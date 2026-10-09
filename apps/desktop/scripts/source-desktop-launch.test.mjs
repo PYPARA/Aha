@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -30,7 +30,7 @@ describe("source desktop launch", () => {
   it("launches normal macOS starts through LaunchServices without secrets in argv", () => {
     const { spawnProcess } = captureSourceDesktopSpawn(
       {
-        SYNARA_HOME: "/tmp/isolated",
+        AHA_HOME: "/tmp/isolated",
         SYNARA_AUTH_TOKEN: "synthetic-secret",
         ELECTRON_RUN_AS_NODE: "1",
       },
@@ -48,7 +48,7 @@ describe("source desktop launch", () => {
       ],
       expect.objectContaining({
         env: expect.objectContaining({
-          SYNARA_HOME: "/tmp/isolated",
+          AHA_HOME: "/tmp/isolated",
           SYNARA_AUTH_TOKEN: "synthetic-secret",
         }),
       }),
@@ -80,7 +80,8 @@ describe("source desktop launch", () => {
       env: {
         PATH: "/usr/bin",
         SYNARA_DESKTOP_FLAVOR: "development",
-        SYNARA_HOME: join("/Users/tester", ".synara-dev"),
+        AHA_HOME: resolve(import.meta.dirname, "../../../.aha-dev"),
+        SYNARA_HOME: resolve(import.meta.dirname, "../../../.aha-dev"),
         SYNARA_SOURCE_DESKTOP_BUILD_MARKER,
       },
       stdio: "inherit",
@@ -93,10 +94,10 @@ describe("source desktop launch", () => {
 
   it("preserves an explicit Synara home", () => {
     const readWindowsEnvironment = vi.fn(() => ({
-      SYNARA_HOME: "C:\\Users\\tester\\persisted-synara-home",
+      AHA_HOME: "C:\\Users\\tester\\persisted-synara-home",
     }));
     const { spawnProcess } = captureSourceDesktopSpawn(
-      { SYNARA_HOME: "/tmp/custom-synara-home" },
+      { AHA_HOME: "/tmp/custom-synara-home" },
       { platform: "win32", readWindowsEnvironment },
     );
 
@@ -113,7 +114,7 @@ describe("source desktop launch", () => {
       {
         platform: "win32",
         readWindowsEnvironment: () => ({
-          Synara_Home: "C:\\Users\\tester\\persisted-synara-home",
+          Aha_Home: "C:\\Users\\tester\\persisted-synara-home",
         }),
       },
     );
@@ -130,7 +131,7 @@ describe("source desktop launch", () => {
 
     expect(spawnProcess.mock.calls[0][2].env).toMatchObject({
       SYNARA_DESKTOP_FLAVOR: "canary",
-      SYNARA_HOME: join("/Users/tester", ".synara-canary"),
+      SYNARA_HOME: resolve(import.meta.dirname, "../../../.aha-dev"),
     });
   });
 
@@ -140,7 +141,7 @@ describe("source desktop launch", () => {
     const stdio = ["pipe", "pipe", "pipe"];
     const { spawnProcess } = captureSourceDesktopSpawn(
       {
-        SYNARA_HOME: smokeHome,
+        AHA_HOME: smokeHome,
         [SYNARA_DESKTOP_SMOKE_USER_DATA_ENV]: smokeUserData,
       },
       { stdio },

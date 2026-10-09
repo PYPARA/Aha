@@ -21,12 +21,12 @@ function environmentValue(environment, name, caseInsensitive) {
 
 function configuredSourceDesktopHome(environment, platform, readWindowsEnvironment) {
   const isWindows = platform === "win32";
-  const inheritedHome = environmentValue(environment, "SYNARA_HOME", isWindows)?.trim();
+  const inheritedHome = environmentValue(environment, "AHA_HOME", isWindows)?.trim();
   if (inheritedHome) return inheritedHome;
   if (!isWindows) return undefined;
 
   try {
-    return environmentValue(readWindowsEnvironment(), "SYNARA_HOME", true)?.trim();
+    return environmentValue(readWindowsEnvironment(), "AHA_HOME", true)?.trim();
   } catch {
     return undefined;
   }
@@ -47,7 +47,8 @@ export function createSourceDesktopEnvironment({
   const childEnvironment = {
     ...environment,
     SYNARA_DESKTOP_FLAVOR: flavor,
-    SYNARA_HOME: configuredHome || join(homeDirectory, identity.defaultHomeDirectoryName),
+    AHA_HOME: configuredHome || resolve(import.meta.dirname, "../../../.aha-dev"),
+    SYNARA_HOME: configuredHome || resolve(import.meta.dirname, "../../../.aha-dev"),
     SYNARA_SOURCE_DESKTOP_BUILD_MARKER,
   };
   delete childEnvironment.ELECTRON_RUN_AS_NODE;

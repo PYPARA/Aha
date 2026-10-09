@@ -49,7 +49,7 @@ export function claudeIsolatedHomePath(input: {
 }): string {
   const isolationRoot =
     input.isolationRootDir?.trim() ||
-    NodePath.join(input.homeDir?.trim() || homedir(), ".synara", "userdata");
+    NodePath.join(input.homeDir?.trim() || homedir(), ".aha-next", "userdata");
   return NodePath.resolve(
     isolationRoot,
     "provider-homes",

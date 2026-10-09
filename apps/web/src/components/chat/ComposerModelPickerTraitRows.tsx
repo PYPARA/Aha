@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 // FILE: ComposerModelPickerTraitRows.tsx
 // Purpose: Footer of the composer model picker — one "<Trait> … <value> ›" row per control
 //   the selected model exposes (thinking, context, effort, speed, agent).
@@ -40,6 +41,7 @@ function TraitRow(props: {
   disabled?: boolean;
   onValueChange: (value: string) => void;
 }) {
+  const tr = useAhaTranslation();
   const [open, setOpen] = useState(false);
   return (
     <MenuSub open={open} onOpenChange={setOpen}>
@@ -61,7 +63,7 @@ function TraitRow(props: {
         >
           {props.options.map((option) => (
             <MenuRadioItem key={option.value} value={option.value} onClick={() => setOpen(false)}>
-              {option.label}
+              {tr(option.label)}
               {option.isDefault ? " (default)" : ""}
             </MenuRadioItem>
           ))}
@@ -85,6 +87,7 @@ export function ComposerModelPickerTraitRows(props: {
   // both. Models without an effort ladder always keep the rows.
   effortControl: ComposerEffortControl;
 }) {
+  const tr = useAhaTranslation();
   const { provider, threadId, model, modelOptions, prompt } = props;
   const selection = getComposerTraitSelection(
     provider,
@@ -113,7 +116,7 @@ export function ComposerModelPickerTraitRows(props: {
     rows.push(
       <TraitRow
         key="thinking"
-        label="Thinking"
+        label={tr("Thinking")}
         value={selection.thinkingEnabled ? "on" : "off"}
         valueLabel={selection.thinkingEnabled ? "On" : "Off"}
         options={[

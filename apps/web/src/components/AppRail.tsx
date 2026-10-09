@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../aha/AppearanceProvider";
 // FILE: AppRail.tsx
 // Purpose: The rail layout's fixed icon tab strip (Home, Spaces, route destinations, Settings).
 // Layer: App shell component
@@ -15,6 +16,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { TasksCoachmark } from "./OneTimeCoachmark";
 import type { RailItemId } from "~/appRail.logic";
 import { createCentralIconComponent } from "~/lib/central-icons";
 import {
@@ -162,23 +164,28 @@ export function appRailButtonClassName(active: boolean): string {
 }
 
 function AppRailButton({ item }: { item: AppRailItem }) {
-  const label = item.badge ? `${item.label} · ${item.badge.accessibleLabel}` : item.label;
+  const tr = useAhaTranslation();
+  const baseLabel = tr(item.label);
+  const label = item.badge ? `${baseLabel} · ${item.badge.accessibleLabel}` : baseLabel;
   const glyphs = item.glyphs;
+  const button = (
+    <SidebarIconButton
+      icon={item.active ? glyphs.active : glyphs.idle}
+      iconClassName={APP_RAIL_GLYPH_CLASS_NAME}
+      label={label}
+      size="lg"
+      tooltip={item.id === "tasks" ? undefined : label}
+      tooltipSide="right"
+      aria-current={item.active ? "page" : undefined}
+      className={appRailButtonClassName(item.active)}
+      onClick={item.onSelect}
+      {...(item.onMouseEnter ? { onMouseEnter: item.onMouseEnter } : {})}
+      {...(item.onFocus ? { onFocus: item.onFocus } : {})}
+    />
+  );
   return (
     <div className="relative shrink-0">
-      <SidebarIconButton
-        icon={item.active ? glyphs.active : glyphs.idle}
-        iconClassName={APP_RAIL_GLYPH_CLASS_NAME}
-        label={label}
-        size="lg"
-        tooltip={label}
-        tooltipSide="right"
-        aria-current={item.active ? "page" : undefined}
-        className={appRailButtonClassName(item.active)}
-        onClick={item.onSelect}
-        {...(item.onMouseEnter ? { onMouseEnter: item.onMouseEnter } : {})}
-        {...(item.onFocus ? { onFocus: item.onFocus } : {})}
-      />
+      {item.id === "tasks" ? <TasksCoachmark tooltip={label}>{button}</TasksCoachmark> : button}
       {/* Same corner dot as the Activity bell's unread marker; the count is in the tooltip. */}
       {item.badge ? (
         <span
@@ -198,9 +205,10 @@ export function AppRail({
   bottomSlot,
   onContextMenu,
 }: AppRailProps) {
+  const tr = useAhaTranslation();
   return (
     <nav
-      aria-label="Primary"
+      aria-label={tr("Primary")}
       onContextMenu={onContextMenu}
       className="flex w-(--app-rail-width) shrink-0 flex-col items-center gap-1.5 pt-2.5 pb-2.5 font-system-ui"
     >

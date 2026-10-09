@@ -23,6 +23,8 @@ it.layer(NodeServices.layer)("stageDesktopRuntimeResources", (it) => {
         "synara.png",
         "entitlements.mac.plist",
         "nested/runtime.dat",
+        "aha/elation/manifest.json",
+        "aha/elation/background.png",
       ];
       const installerFiles = ["dmgly/assets/dmg-background.png", "dmgly/assets/app-icon.png"];
 

@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../aha/AppearanceProvider";
 // FILE: ThemePackEditor.tsx
 // Purpose: Per-variant theme card matching the Codex appearance settings layout.
 // Layer: Web settings UI
@@ -70,6 +71,7 @@ export function ThemePackEditor({
   isActive: isActiveProp,
   mode: modeProp,
 }: ThemePackEditorProps) {
+  const tr = useAhaTranslation();
   const {
     darkTheme,
     lightTheme,
@@ -111,7 +113,7 @@ export function ThemePackEditor({
   const codeThemeLabel =
     CODE_THEME_OPTIONS.find((option) => option.id === pack.codeThemeId)?.label ?? pack.codeThemeId;
   const isPristine = isDefaultThemePack(variant);
-  const titleLabel = variant === "dark" ? "Dark theme" : "Light theme";
+  const titleLabel = tr(variant === "dark" ? "Dark theme" : "Light theme");
   const contextLabel = isActive
     ? mode === "system"
       ? `System is currently using this ${variant} slot.`
@@ -156,7 +158,7 @@ export function ThemePackEditor({
                 ELEVATED_HOVER_SURFACE_RAISED_TEXT_CLASS_NAME,
               )}
             >
-              Reset
+              {tr("Reset")}
             </button>
           ) : null}
         </div>
@@ -167,7 +169,7 @@ export function ThemePackEditor({
             onClick={() => void handleCopy()}
             className={EDITOR_TEXT_ACTION_CLASS_NAME}
           >
-            Copy
+            {tr("Copy")}
           </button>
           <Select
             value={pack.codeThemeId}
@@ -193,7 +195,7 @@ export function ThemePackEditor({
                   value={option.id}
                   className={cn(SETTINGS_CONTROL_RADIUS_CLASS_NAME, "px-2 py-2")}
                 >
-                  <CodeThemeSelectOption label={option.label} theme={option.previewTheme} />
+                  <CodeThemeSelectOption label={tr(option.label)} theme={option.previewTheme} />
                 </SelectItem>
               ))}
             </SettingsSelectPopup>
@@ -237,7 +239,7 @@ export function ThemePackEditor({
       </div>
 
       <div className={SETTINGS_STACKED_ROWS_DIVIDER_CLASS_NAME}>
-        <ThemeRow label="Accent">
+        <ThemeRow label={tr("Accent")}>
           <ColorPill
             color={theme.accent}
             ariaLabel={`${titleLabel} accent color`}
@@ -253,7 +255,7 @@ export function ThemePackEditor({
           />
         </ThemeRow>
 
-        <ThemeRow label="Background">
+        <ThemeRow label={tr("Background")}>
           <ColorPill
             color={theme.surface}
             ariaLabel={`${titleLabel} background color`}
@@ -269,7 +271,7 @@ export function ThemePackEditor({
           />
         </ThemeRow>
 
-        <ThemeRow label="Foreground">
+        <ThemeRow label={tr("Foreground")}>
           <ColorPill
             color={theme.ink}
             ariaLabel={`${titleLabel} foreground color`}
@@ -285,11 +287,11 @@ export function ThemePackEditor({
           />
         </ThemeRow>
 
-        <ThemeRow label="UI font">
+        <ThemeRow label={tr("UI font")}>
           <div className="flex flex-col items-end gap-1">
             <FontInput
               value={theme.fonts.ui ?? ""}
-              placeholder="System default"
+              placeholder={tr("System default")}
               ariaLabel={`${titleLabel} UI font`}
               onChange={(next) => updateThemeFonts(variant, { ui: next.length > 0 ? next : null })}
             />
@@ -301,7 +303,7 @@ export function ThemePackEditor({
           </div>
         </ThemeRow>
 
-        <ThemeRow label="Code font">
+        <ThemeRow label={tr("Code font")}>
           <div className="flex flex-col items-end gap-1">
             <FontInput
               value={theme.fonts.code ?? ""}
@@ -316,7 +318,7 @@ export function ThemePackEditor({
         </ThemeRow>
 
         <div>
-          <ThemeRow label="Window">
+          <ThemeRow label={tr("Window")}>
             <SettingsSegmentedControl
               value={theme.opaqueWindows ? "solid" : "translucent"}
               onValueChange={(value) =>
@@ -333,7 +335,7 @@ export function ThemePackEditor({
                 "border-t border-[color:var(--color-border)]",
               )}
             >
-              <ThemeRow label="Sidebar only">
+              <ThemeRow label={tr("Sidebar only")}>
                 <Switch
                   checked={translucency.sidebarOnly}
                   onCheckedChange={(checked) =>
@@ -342,7 +344,7 @@ export function ThemePackEditor({
                   aria-label={`${titleLabel} translucent sidebar only`}
                 />
               </ThemeRow>
-              <ThemeRow label="Opacity">
+              <ThemeRow label={tr("Opacity")}>
                 <ThemeSlider
                   value={translucency.opacity}
                   min={WINDOW_TRANSLUCENCY_OPACITY_MIN}
@@ -352,7 +354,7 @@ export function ThemePackEditor({
                   ariaLabel={`${titleLabel} translucency opacity`}
                 />
               </ThemeRow>
-              <ThemeRow label="Blur">
+              <ThemeRow label={tr("Blur")}>
                 {translucency.blur !== null ? (
                   <Button
                     variant="outline"
@@ -376,7 +378,7 @@ export function ThemePackEditor({
           </DisclosureRegion>
         </div>
 
-        <ThemeRow label="Contrast">
+        <ThemeRow label={tr("Contrast")}>
           <ThemeSlider
             value={theme.contrast}
             max={100}
@@ -684,6 +686,7 @@ function ImportThemeDialog({
   variant: ThemeVariant;
   onImport: (value: string) => void;
 }) {
+  const tr = useAhaTranslation();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -709,13 +712,16 @@ function ImportThemeDialog({
       <DialogTrigger
         render={
           <button type="button" className={EDITOR_TEXT_ACTION_CLASS_NAME}>
-            Import
+            {tr("Import")}
           </button>
         }
       />
       <DialogPopup className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Import {variant} theme</DialogTitle>
+          <DialogTitle>
+            {tr("Import")}
+            {variant} theme
+          </DialogTitle>
           <p className="text-ui leading-snug text-muted-foreground">
             Paste a{" "}
             <code className="rounded bg-muted px-1 py-0.5 font-chat-code">codex-theme-v1:</code>{" "}
@@ -742,7 +748,7 @@ function ImportThemeDialog({
           <DialogClose
             render={
               <Button variant="outline" type="button" size="sm">
-                Cancel
+                {tr("Cancel")}
               </Button>
             }
           />
@@ -752,7 +758,7 @@ function ImportThemeDialog({
             disabled={value.trim().length === 0}
             onClick={handleSubmit}
           >
-            Import
+            {tr("Import")}
           </Button>
         </DialogFooter>
       </DialogPopup>

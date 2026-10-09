@@ -48,7 +48,6 @@ import {
   SYNARA_BETA_BUNDLE_ID,
   SYNARA_DESKTOP_BUNDLE_ID_ENV,
 } from "@synara/shared/desktopIdentity";
-import { runBetaImportIfRequested } from "./betaImport";
 import { startBetaUsageSnapshotJob } from "./betaUsageSnapshot";
 import { LATEST_MIGRATION_ID } from "./persistence/Migrations";
 import { fixPath, resolveBaseDir } from "./os-jank";
@@ -177,7 +176,7 @@ const CliEnvConfig = Config.all({
   ),
   port: Config.port("SYNARA_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
   host: Config.string("SYNARA_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  synaraHome: Config.string("SYNARA_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  synaraHome: Config.string("AHA_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
   devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
   publicUrl: Config.url("SYNARA_PUBLIC_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
   allowInsecureRemote: optionalBooleanEnvironmentConfig("SYNARA_ALLOW_INSECURE_REMOTE"),
@@ -285,28 +284,7 @@ const ServerConfigLive = (input: CliInput) =>
       const baseDir = yield* resolveBaseDir(configuredHome);
       const userHomeDir = OS.homedir();
       const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
-      // A "Copy my data to Beta" request from a stable install lands as a
-      // marker in this home; it must be consumed before the private state
-      // directory (and its database) is created or repaired.
-      // Only Synara Beta consumes the marker, so a stray file in any other
-      // home can never replace that install's database.
-      if (process.env[SYNARA_DESKTOP_BUNDLE_ID_ENV] === SYNARA_BETA_BUNDLE_ID) {
-        const importResult = yield* Effect.tryPromise({
-          try: () =>
-            runBetaImportIfRequested({
-              betaHomeDir: baseDir,
-              stateDir: derivedPaths.stateDir,
-              latestMigrationId: LATEST_MIGRATION_ID,
-            }),
-          catch: (cause) =>
-            new StartupError({ message: "Failed to complete the stable→beta data import", cause }),
-        });
-        if (importResult.consumed) {
-          yield* Effect.logInfo("stable→beta data import finished").pipe(
-            Effect.annotateLogs({ ok: importResult.ok, error: importResult.error ?? null }),
-          );
-        }
-      }
+      // Aha only imports appearance after an explicit desktop selection.
       yield* Effect.try({
         try: () => preparePrivateServerPaths(derivedPaths),
         catch: (cause) =>

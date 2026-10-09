@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../aha/AppearanceProvider";
 // FILE: SettingsSidebarNav.tsx
 // Purpose: Settings section sidebar navigation with central icons and reference-style pill rows.
 //          Doubles as a settings search surface: typing swaps the section list for ranked
@@ -51,6 +52,7 @@ function SettingsSearchResultRow(props: {
   entry: SettingsSearchEntry;
   onSelect: (entry: SettingsSearchEntry) => void;
 }) {
+  const tr = useAhaTranslation();
   const { entry, onSelect } = props;
   const icon = SETTINGS_SECTION_ICON_BY_ID.get(entry.section) ?? "settings-gear-4";
   // Mirrors the project header + nested thread layout: the section reuses the nav row
@@ -66,7 +68,7 @@ function SettingsSearchResultRow(props: {
           <CentralIcon name={icon} className={SETTINGS_SIDEBAR_ICON_CLASS_NAME} />
         </SidebarLeadingIcon>
         <span className={SETTINGS_SIDEBAR_ITEM_LABEL_CLASS_NAME}>
-          {settingsSectionLabel(entry.section)}
+          {tr(settingsSectionLabel(entry.section))}
         </span>
       </button>
       <button
@@ -79,7 +81,7 @@ function SettingsSearchResultRow(props: {
         )}
         onClick={() => onSelect(entry)}
       >
-        <span className="min-w-0 truncate">{entry.title}</span>
+        <span className="min-w-0 truncate">{tr(entry.title)}</span>
       </button>
     </li>
   );
@@ -96,6 +98,7 @@ export function SettingsSidebarNav(props: {
    */
   searchContext?: SettingsSearchContext | undefined;
 }) {
+  const tr = useAhaTranslation();
   const { onSelectSection } = props;
   const [query, setQuery] = useState("");
   const trimmedQuery = query.trim();
@@ -136,8 +139,8 @@ export function SettingsSidebarNav(props: {
           spellCheck={false}
           autoCorrect="off"
           autoCapitalize="off"
-          placeholder="Search settings..."
-          aria-label="Search settings"
+          placeholder={tr("Search settings...")}
+          aria-label={tr("Search settings")}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={handleSearchKeyDown}
         />
@@ -145,10 +148,10 @@ export function SettingsSidebarNav(props: {
 
       {isSearching ? (
         results.length === 0 ? (
-          <p className={SETTINGS_SIDEBAR_SECTION_LABEL_CLASS_NAME}>No matching settings.</p>
+          <p className={SETTINGS_SIDEBAR_SECTION_LABEL_CLASS_NAME}>{tr("No matching settings.")}</p>
         ) : (
           <ul
-            aria-label="Settings search results"
+            aria-label={tr("Settings search results")}
             className={cn("flex flex-col", SETTINGS_SIDEBAR_LIST_GAP_CLASS_NAME)}
           >
             {results.map((entry) => (
@@ -157,7 +160,7 @@ export function SettingsSidebarNav(props: {
           </ul>
         )
       ) : (
-        <nav aria-label="Settings sections" className="flex flex-col">
+        <nav aria-label={tr("Settings sections")} className="flex flex-col">
           {SETTINGS_NAV_GROUPS.map((group) => {
             const items = SETTINGS_NAV_ITEMS.filter((item) => item.group === group.id);
             if (items.length === 0) {
@@ -174,7 +177,7 @@ export function SettingsSidebarNav(props: {
                   id={`settings-nav-${group.id}`}
                   className={SETTINGS_SIDEBAR_SECTION_LABEL_CLASS_NAME}
                 >
-                  {group.label}
+                  {tr(group.label)}
                 </h2>
                 <ul className={cn("flex flex-col", SETTINGS_SIDEBAR_LIST_GAP_CLASS_NAME)}>
                   {items.map((item) => {
@@ -199,7 +202,7 @@ export function SettingsSidebarNav(props: {
                             />
                           </SidebarLeadingIcon>
                           <span className={SETTINGS_SIDEBAR_ITEM_LABEL_CLASS_NAME}>
-                            {item.label}
+                            {tr(item.label)}
                           </span>
                           {item.badge ? (
                             <Badge

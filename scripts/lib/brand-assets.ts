@@ -1,22 +1,22 @@
 import type { SynaraPackagedDesktopFlavor } from "@synara/shared/desktopIdentity";
 
 export const BRAND_ASSET_PATHS = {
-  productionMacIconPng: "assets/prod/black-macos-1024.png",
+  productionMacIconPng: "assets/aha/elation/icon.png",
   // Icon Composer source for the macOS 26 bundle icon. Only a layered ".icon"
   // asset gets the Liquid Glass material; a flat ICNS/PNG never does.
-  productionMacIconComposer: "assets/prod/Synara.icon",
-  productionMacLegacyIconPng: "assets/prod/black-macos-legacy-1024.png",
-  productionLinuxIconPng: "assets/prod/black-universal-1024.png",
-  productionWindowsIconIco: "assets/prod/synara-black-windows.ico",
-  productionWebFaviconIco: "assets/prod/synara-black-web-favicon.ico",
-  productionWebFavicon16Png: "assets/prod/synara-black-web-favicon-16x16.png",
-  productionWebFavicon32Png: "assets/prod/synara-black-web-favicon-32x32.png",
-  productionWebAppleTouchIconPng: "assets/prod/synara-black-web-apple-touch-180.png",
-  developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
-  developmentWebFaviconIco: "assets/dev/blueprint-web-favicon.ico",
-  developmentWebFavicon16Png: "assets/dev/blueprint-web-favicon-16x16.png",
-  developmentWebFavicon32Png: "assets/dev/blueprint-web-favicon-32x32.png",
-  developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
+  productionMacIconComposer: "assets/aha/Aha.icon",
+  productionMacLegacyIconPng: "assets/aha/elation/icon.png",
+  productionLinuxIconPng: "assets/aha/elation/icon.png",
+  productionWindowsIconIco: "assets/aha/elation/icon.ico",
+  productionWebFaviconIco: "assets/aha/elation/icon.ico",
+  productionWebFavicon16Png: "assets/aha/elation/favicon-16.png",
+  productionWebFavicon32Png: "assets/aha/elation/favicon-32.png",
+  productionWebAppleTouchIconPng: "assets/aha/elation/apple-touch.png",
+  developmentWindowsIconIco: "assets/aha/elation/icon.ico",
+  developmentWebFaviconIco: "assets/aha/elation/icon.ico",
+  developmentWebFavicon16Png: "assets/aha/elation/favicon-16.png",
+  developmentWebFavicon32Png: "assets/aha/elation/favicon-32.png",
+  developmentWebAppleTouchIconPng: "assets/aha/elation/apple-touch.png",
 } as const;
 
 export const BETA_ASSET_PATHS = {
@@ -63,6 +63,7 @@ export function desktopIconAssetPaths(flavor: DesktopBuildFlavor): DesktopIconAs
     macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
     macIconComposer: BRAND_ASSET_PATHS.productionMacIconComposer,
     macLegacyIconPng: BRAND_ASSET_PATHS.productionMacLegacyIconPng,
+    macLegacyDarkIconPng: BRAND_ASSET_PATHS.productionMacLegacyIconPng,
     linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
     windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
   };

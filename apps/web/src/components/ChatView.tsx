@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../aha/AppearanceProvider";
 import { type LegendListRef } from "@legendapp/list/react";
 import {
   parseComputerInvocation,
@@ -276,7 +277,7 @@ import { RenameThreadDialog } from "./RenameThreadDialog";
 import { hasUnseenSnoozeReturn } from "./Sidebar.logic";
 import { SidebarHeaderNavigationControls } from "./SidebarHeaderNavigationControls";
 import { SynaraLogo } from "./SynaraLogo";
-import { ProjectImportLandingBanner } from "~/projectImport/ProjectImportLandingBanner";
+import { SponsorLandingBanner } from "./SponsorLandingBanner";
 import TerminalWorkspaceTabs from "./TerminalWorkspaceTabs";
 import { ThreadWorktreeHandoffDialog } from "./ThreadWorktreeHandoffDialog";
 
@@ -531,16 +532,17 @@ function ComposerControlSkeleton(props: { widthClassName: string }) {
 }
 
 function ComposerModelLoadingControl(props: { widthClassName: string }) {
+  const tr = useAhaTranslation();
   return (
     <div
-      aria-label="Loading models"
+      aria-label={tr("Loading models")}
       className={cn(
         "flex h-8 shrink-0 items-center gap-2 rounded-md border border-border/50 px-2 text-muted-foreground",
         props.widthClassName,
       )}
     >
       <RefreshCwIcon aria-hidden="true" className="size-3.5 animate-spin" />
-      <span className="truncate text-ui-xs">Loading models</span>
+      <span className="truncate text-ui-xs">{tr("Loading models")}</span>
     </div>
   );
 }
@@ -596,6 +598,7 @@ export default function ChatView({
   viewModeAction: viewModeActionProp,
   onCloseThreadPane,
 }: ChatViewProps) {
+  const tr = useAhaTranslation();
   // Prop defaults are resolved here instead of in the destructuring pattern: an
   // AssignmentPattern in the parameter list makes React Compiler bail out (silently —
   // `panicThreshold` is unset) on this entire component, the hottest one in the app.
@@ -1664,8 +1667,11 @@ export default function ChatView({
   // Providers that clear `activeTurnId` on every terminal event (Claude) would
   // otherwise leave the transcript with no active turn while work is still in
   // progress, collapsing the newest answer into a closed "Worked for" disclosure.
-  // The latest turn is the transcript's own notion of "current", so fall back to it.
-  const activeTurnIdForTranscript = activeThread?.session?.activeTurnId ?? activeLatestTurnId;
+  // Fall back only while that turn is unsettled. A follow-up send can be busy
+  // before its new turn exists; it must not reopen the previous turn's work.
+  const activeTurnIdForTranscript = latestTurnSettled
+    ? null
+    : (activeThread?.session?.activeTurnId ?? activeLatestTurnId);
   // The edit affordance must mirror the exact policy the server decider applies:
   // resolve the editable target from the raw sequence-ordered thread messages and
   // the running-session turn id — never from the createdAt-sorted timeline rows,
@@ -5264,13 +5270,15 @@ export default function ChatView({
             )}
           >
             <SidebarHeaderNavigationControls />
-            <span className="text-ui leading-snug text-muted-foreground/50">No active thread</span>
+            <span className="text-ui leading-snug text-muted-foreground/50">
+              {tr("No active thread")}
+            </span>
           </div>
         )}
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
             <p className="text-ui leading-snug">
-              Select a thread or create a new one to get started.
+              {tr("Select a thread or create a new one to get started.")}
             </p>
           </div>
         </div>
@@ -5510,7 +5518,7 @@ export default function ChatView({
           title={
             isThreadTemporary
               ? "Temporary chat — deleted when you leave. Click to keep it."
-              : "Make this a temporary chat (deleted when you leave)"
+              : tr("Make this a temporary chat (deleted when you leave)")
           }
           aria-label="Temporary chat"
           className={cn(
@@ -5539,7 +5547,7 @@ export default function ChatView({
             COMPOSER_TOOLBAR_TRIGGER_TEXT_CLASS_NAME,
           )}
         >
-          Worktree
+          {tr("Worktree")}
           {envMode === "worktree" ? (
             <CheckboxCheckedIcon className="size-4" />
           ) : (
@@ -5741,6 +5749,7 @@ export default function ChatView({
       data-empty-landing-composer-block={isCenteredEmptyLanding ? "true" : undefined}
     >
       <form
+        data-aha-region="composer"
         ref={composerFormRef}
         onSubmit={onSend}
         className="relative z-10 w-full overflow-visible"
@@ -6136,20 +6145,24 @@ export default function ChatView({
                     : {})}
                   placeholder={
                     isComposerApprovalState
-                      ? "Resolve this approval request to continue"
+                      ? tr("Resolve this approval request to continue")
                       : activePendingProgress
                         ? activePendingProgress.activeQuestion?.options.length === 0
                           ? "Type your answer to continue"
                           : "Type your own answer, or leave this blank to use the selected option"
                         : showPlanFollowUpPrompt && activeProposedPlan
-                          ? "Add feedback to refine the plan, or leave this blank to implement it"
+                          ? tr(
+                              "Add feedback to refine the plan, or leave this blank to implement it",
+                            )
                           : activeThread?.parentThreadId
                             ? "Message this subagent while it works"
                             : hasLiveTurn
-                              ? "Ask for follow-up changes"
+                              ? tr("Ask for follow-up changes")
                               : standaloneSidechatContext
                                 ? `Ask about this ${standaloneSidechatItemNoun}`
-                                : "Ask anything, @tag files/folders, or use / to show available commands"
+                                : tr(
+                                    "Ask anything, @tag files/folders, or use / to show available commands",
+                                  )
                   }
                   disabled={isComposerEditorDisabled}
                 />
@@ -6464,7 +6477,7 @@ export default function ChatView({
                   {/* Pinned to the top so the heading stays optically centered; hidden on
                       short panes where it would crowd the heading. */}
                   <div className="absolute inset-x-0 top-4 flex justify-center px-6 [@media(max-height:620px)]:hidden">
-                    <ProjectImportLandingBanner className="w-full max-w-[520px]" />
+                    <SponsorLandingBanner className="w-full max-w-[520px]" />
                   </div>
                   <div
                     className={cn(
@@ -6608,7 +6621,10 @@ export default function ChatView({
                     editableUserMessageId={editableUserMessageId}
                     isRevertingCheckpoint={isRevertingCheckpoint}
                     onExpandTimelineImage={onExpandTimelineImage}
-                    followLiveOutput={hasStreamingAssistantText && !isUserScrollDetached}
+                    // End-follow belongs to the reader, including the gaps
+                    // between assistant text and subsequent tool/layout updates.
+                    followLiveOutput={!isUserScrollDetached}
+                    animateTailAnchorSlide={!hasStreamingAssistantText}
                     onIsAtEndChange={onIsAtEndChange}
                     onNavigate={onTranscriptNavigate}
                     markdownCwd={threadWorkspaceCwd ?? undefined}

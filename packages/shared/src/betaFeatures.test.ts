@@ -16,10 +16,13 @@ import {
 } from "./desktopIdentity";
 
 describe("isBetaFeatureEnabled", () => {
-  it.each(["inbox", "pull-request-auto-fix"])("offers %s in Stable and Beta", (feature) => {
-    expect(isBetaFeatureEnabled(feature, "production")).toBe(true);
-    expect(isBetaFeatureEnabled(feature, "beta")).toBe(true);
-  });
+  it.each(["inbox", "pull-request-auto-fix", "tasks"])(
+    "offers %s in Stable and Beta",
+    (feature) => {
+      expect(isBetaFeatureEnabled(feature, "production")).toBe(true);
+      expect(isBetaFeatureEnabled(feature, "beta")).toBe(true);
+    },
+  );
 
   it("enables Oh My Pi in Stable and all other flavors", () => {
     for (const flavor of [
@@ -34,17 +37,17 @@ describe("isBetaFeatureEnabled", () => {
     }
   });
 
-  it("keeps Tasks in Beta while Stable keeps Kanban", () => {
+  it("keeps the pinned Beta Tasks feature in all Aha flavors", () => {
     expect(isBetaFeatureEnabled("tasks", "beta")).toBe(true);
-    expect(isBetaFeatureEnabled("tasks", "production")).toBe(false);
+    expect(isBetaFeatureEnabled("tasks", "production")).toBe(true);
   });
 
-  it("keeps Groups out of Stable only", () => {
+  it("keeps the pinned Beta Groups feature in all Aha flavors", () => {
     expect(BETA_ONLY_FEATURES).toContain(GROUPS_BETA_FEATURE);
     for (const flavor of ["development", "canary", "cua", "beta", "unknown"] as const) {
       expect(isBetaFeatureEnabled(GROUPS_BETA_FEATURE, flavor)).toBe(true);
     }
-    expect(isBetaFeatureEnabled(GROUPS_BETA_FEATURE, "production")).toBe(false);
+    expect(isBetaFeatureEnabled(GROUPS_BETA_FEATURE, "production")).toBe(true);
   });
 
   it("enables the rail sidebar layout in both Beta and Stable", () => {
@@ -96,14 +99,14 @@ describe("desktopFlavorFromBundleId", () => {
 
 describe("desktopFlavorFromProtocol", () => {
   it("maps each desktop scheme", () => {
-    expect(desktopFlavorFromProtocol("synara-beta:", false)).toBe("beta");
-    expect(desktopFlavorFromProtocol("synara-canary:", false)).toBe("canary");
-    expect(desktopFlavorFromProtocol("synara-cua:", false)).toBe("cua");
-    expect(desktopFlavorFromProtocol("synara:", false)).toBe("production");
+    expect(desktopFlavorFromProtocol("aha-next-beta:", false)).toBe("beta");
+    expect(desktopFlavorFromProtocol("aha-next-canary:", false)).toBe("canary");
+    expect(desktopFlavorFromProtocol("aha-next-cua:", false)).toBe("cua");
+    expect(desktopFlavorFromProtocol("aha-next:", false)).toBe("production");
   });
 
   it("treats the synara scheme in a dev build as development", () => {
-    expect(desktopFlavorFromProtocol("synara:", true)).toBe("development");
+    expect(desktopFlavorFromProtocol("aha-next:", true)).toBe("development");
   });
 
   it("returns unknown for non-desktop protocols and missing values", () => {

@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 // FILE: ProviderSignInDialog.tsx
 // Purpose: Human-in-the-loop provider authentication in the shared isolated terminal.
 // Layer: Settings UI
@@ -30,6 +31,7 @@ export default function ProviderSignInDialog(props: {
   accountLabel: string;
   onClose: () => void;
 }) {
+  const tr = useAhaTranslation();
   const [session] = useState(() => ({
     threadId: ThreadId.makeUnsafe(`provider-auth-${crypto.randomUUID()}`),
     terminalId: "sign-in",
@@ -166,7 +168,7 @@ export default function ProviderSignInDialog(props: {
             />
           ) : (
             <p className="p-3 text-ui-sm">
-              {config.isError ? "Unable to connect to the Synara server." : "Connecting…"}
+              {config.isError ? "Unable to connect to the Synara server." : tr("Connecting…")}
             </p>
           )}
         </div>
@@ -174,7 +176,9 @@ export default function ProviderSignInDialog(props: {
           {result ??
             (runtimeStatus === "error"
               ? "Sign-in could not start. Check the terminal error, close this window and retry."
-              : "Follow the provider's prompts. Opening the browser does not confirm authentication.")}
+              : tr(
+                  "Follow the provider's prompts. Opening the browser does not confirm authentication.",
+                ))}
         </p>
         <DialogFooter>
           {interactiveCommand ? (
@@ -183,7 +187,7 @@ export default function ProviderSignInDialog(props: {
               disabled={runtimeStatus !== "ready" || optionsSent || closing}
               onClick={() => void showSignInOptions()}
             >
-              Sign-in options
+              {tr("Sign-in options")}
             </Button>
           ) : null}
           <Button
@@ -191,10 +195,10 @@ export default function ProviderSignInDialog(props: {
             disabled={closing || checking || runtimeStatus === "connecting"}
             onClick={() => void checkStatus()}
           >
-            {checking ? "Checking…" : "Check authentication"}
+            {checking ? tr("Checking…") : tr("Check authentication")}
           </Button>
           <Button disabled={closing} onClick={() => void close()}>
-            {closing ? "Closing…" : runtimeStatus === "exited" ? "Close" : "Cancel / close"}
+            {closing ? "Closing…" : runtimeStatus === "exited" ? tr("Close") : "Cancel / close"}
           </Button>
         </DialogFooter>
       </DialogPopup>

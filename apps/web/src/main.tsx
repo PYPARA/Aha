@@ -1,3 +1,4 @@
+import { AhaAppearanceProvider } from "./aha/AppearanceProvider";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
@@ -35,6 +36,8 @@ if (isElectron) {
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <RouterProvider router={router} />
+    <AhaAppearanceProvider>
+      <RouterProvider router={router} />
+    </AhaAppearanceProvider>
   </React.StrictMode>,
 );

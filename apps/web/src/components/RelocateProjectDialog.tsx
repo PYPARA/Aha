@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../aha/AppearanceProvider";
 // FILE: RelocateProjectDialog.tsx
 // Purpose: Reconnects an imported project to a restored/moved folder without recreating chats.
 // Layer: Sidebar UI
@@ -17,12 +18,13 @@ export function RelocateProjectDialog(props: {
   workspaceRoot: string;
   onOpenChange: (open: boolean) => void;
 }) {
+  const tr = useAhaTranslation();
   const queryClient = useQueryClient();
   const [originalWorkspaceRoot] = useState(props.workspaceRoot);
   return (
     <RenameDialog
       open
-      title="Change project path"
+      title={tr("Change project path")}
       description="Enter the restored folder's path on the Synara server. Your existing project and conversations stay in place. This does not recover lost files or move/repair linked Git worktrees. Finish active turns first."
       initialValue={originalWorkspaceRoot}
       saveLabel="Change path"

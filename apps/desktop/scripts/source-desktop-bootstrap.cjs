@@ -19,6 +19,7 @@ try {
     const configuration = JSON.parse(fs.readFileSync(configurationPath, "utf8"));
     for (const name of [
       "SYNARA_HOME",
+      "AHA_HOME",
       "SYNARA_DESKTOP_FLAVOR",
       "SYNARA_SOURCE_DESKTOP_BUILD_MARKER",
       "VITE_DEV_SERVER_URL",
@@ -39,7 +40,7 @@ try {
   require(entry);
 } catch (error) {
   dialog.showErrorBox(
-    "Synara development build could not start",
+    "Aha development build could not start",
     `${error instanceof Error ? error.message : String(error)}\n\nRun bun run electron:dev from ${path.resolve(desktopDirectory, "../..")} and wait for the build to finish.`,
   );
   app.exit(1);

@@ -7,6 +7,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { cp } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
@@ -517,6 +518,9 @@ function stageMacIcons(
     }
     yield* generateMacIconSet(legacyIconSource, iconIcnsPath, tmpRoot, path, verbose);
 
+    // Aha first builds use the archived flat icon; layered icons are opt-in.
+    if (process.env.AHA_ICON_COMPOSER !== "1") return;
+
     // macOS 26 renders the Liquid Glass material only from a layered Icon
     // Composer asset, so compile one into the asset catalog that ships beside
     // the ICNS. Older releases ignore Assets.car and keep the solid mark.
@@ -711,10 +715,7 @@ function resolveGitHubPublishConfig():
       readonly releaseType: "release";
     }
   | undefined {
-  const rawRepo =
-    process.env.SYNARA_DESKTOP_UPDATE_REPOSITORY?.trim() ||
-    process.env.GITHUB_REPOSITORY?.trim() ||
-    "";
+  const rawRepo = process.env.AHA_UPDATE_REPOSITORY?.trim() || "";
   if (!rawRepo) return undefined;
 
   const [owner, repo, ...rest] = rawRepo.split("/");
@@ -866,13 +867,14 @@ const installFrozenStageDependencies = Effect.fn("installFrozenStageDependencies
     // node-pty's npm package does not ship Linux prebuilds. Keep the frozen
     // install's blanket lifecycle-script block, then rebuild only node-pty so
     // npm supplies node-gyp to its install script and compiles the native
-    // binding required by the packaged terminal.
+    // binding required by the packaged terminal. Set an explicit package prefix
+    // so npm does not parse the workspace's Bun-specific scoped overrides.
     yield* Effect.log("[desktop-artifact] Building staged Linux node-pty binding...");
     yield* runCommand(
       ChildProcess.make({
         cwd: stageAppDir,
         ...commandOutputOptions(verbose),
-      })`npm rebuild node-pty --foreground-scripts`,
+      })`npm rebuild node-pty --foreground-scripts --prefix ${path.join(stageAppDir, "node_modules", "node-pty")}`,
     );
   }
 
@@ -939,6 +941,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     signed,
     adHocSign: artifactIdentity.identity.usesScriptedUpdates && !signed,
     flavor,
+    useIconComposer: process.env.AHA_ICON_COMPOSER === "1",
     ...(windowsAzureSignOptions ? { windowsAzureSignOptions } : {}),
   } as const;
 
@@ -1444,7 +1447,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     );
   }
 
-  if (options.platform === "mac") {
+  if (options.platform === "mac" && options.target !== "dir") {
     yield* Effect.log("[desktop-artifact] Repacking and validating macOS update zip...");
     const finalizedZip = yield* timedBuildStage(
       "update-zip",
@@ -1480,14 +1483,21 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   for (const entry of stageEntries) {
     const from = path.join(stageDistDir, entry);
     const stat = yield* fs.stat(from).pipe(Effect.catch(() => Effect.succeed(null)));
-    if (!stat || stat.type !== "File") continue;
+    if (!stat || (stat.type !== "File" && !(options.target === "dir" && stat.type === "Directory")))
+      continue;
 
     const outputEntry =
       options.platform === "mac" && options.arch !== "arm64" && entry === "latest-mac.yml"
         ? `latest-mac-${options.arch}.yml`
         : entry;
     const to = path.join(options.outputDir, outputEntry);
-    yield* fs.copyFile(from, to);
+    if (stat.type === "Directory")
+      yield* Effect.tryPromise({
+        try: () => cp(from, to, { recursive: true, verbatimSymlinks: true }),
+        catch: (cause) =>
+          new BuildScriptError({ message: "Failed to copy unpacked desktop bundle.", cause }),
+      });
+    else yield* fs.copyFile(from, to);
     copiedArtifacts.push(to);
   }
 

@@ -1,3 +1,19 @@
+# Aha fork instructions (user-approved, 2026-10-09)
+
+This checkout is Aha, based on complete Synara v1.0.1-beta.2. Read `docs/aha/MIGRATION.md` and `docs/aha/STATUS.md` first. Their Aha scope and the current user's instructions override conflicting upstream product/release guidance below.
+
+- Work directly at this repository root on main; do not create a nested Synara checkout.
+- Old Aha is preserved on `codex/archive-aha-before-synara-20261009` at `848db93`. Reuse background/theme/image services from that branch; retain upstream UI geometry and interactions.
+- Keep upstream package names, contracts, runtime and Git history. Put Aha additions in focused modules with small integration points.
+- Keep Aha identity/data/update/diagnostic configuration separate. Do not launch the upstream Beta profile or send diagnostics to upstream endpoints while migrating.
+- Preserve Aha brand, Chinese/English, five-region backgrounds, clear mode and theme packages. Keep all upstream features, including terminal/browser/Hubs/Tasks/automations and other providers, with their existing permission gates. Do not automatically enable remote access. Basic image generation/assets stay on the later roadmap.
+- Prefer implementation and concise affected checks. No screenshot matrices or repeated builds without a new reason. Fixtures and builds are not proof of live provider success.
+- The one local archival commit was explicitly authorized. Do not make further commits, pushes, publications or paid model calls without existing authorization. Codex added budget is exhausted (2/2); Claude used 1/2 in a failed connection attempt; the user then cancelled Claude verification. Do not spend its remaining budget.
+- Latest user scope: do not implement historical chat migration; preserve old data.
+- Repository boundary is `/Users/0x10/Documents/Github/Aha`; no sibling project access. Record accurate progress and next task in `docs/aha/STATUS.md`.
+
+---
+
 # Synara agent instructions
 
 Synara is a multi-provider coding-agent workspace with web, server, CLI, and desktop surfaces. Prioritize correctness, reliability, and predictable performance during streaming, reconnects, cancellation, and recovery. Do not treat the project as a disposable early prototype or use this file as permission for unrelated rewrites.
@@ -31,7 +47,7 @@ Synara ships two desktop apps from the same `main`: **Synara** (Stable) and **Sy
 
 ## Transcript and UI safeguards
 
-- Auto-follow represents real assistant text streaming, not generic work, buffering, reconnecting, pending approvals, or tool-only activity. Tool/work rows must not retrigger message-arrival auto-stick behavior.
+- Keep end-follow while the reader remains at the bottom, including tool/work growth between assistant messages and the final settled layout. User navigation away from the bottom releases follow. Generic work, buffering, reconnecting, pending approvals, and tool-only activity must not rearm a detached reader or retrigger message-arrival auto-stick behavior.
 - Keep the common transcript path simple. Introduce virtualization only with measured need; never couple virtualizer measurement to a bottom-stick/height-follow feedback loop. Cover scrolling and measurement changes with focused transcript tests.
 - Reuse [disclosureMotion.ts](apps/web/src/lib/disclosureMotion.ts) and its existing disclosure components for open/close transitions, including reduced-motion behavior. Do not duplicate timing constants or bespoke toggle animations.
 - Reuse before you build. Before adding a dialog, sheet, input, button, row, hook, store, or helper function, search the codebase for one that already does the job and use it, extending it with a prop or variant when it almost fits. When a second surface needs the same shape as an existing one, extract the shared piece (as [AnnouncementSheet.tsx](apps/web/src/components/AnnouncementSheet.tsx) does for one-time announcements) and switch both to it instead of copying markup or logic. Write something from scratch only when nothing comparable exists, and say so in the completion report.

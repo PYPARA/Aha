@@ -1,6 +1,6 @@
 {
   "name": "@synara/contracts",
-  "version": "1.0.1-beta.2",
+  "version": "1.0.1",
   "private": true,
   "files": [
     "dist"
@@ -14,6 +14,18 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "require": "./dist/index.cjs"
+    },
+    "./ahaAppearance": {
+      "types": "./src/ahaAppearance.ts",
+      "import": "./src/ahaAppearance.ts"
+    },
+    "./ahaLegacyAppearance": {
+      "types": "./src/ahaLegacyAppearance.ts",
+      "import": "./src/ahaLegacyAppearance.ts"
+    },
+    "./ahaChannels": {
+      "types": "./src/ahaChannels.ts",
+      "import": "./src/ahaChannels.ts"
     }
   },
   "scripts": {
@@ -26,7 +38,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",

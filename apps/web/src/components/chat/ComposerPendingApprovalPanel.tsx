@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 // FILE: ComposerPendingApprovalPanel.tsx
 // Purpose: Detached card, floating just above the composer, that surfaces a pending
 // tool approval — the command / file context plus approve / decline / cancel actions
@@ -160,6 +161,7 @@ export const ComposerPendingApprovalPanel = function ComposerPendingApprovalPane
   isResponding,
   onRespond,
 }: ComposerPendingApprovalPanelProps) {
+  const tr = useAhaTranslation();
   const parsed = parseApprovalDetail(approval.detail);
   const requestId = approval.requestId;
   const requestKey = pendingRequestInstanceKey(requestId, approval.lifecycleGeneration);
@@ -217,7 +219,7 @@ export const ComposerPendingApprovalPanel = function ComposerPendingApprovalPane
     >
       <div className="flex items-start justify-between gap-3">
         <p className="min-w-0 text-ui-lg font-medium leading-snug text-foreground/90">
-          {computerScope?.prompt ?? KIND_PROMPT[approval.requestKind]}
+          {tr(computerScope?.prompt ?? KIND_PROMPT[approval.requestKind])}
           {!computerScope && (approval.toolName ?? parsed.tool) ? (
             <span className="ml-1.5 text-ui-sm font-normal text-muted-foreground/50">
               {approval.toolName ?? parsed.tool}
@@ -241,8 +243,8 @@ export const ComposerPendingApprovalPanel = function ComposerPendingApprovalPane
           <ComposerChoiceRow
             key={action.decision}
             shortcut={index + 1}
-            label={action.label}
-            description={action.description}
+            label={tr(action.label)}
+            description={tr(action.description)}
             tone={action.tone}
             disabled={isResponding}
             onSelect={() => respondOnce(action)}
@@ -264,6 +266,7 @@ function ApprovalDetail({
   toolName?: string;
   toolParamsDisplay?: PendingApproval["toolParamsDisplay"];
 }) {
+  const tr = useAhaTranslation();
   if (permissionProfile) {
     return (
       <div className="mt-2">
@@ -274,7 +277,7 @@ function ApprovalDetail({
         ) : null}
         <pre
           className="max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--color-background-elevated-secondary)] px-2.5 py-2 font-mono text-ui-sm leading-relaxed text-foreground/85"
-          title="Requested permission profile"
+          title={tr("Requested permission profile")}
         >
           <code>{JSON.stringify(permissionProfile, null, 2)}</code>
         </pre>
@@ -339,7 +342,9 @@ function ApprovalDetail({
     );
   }
 
-  return <p className="mt-2 text-ui text-muted-foreground/65">Review the request to continue.</p>;
+  return (
+    <p className="mt-2 text-ui text-muted-foreground/65">{tr("Review the request to continue.")}</p>
+  );
 }
 
 function formatToolParameterValue(value: unknown): string {

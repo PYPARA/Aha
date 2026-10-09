@@ -13,7 +13,7 @@ export const BETA_IMPORT_RESULT_FILE_NAME = "import-result.json";
  * electron-builder NSIS `guid` for beta builds. The uninstall registry key is
  * the raw GUID (no braces — see app-builder-lib NsisTarget / multiUser.nsh).
  */
-export const SYNARA_BETA_WINDOWS_INSTALLER_GUID = "a8e63b48-d4f3-4db5-9e12-368107afe65d";
+export const SYNARA_BETA_WINDOWS_INSTALLER_GUID = "18787667-676b-5263-a763-7e36bb3c2f60";
 
 /** Public release listing; the newest `v*-beta.N` prerelease is the current beta build. */
 export const SYNARA_BETA_RELEASES_URL =
@@ -24,7 +24,7 @@ export const SYNARA_STABLE_RELEASES_URL =
   "https://github.com/Emanuele-web04/synara/releases/latest";
 
 /** electron-builder NSIS `guid` for stable (production) builds. */
-export const SYNARA_STABLE_WINDOWS_INSTALLER_GUID = "368107a8-afe6-5db5-ab3b-d4f331684868";
+export const SYNARA_STABLE_WINDOWS_INSTALLER_GUID = "f1a8c6bf-4fac-514b-912d-626c4f3ac84a";
 
 /** GitHub API releases endpoint probed for the newest `v*-beta.N` tag. */
 export const SYNARA_BETA_RELEASES_API_URL =

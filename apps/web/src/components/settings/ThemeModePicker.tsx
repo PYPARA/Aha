@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 // FILE: ThemeModePicker.tsx
 // Purpose: Theme mode radio cards (System / Light / Dark) rendered as miniature
 //          app-window mockups instead of a plain segmented control.
@@ -174,6 +175,7 @@ export function ThemeModePicker({
   onValueChange: (value: ThemeMode) => void;
   ariaLabel: string;
 }) {
+  const tr = useAhaTranslation();
   const radioItemProps = useRadioGroupKeyboardNav({
     values: THEME_MODE_VALUES,
     value,
@@ -212,7 +214,7 @@ export function ThemeModePicker({
                 isActive ? "font-medium text-foreground" : "text-muted-foreground",
               )}
             >
-              {choice.label}
+              {tr(choice.label)}
             </span>
           </button>
         );

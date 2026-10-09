@@ -32,7 +32,7 @@ export interface DeviceServiceLiveOptions {
  * crash-recovery, not the feature.
  */
 function defaultBootOwnershipPath(): string {
-  const baseDir = process.env.SYNARA_HOME?.trim() || path.join(homedir(), ".synara");
+  const baseDir = process.env.SYNARA_HOME?.trim() || path.join(homedir(), ".aha-next");
   const stateDir = path.join(baseDir, process.env.VITE_DEV_SERVER_URL ? "dev" : "userdata");
   return path.join(stateDir, "device-boot-ownership.json");
 }

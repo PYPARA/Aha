@@ -611,7 +611,11 @@ function ChatRouteLayout() {
   // would have gotten inside <Sidebar> (otherwise dragging to resize stops working).
   // `data-sidebar-side` on the provider selects the seam geometry.
   const mainContentShell = (
-    <div ref={setRouteColumn} className="relative flex h-svh min-h-0 min-w-0 flex-1">
+    <div
+      data-aha-region="content"
+      ref={setRouteColumn}
+      className="relative flex h-svh min-h-0 min-w-0 flex-1"
+    >
       <div aria-hidden className="app-rail-header-divider" />
       {isEditorView ? null : (
         <SidebarInstanceProvider side="left" resizable={THREAD_SIDEBAR_RESIZABLE}>
@@ -632,6 +636,7 @@ function ChatRouteLayout() {
       defaultOpen
       open={resolvedSidebarOpen}
       onOpenChange={handleSidebarOpenChange}
+      data-aha-region="window"
       className="h-svh overflow-hidden bg-[var(--app-rail-shell-background)]"
       style={{ "--app-top-strip-height": `${CHAT_SURFACE_HEADER_HEIGHT_PX}px` } as CSSProperties}
       data-sidebar-side="left"
@@ -649,8 +654,11 @@ function ChatRouteLayout() {
             <div className="flex min-h-0 shrink-0 flex-col">
               <AppShellTopStrip />
               <div className="flex min-h-0 flex-1">
-                <div ref={setRailSlot} className="flex shrink-0" />
-                <div className="app-rail-panel relative flex shrink-0 overflow-hidden [contain:paint]">
+                <div data-aha-region="rail" ref={setRailSlot} className="flex shrink-0" />
+                <div
+                  data-aha-region="sidebar"
+                  className="app-rail-panel relative flex shrink-0 overflow-hidden [contain:paint]"
+                >
                   {sidebarElement}
                 </div>
               </div>

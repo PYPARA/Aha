@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 import type { AsyncUserInput, MessageId, UserInputQuestion } from "@synara/contracts";
 import { useMemo, useRef, useState } from "react";
 import { CircleQuestionIcon, CheckIcon } from "~/lib/icons";
@@ -22,6 +23,7 @@ export function AsyncUserInputCard({
   input: AsyncUserInput;
   onRespond?: ((messageId: MessageId, answers: readonly string[]) => Promise<void>) | undefined;
 }) {
+  const tr = useAhaTranslation();
   // Native questions have no IDs. Their positions are stable within this message.
   const questions = useMemo<ReadonlyArray<UserInputQuestion>>(
     () =>
@@ -97,7 +99,7 @@ export function AsyncUserInputCard({
         {answered && (
           <>
             <CheckIcon className="size-3" aria-hidden="true" />
-            <span>Answered</span>
+            <span>{tr("Answered")}</span>
           </>
         )}
       </CollapsibleTrigger>
@@ -116,7 +118,7 @@ export function AsyncUserInputCard({
             </dl>
           ) : activeQuestion ? (
             <form
-              aria-label="Questions from Codex"
+              aria-label={tr("Questions from Codex")}
               onSubmit={(event) => {
                 event.preventDefault();
                 void advance();
@@ -150,7 +152,7 @@ export function AsyncUserInputCard({
                     rows={2}
                     placeholder={
                       activeQuestion.options.length > 0
-                        ? "Or type your own answer…"
+                        ? tr("Or type your own answer…")
                         : "Type your answer…"
                     }
                     onChange={(event) => {
@@ -189,8 +191,8 @@ export function AsyncUserInputCard({
                       {submitting
                         ? "Submitting…"
                         : progress.isLastQuestion
-                          ? "Send answer"
-                          : "Next"}
+                          ? tr("Send answer")
+                          : tr("Next")}
                     </Button>
                   </div>
                 </div>

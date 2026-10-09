@@ -1,3 +1,5 @@
+import { useAhaTranslation } from "../aha/AppearanceProvider";
+import { AhaAppearancePanel } from "../aha/AppearancePanel";
 // FILE: _chat.settings.tsx
 // Purpose: Render the dedicated settings experience with its own section sidebar and grouped panels.
 // Layer: Route screen
@@ -46,7 +48,6 @@ import {
 } from "~/components/settings/ConversationStorageSettingsPanels";
 import {
   AppSnapSettingsPanel,
-  BetaChannelSettingsPanel,
   NotificationsSettingsPanel,
 } from "~/components/settings/DesktopSettingsPanels";
 import { ComputerSettingsPanel } from "~/components/settings/ComputerSettingsPanel";
@@ -234,6 +235,7 @@ function MessageTrailMicrophoneRow({
   defaultValue: string;
   onChange: (microphoneId: string) => void;
 }) {
+  const tr = useAhaTranslation();
   const [devices, setDevices] = useState<readonly DesktopAudioInputDevice[]>([]);
 
   // Listing only reads device names; plugging a device in or out refreshes it.
@@ -298,7 +300,7 @@ function MessageTrailMicrophoneRow({
           ))}
           {value && !selected ? (
             <SelectItem hideIndicator value={value}>
-              Not connected
+              {tr("Not connected")}
             </SelectItem>
           ) : null}
         </SettingsSelectControl>
@@ -328,6 +330,7 @@ type BooleanSettingKey = {
 // ── Route screen ───────────────────────────────────────────────────────────
 
 function SettingsRouteView() {
+  const tr = useAhaTranslation();
   const routeSearch = useSearch({ strict: false }) as Record<string, unknown>;
   const activeSection = normalizeSettingsSection(routeSearch.section);
   const settingsTarget = typeof routeSearch.target === "string" ? routeSearch.target : null;
@@ -646,11 +649,13 @@ function SettingsRouteView() {
   const renderGeneralPanel = () => (
     <div className="space-y-6">
       <SafariAccessSetupButton />
-      <BetaChannelSettingsPanel active={true} />
-      <SettingsSection title="Core defaults">
+
+      <SettingsSection title={tr("Core defaults")}>
         <SettingsRow
-          title="Default provider"
-          description="Provider used for new chats until you pick a model. New chats then reuse your most recent model and options."
+          title={tr("Default provider")}
+          description={tr(
+            "Provider used for new chats until you pick a model. New chats then reuse your most recent model and options.",
+          )}
           resetAction={
             settings.defaultProvider !== defaults.defaultProvider ? (
               <SettingResetButton
@@ -672,10 +677,10 @@ function SettingsRouteView() {
                   return;
                 updateSettings({ defaultProvider: value });
               }}
-              ariaLabel="Default provider"
+              ariaLabel={tr("Default provider")}
               valueContent={
                 settings.disabledProviders.includes(settings.defaultProvider) ? (
-                  "Choose an enabled provider"
+                  tr("Choose an enabled provider")
                 ) : (
                   <ProviderOptionLabel
                     provider={settings.defaultProvider}
@@ -697,8 +702,8 @@ function SettingsRouteView() {
         />
 
         <SettingsRow
-          title="New threads"
-          description="Pick the default workspace mode for newly created draft threads."
+          title={tr("New threads")}
+          description={tr("Pick the default workspace mode for newly created draft threads.")}
           resetAction={
             settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? (
               <SettingResetButton
@@ -720,14 +725,16 @@ function SettingsRouteView() {
                   defaultThreadEnvMode: value,
                 });
               }}
-              ariaLabel="Default thread mode"
-              valueContent={settings.defaultThreadEnvMode === "worktree" ? "New worktree" : "Local"}
+              ariaLabel={tr("Default thread mode")}
+              valueContent={
+                settings.defaultThreadEnvMode === "worktree" ? tr("New worktree") : tr("Local")
+              }
             >
               <SelectItem hideIndicator value="local">
-                Local
+                {tr("Local")}
               </SelectItem>
               <SelectItem hideIndicator value="worktree">
-                New worktree
+                {tr("New worktree")}
               </SelectItem>
             </SettingsSelectControl>
           }
@@ -765,10 +772,10 @@ function SettingsRouteView() {
         />
       </SettingsSection>
 
-      <SettingsSection title="Sidebar organization">
+      <SettingsSection title={tr("Sidebar organization")}>
         <SettingsRow
-          title="Project order"
-          description="Controls how projects are arranged in the main sidebar."
+          title={tr("Project order")}
+          description={tr("Controls how projects are arranged in the main sidebar.")}
           resetAction={
             settings.sidebarProjectSortOrder !== defaults.sidebarProjectSortOrder ? (
               <SettingResetButton
@@ -790,7 +797,7 @@ function SettingsRouteView() {
                 }
                 updateSettings({ sidebarProjectSortOrder: value });
               }}
-              ariaLabel="Project sort order"
+              ariaLabel={tr("Project sort order")}
               valueContent={SIDEBAR_PROJECT_SORT_ORDER_LABELS[settings.sidebarProjectSortOrder]}
             >
               <SelectItem hideIndicator value="updated_at">
@@ -807,8 +814,10 @@ function SettingsRouteView() {
         />
 
         <SettingsRow
-          title="Thread order"
-          description="Controls how threads are arranged inside each project in the main sidebar."
+          title={tr("Thread order")}
+          description={tr(
+            "Controls how threads are arranged inside each project in the main sidebar.",
+          )}
           resetAction={
             settings.sidebarThreadSortOrder !== defaults.sidebarThreadSortOrder ? (
               <SettingResetButton
@@ -830,7 +839,7 @@ function SettingsRouteView() {
                 }
                 updateSettings({ sidebarThreadSortOrder: value });
               }}
-              ariaLabel="Thread sort order"
+              ariaLabel={tr("Thread sort order")}
               valueContent={SIDEBAR_THREAD_SORT_ORDER_LABELS[settings.sidebarThreadSortOrder]}
             >
               <SelectItem hideIndicator value="updated_at">
@@ -844,7 +853,7 @@ function SettingsRouteView() {
         />
       </SettingsSection>
 
-      <SettingsSection title="Sidebar sections">
+      <SettingsSection title={tr("Sidebar sections")}>
         {renderBooleanSettingRow({
           settingKey: "showChatsSection",
           title: "Chats",
@@ -962,8 +971,9 @@ function SettingsRouteView() {
 
   const renderAppearancePanel = () => (
     <div className="space-y-6">
+      <AhaAppearancePanel />
       <SettingsSectionShell
-        title="Theme"
+        title={tr("Theme")}
         action={
           theme !== "system" ? (
             <SettingResetButton label="theme" onClick={() => setTheme("system")} />
@@ -996,8 +1006,8 @@ function SettingsRouteView() {
       {isElectron ? (
         <SettingsSection title="App">
           <SettingsRow
-            title="App icon"
-            description="Choose the icon Synara uses in the dock or taskbar."
+            title={tr("App icon")}
+            description={tr("Choose the icon Synara uses in the dock or taskbar.")}
             resetAction={
               settings.desktopAppIcon !== defaultDesktopAppIcon ? (
                 <SettingResetButton
@@ -1069,7 +1079,9 @@ function SettingsRouteView() {
       <SettingsSection title="Typography and spacing">
         <SettingsRow
           title="Use system UI font"
-          description="Ignore the theme's custom UI font and render the interface with the native system font (SF Pro on macOS)."
+          description={tr(
+            "Ignore the theme's custom UI font and render the interface with the native system font (SF Pro on macOS).",
+          )}
           resetAction={
             !systemUiFont ? (
               <SettingResetButton label="system UI font" onClick={() => setSystemUiFont(true)} />
@@ -1085,12 +1097,14 @@ function SettingsRouteView() {
         />
 
         <SettingsRow
-          title="UI density"
-          description="Control spacing in the sidebar, composer, chat gutters, and settings rows without changing font size."
+          title={tr("UI density")}
+          description={tr(
+            "Control spacing in the sidebar, composer, chat gutters, and settings rows without changing font size.",
+          )}
           resetAction={
             settings.uiDensity !== defaults.uiDensity ? (
               <SettingResetButton
-                label="UI density"
+                label={tr("UI density")}
                 onClick={() =>
                   updateSettings({
                     uiDensity: DEFAULT_UI_DENSITY,
@@ -1108,15 +1122,17 @@ function SettingsRouteView() {
                 }
                 updateSettings({ uiDensity: value });
               }}
-              ariaLabel="UI density"
+              ariaLabel={tr("UI density")}
               options={UI_DENSITY_OPTIONS}
             />
           }
         />
 
         <SettingsRow
-          title="Chat width"
-          description="Control how wide the chat column grows. Wide and Full give tables and wide content more room."
+          title={tr("Chat width")}
+          description={tr(
+            "Control how wide the chat column grows. Wide and Full give tables and wide content more room.",
+          )}
           resetAction={
             settings.chatWidth !== defaults.chatWidth ? (
               <SettingResetButton
@@ -1138,15 +1154,17 @@ function SettingsRouteView() {
                 }
                 updateSettings({ chatWidth: value });
               }}
-              ariaLabel="Chat width"
+              ariaLabel={tr("Chat width")}
               options={CHAT_WIDTH_OPTIONS}
             />
           }
         />
 
         <SettingsRow
-          title="Base font size"
-          description="Adjust the app text base in pixels. Chat and UI typography scale proportionally from this value."
+          title={tr("Base font size")}
+          description={tr(
+            "Adjust the app text base in pixels. Chat and UI typography scale proportionally from this value.",
+          )}
           resetAction={
             settings.chatFontSizePx !== defaults.chatFontSizePx ? (
               <SettingResetButton
@@ -1178,7 +1196,7 @@ function SettingsRouteView() {
                     chatFontSizePx: normalizeChatFontSizePx(Number(nextValue)),
                   });
                 }}
-                aria-label="Base font size in pixels"
+                aria-label={tr("Base font size in pixels")}
               />
               <span className="text-ui leading-snug text-muted-foreground">px</span>
             </div>
@@ -1186,7 +1204,7 @@ function SettingsRouteView() {
         />
 
         <SettingsRow
-          title="Terminal font size"
+          title={tr("Terminal font size")}
           description="Adjust terminal text independently from the app and chat font size."
           resetAction={
             settings.terminalFontSizePx !== defaults.terminalFontSizePx ? (
@@ -1227,7 +1245,7 @@ function SettingsRouteView() {
         />
 
         <SettingsRow
-          title="Terminal font"
+          title={tr("Terminal font")}
           description="Type any monospace font installed on this device (e.g. Fira Code). Leave empty for the default. Fonts that aren't installed fall back to the system monospace."
           resetAction={
             settings.terminalFontFamily !== defaults.terminalFontFamily ? (
@@ -1261,7 +1279,7 @@ function SettingsRouteView() {
                   showClear={settings.terminalFontFamily.length > 0}
                   spellCheck={false}
                   autoComplete="off"
-                  placeholder="Default (JetBrains Mono)"
+                  placeholder={tr("Default (JetBrains Mono)")}
                   className="w-full sm:w-56"
                   aria-label="Terminal font family"
                 />
@@ -1303,7 +1321,7 @@ function SettingsRouteView() {
 
       <SettingsSection title="Time and reading">
         <SettingsRow
-          title="Time format"
+          title={tr("Time format")}
           description="System default follows your browser or OS clock preference."
           resetAction={
             settings.timestampFormat !== defaults.timestampFormat ? (
@@ -1330,16 +1348,16 @@ function SettingsRouteView() {
               }}
               ariaLabel="Timestamp format"
               triggerClassName="w-full sm:w-40"
-              valueContent={TIMESTAMP_FORMAT_LABELS[settings.timestampFormat]}
+              valueContent={tr(TIMESTAMP_FORMAT_LABELS[settings.timestampFormat])}
             >
               <SelectItem hideIndicator value="locale">
                 {TIMESTAMP_FORMAT_LABELS.locale}
               </SelectItem>
               <SelectItem hideIndicator value="12-hour">
-                {TIMESTAMP_FORMAT_LABELS["12-hour"]}
+                {tr(TIMESTAMP_FORMAT_LABELS["12-hour"])}
               </SelectItem>
               <SelectItem hideIndicator value="24-hour">
-                {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                {tr(TIMESTAMP_FORMAT_LABELS["24-hour"])}
               </SelectItem>
             </SettingsSelectControl>
           }
@@ -1504,7 +1522,7 @@ function SettingsRouteView() {
         onSelectMode={(keepAwakeMode) => updateSettings({ keepAwakeMode })}
       />
 
-      <SettingsSection title="Review">
+      <SettingsSection title={tr("Review")}>
         <SettingsRow
           title="Open pull requests and issues"
           description="Choose where a pull request or issue link in a chat opens: the built-in review view, the in-app browser, or your external browser. Ctrl/Cmd+click always opens the external browser."
@@ -1575,7 +1593,7 @@ function SettingsRouteView() {
         })}
       </SettingsSection>
 
-      <SettingsSection title="Safety confirmations">
+      <SettingsSection title={tr("Safety confirmations")}>
         {renderBooleanSettingRow({
           settingKey: "confirmThreadDelete",
           title: "Delete confirmation",
@@ -1667,7 +1685,7 @@ function SettingsRouteView() {
                 <div className="mb-8 flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <h1 className="flex items-center gap-2 text-xl font-medium tracking-tight text-foreground">
-                      {activeSectionItem.label}
+                      {tr(activeSectionItem.label)}
                       {activeSectionItem.badge ? (
                         <Badge
                           variant="outline"
@@ -1678,7 +1696,7 @@ function SettingsRouteView() {
                       ) : null}
                     </h1>
                     <p className="mt-1.5 text-ui leading-relaxed text-muted-foreground">
-                      {activeSectionItem.description}
+                      {tr(activeSectionItem.description)}
                     </p>
                   </div>
                   {activeSection === "shortcuts" ? (
@@ -1692,7 +1710,7 @@ function SettingsRouteView() {
                       onClick={() => void restoreDefaults()}
                     >
                       <ResetIcon className="size-3.5" />
-                      Restore defaults
+                      {tr("Restore defaults")}
                     </Button>
                   )}
                 </div>

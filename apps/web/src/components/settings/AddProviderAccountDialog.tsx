@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 // FILE: AddProviderAccountDialog.tsx
 // Purpose: Collects what a new provider account needs — which provider it runs, its
 //   label, the routing id derived from that label, an accent, and its own paths.
@@ -56,6 +57,7 @@ export function AddProviderAccountDialog(props: {
   configFieldsFor: (provider: ProviderKind) => ReadonlyArray<AddProviderAccountConfigField>;
   onAdd: (input: AddProviderAccountInput) => void;
 }) {
+  const tr = useAhaTranslation();
   const formId = useId();
   const [provider, setProvider] = useState(props.initialProvider);
   const [label, setLabel] = useState("");
@@ -108,7 +110,7 @@ export function AddProviderAccountDialog(props: {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add account</DialogTitle>
+          <DialogTitle>{tr("Add account")}</DialogTitle>
           <DialogDescription>
             Each account signs in on its own and gets its own tab in the model picker.
           </DialogDescription>
@@ -116,11 +118,11 @@ export function AddProviderAccountDialog(props: {
         <DialogPanel>
           <form id={formId} className="space-y-3" onSubmit={submit} noValidate>
             <div className="space-y-1">
-              <span className={dialogFieldLabelClassName}>Provider</span>
+              <span className={dialogFieldLabelClassName}>{tr("Provider")}</span>
               <SettingsSelectControl
                 value={provider}
                 onValueChange={(next) => setProvider(next as ProviderKind)}
-                ariaLabel="Provider"
+                ariaLabel={tr("Provider")}
                 triggerClassName="w-full"
                 valueContent={
                   <span className="flex items-center gap-2">
@@ -133,14 +135,14 @@ export function AddProviderAccountDialog(props: {
                   <SelectItem hideIndicator key={option.provider} value={option.provider}>
                     <span className="flex items-center gap-2">
                       <ProviderIcon provider={option.provider} className="size-4 shrink-0" />
-                      <span className="truncate">{option.label}</span>
+                      <span className="truncate">{tr(option.label)}</span>
                     </span>
                   </SelectItem>
                 ))}
               </SettingsSelectControl>
             </div>
             <label className="block space-y-1">
-              <span className={dialogFieldLabelClassName}>Label</span>
+              <span className={dialogFieldLabelClassName}>{tr("Label")}</span>
               <Input
                 size="sm"
                 value={label}
@@ -150,11 +152,11 @@ export function AddProviderAccountDialog(props: {
                 autoFocus
               />
               <span className="block text-ui-sm text-muted-foreground">
-                Shown in the account list and the model picker. Optional.
+                {tr("Shown in the account list and the model picker. Optional.")}
               </span>
             </label>
             <label className="block space-y-1">
-              <span className={dialogFieldLabelClassName}>Account ID</span>
+              <span className={dialogFieldLabelClassName}>{tr("Account ID")}</span>
               <Input
                 size="sm"
                 className="font-mono"
@@ -173,11 +175,11 @@ export function AddProviderAccountDialog(props: {
               >
                 {submitAttempted && idError !== null
                   ? idError
-                  : "Routing key used by threads and sessions. Letters, digits, '-', or '_'."}
+                  : tr("Routing key used by threads and sessions. Letters, digits, '-', or '_'.")}
               </span>
             </label>
             <div className="space-y-1">
-              <span className={dialogFieldLabelClassName}>Accent color</span>
+              <span className={dialogFieldLabelClassName}>{tr("Accent color")}</span>
               <ProviderAccentColorControl
                 value={accentColor}
                 onChange={setAccentColor}
@@ -210,10 +212,10 @@ export function AddProviderAccountDialog(props: {
         </DialogPanel>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
-            Cancel
+            {tr("Cancel")}
           </Button>
           <Button type="submit" form={formId}>
-            Add account
+            {tr("Add account")}
           </Button>
         </DialogFooter>
       </DialogPopup>

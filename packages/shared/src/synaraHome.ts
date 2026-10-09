@@ -7,7 +7,7 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 
 export const SYNARA_HOME_ENV_NAME = "SYNARA_HOME";
-export const DEFAULT_SYNARA_HOME_DIRECTORY_NAME = ".synara";
+export const DEFAULT_SYNARA_HOME_DIRECTORY_NAME = ".aha-next";
 
 /** Expands a leading `~` against the user's home directory; other inputs pass through. */
 export function expandHomePath(input: string, homeDirectory: string = OS.homedir()): string {
@@ -38,9 +38,7 @@ export function resolveSynaraHomeDirectory(
   } = {},
 ): string {
   const homeDirectory = options.homeDirectory ?? OS.homedir();
-  const configured = (
-    options.configuredHome ?? (options.env ?? process.env)[SYNARA_HOME_ENV_NAME]
-  )?.trim();
+  const configured = (options.configuredHome ?? (options.env ?? process.env).AHA_HOME)?.trim();
   if (!configured) {
     return Path.join(homeDirectory, options.directoryName ?? DEFAULT_SYNARA_HOME_DIRECTORY_NAME);
   }

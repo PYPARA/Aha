@@ -12,7 +12,7 @@ import {
   optionalBooleanFlag,
   type BooleanFlagInput,
 } from "@synara/shared/cli";
-import { resolveSynaraDesktopFlavor, synaraDesktopIdentity } from "@synara/shared/desktopIdentity";
+import { resolveSynaraDesktopFlavor } from "@synara/shared/desktopIdentity";
 import { applyShellEnvironmentHydrationMarker } from "@synara/shared/shell";
 import { Config, Data, Effect, Hash, Layer, Logger, Option, Path, Schema } from "effect";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -25,7 +25,7 @@ const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
 
 export const DEFAULT_SYNARA_HOME = Effect.map(Effect.service(Path.Path), (path) =>
-  path.join(homedir(), ".synara"),
+  path.resolve(".aha-dev"),
 );
 const MODE_ARGS = {
   dev: [
@@ -148,7 +148,8 @@ function resolveBaseDir(
         isDevelopment: true,
         requestedFlavor: requestedDesktopFlavor,
       });
-      return path.join(homedir(), synaraDesktopIdentity(flavor).defaultHomeDirectoryName);
+      void flavor;
+      return path.resolve(".aha-dev");
     }
     return yield* DEFAULT_SYNARA_HOME;
   });
@@ -205,6 +206,7 @@ export function createDevRunnerEnv({
       VITE_WS_URL: `ws://${formattedClientHost}:${serverPort}`,
       VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
       SYNARA_HOME: resolvedBaseDir,
+      AHA_HOME: resolvedBaseDir,
       SYNARA_HOST: serverHost,
     };
 

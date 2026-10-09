@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 import type { UserInputQuestion } from "@synara/contracts";
 import { useEffect, useEffectEvent, useRef, type ReactNode } from "react";
 import {
@@ -39,6 +40,7 @@ export function UserInputQuestionForm({
   keyboardShortcuts?: "global" | "local";
   children?: ReactNode;
 }) {
+  const tr = useAhaTranslation();
   const progress = derivePendingUserInputProgress(questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
   const selectedOptionLabelSet = new Set(progress.selectedOptionLabels);
@@ -138,7 +140,7 @@ export function UserInputQuestionForm({
               disabled={!canGoBack || isResponding}
               onClick={onPrevious}
               className={NAV_BUTTON_CLASS_NAME}
-              aria-label="Previous question"
+              aria-label={tr("Previous question")}
             >
               <ChevronLeftIcon className="size-3.5" />
             </button>
@@ -150,7 +152,7 @@ export function UserInputQuestionForm({
               disabled={!canGoForward || isResponding}
               onClick={() => onAdvance()}
               className={NAV_BUTTON_CLASS_NAME}
-              aria-label="Next question"
+              aria-label={tr("Next question")}
             >
               <ChevronRightIcon className="size-3.5" />
             </button>
@@ -158,7 +160,7 @@ export function UserInputQuestionForm({
         ) : null}
       </div>
       {activeQuestion.multiSelect ? (
-        <p className="mt-1 text-ui-sm text-muted-foreground/55">Select one or more.</p>
+        <p className="mt-1 text-ui-sm text-muted-foreground/55">{tr("Select one or more.")}</p>
       ) : null}
       {activeQuestion.options.length > 0 ? (
         <div className="mt-2.5 space-y-0.5">
@@ -169,7 +171,7 @@ export function UserInputQuestionForm({
               <ComposerChoiceRow
                 key={`${activeQuestion.id}:${option.label}`}
                 shortcut={shortcutKey}
-                label={option.label}
+                label={tr(option.label)}
                 description={option.description}
                 selected={isSelected}
                 disabled={isResponding}
@@ -195,7 +197,7 @@ export function UserInputQuestionForm({
               isResponding && "cursor-not-allowed opacity-50",
             )}
           >
-            Cancel
+            {tr("Cancel")}
           </button>
         </div>
       ) : null}

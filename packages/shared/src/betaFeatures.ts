@@ -14,9 +14,7 @@ import {
 /**
  * Features that ship only in non-Stable builds. Keep a feature out of Stable
  * by adding its key here; promote it by deleting the entry. A provider's key
- * is its ProviderKind. "groups" is Groups (below);
- * "tasks" is the Tasks to-do list, which replaces Kanban in Beta while Stable
- * keeps Kanban.
+ * is its ProviderKind. "groups" is Groups (below).
  */
 export type BetaOnlyFeature = string;
 
@@ -35,7 +33,7 @@ export const AUDIO_TRAIL_BETA_FEATURE = "audio-trail";
 /** Auto-fix CI (Stable and Beta): the PR menu checkbox, RPCs, and check watcher. */
 export const PULL_REQUEST_AUTO_FIX_BETA_FEATURE = "pull-request-auto-fix";
 
-export const BETA_ONLY_FEATURES: readonly BetaOnlyFeature[] = [GROUPS_BETA_FEATURE, "tasks"];
+export const BETA_ONLY_FEATURES: readonly BetaOnlyFeature[] = [GROUPS_BETA_FEATURE];
 
 /**
  * Whether a Beta-only feature is on for this host. Only the Stable
@@ -46,7 +44,10 @@ export function isBetaFeatureEnabled(
   feature: BetaOnlyFeature,
   flavor: SynaraDesktopFlavor | "unknown",
 ): boolean {
-  return !BETA_ONLY_FEATURES.includes(feature) || flavor !== "production";
+  // Aha retains the complete pinned Beta feature set independently of diagnostics.
+  void feature;
+  void flavor;
+  return true;
 }
 
 /** Maps a desktop bundle id to its flavor; blank or unrecognized -> "unknown". */
@@ -80,13 +81,13 @@ export function desktopFlavorFromProtocol(
   isDevBuild: boolean,
 ): SynaraDesktopFlavor | "unknown" {
   switch (protocol) {
-    case "synara-beta:":
+    case "aha-next-beta:":
       return "beta";
-    case "synara-canary:":
+    case "aha-next-canary:":
       return "canary";
-    case "synara-cua:":
+    case "aha-next-cua:":
       return "cua";
-    case "synara:":
+    case "aha-next:":
       return isDevBuild ? "development" : "production";
     default:
       return "unknown";

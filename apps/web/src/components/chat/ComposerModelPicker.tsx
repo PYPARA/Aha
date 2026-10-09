@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 // FILE: ComposerModelPicker.tsx
 // Purpose: Single composer picker — provider tabs, searchable model rows, starred
 //   model + trait presets, and per-trait rows (effort, speed, …) in one panel.
@@ -174,6 +175,7 @@ function groupRowElements(
 }
 
 export function ComposerModelPicker(props: ComposerModelPickerProps) {
+  const tr = useAhaTranslation();
   const { onOpenChange, open, lockedProvider, threadId } = props;
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const isMenuOpen = open ?? uncontrolledOpen;
@@ -577,8 +579,8 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               ref={searchInputRef}
               size="sm"
               type="search"
-              aria-label="Search models"
-              placeholder={tab === STARRED_TAB ? "Search starred…" : "Search models…"}
+              aria-label={tr("Search models")}
+              placeholder={tab === STARRED_TAB ? "Search starred…" : tr("Search models…")}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDownCapture={(event) => {
@@ -627,7 +629,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               </div>
             ) : null}
             {setupMessage !== null ? null : isTabLoading ? (
-              <div className="space-y-2 px-2 py-2" aria-label="Loading models">
+              <div className="space-y-2 px-2 py-2" aria-label={tr("Loading models")}>
                 {Array.from({ length: 5 }, (_, index) => (
                   <Skeleton
                     key={index}
@@ -661,10 +663,10 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             ) : (
               <div className="px-2 py-3 text-muted-foreground text-ui leading-relaxed">
                 {normalizedQuery.length > 0
-                  ? "No matches"
+                  ? tr("No matches")
                   : tab === STARRED_TAB
                     ? "Star a model to pin it here together with its effort and speed, then pick it in one click."
-                    : "No models found"}
+                    : tr("No models found")}
               </div>
             )}
           </div>

@@ -1,3 +1,4 @@
+import { AHA_APPEARANCE_CHANNELS as AHA } from "@synara/contracts/ahaChannels";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   BrowserAnnotationEvent,
@@ -129,6 +130,22 @@ function recordBrowserActivity(activity: DesktopDiagnosticActivity): void {
 }
 
 contextBridge.exposeInMainWorld("desktopBridge", {
+  ahaAppearance: {
+    get: () => ipcRenderer.invoke(AHA.get),
+    save: (input) => ipcRenderer.invoke(AHA.save, input),
+    importImage: () => ipcRenderer.invoke(AHA.imageImport),
+    readImage: (id) => ipcRenderer.invoke(AHA.imageRead, id),
+    previewDirectory: () => ipcRenderer.invoke(AHA.directoryPreview),
+    previewPackage: () => ipcRenderer.invoke(AHA.packagePreview),
+    previewBuiltin: (id) => ipcRenderer.invoke(AHA.builtinPreview, id),
+    exportPackage: (input) => ipcRenderer.invoke(AHA.packageExport, input),
+    onChanged: (listener) => {
+      const handler = (_event: unknown, snapshot: Parameters<typeof listener>[0]) =>
+        listener(snapshot);
+      ipcRenderer.on(AHA.changed, handler);
+      return () => ipcRenderer.removeListener(AHA.changed, handler);
+    },
+  },
   ...(betaDiagnosticsBridge ? { betaDiagnostics: betaDiagnosticsBridge } : {}),
   getWsUrl: getDesktopWsUrl,
   // Absolute path for OS-dropped File objects (folders with spaces/parens, etc.).

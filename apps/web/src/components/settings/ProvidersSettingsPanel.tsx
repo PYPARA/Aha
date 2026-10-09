@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 // FILE: ProvidersSettingsPanel.tsx
 // Purpose: Own provider picker, update, and CLI installation settings workflows.
 // Layer: Settings panel
@@ -758,6 +759,7 @@ function ProviderInstallFieldControl(props: {
   settings: AppSettings;
   updateSettings: (patch: Partial<AppSettings>) => void;
 }) {
+  const tr = useAhaTranslation();
   const id = `provider-install-${props.field.settingsKey}`;
   if (props.field.kind === "boolean") {
     return (
@@ -803,7 +805,7 @@ function ProviderInstallFieldControl(props: {
         }
         placeholder={
           isPassword && configured
-            ? "Configured — enter a replacement or leave blank"
+            ? tr("Configured — enter a replacement or leave blank")
             : props.field.placeholder
         }
         type={isPassword ? "password" : undefined}
@@ -974,6 +976,7 @@ function ProviderAccountsControl(props: {
   updateSettings: (patch: Partial<AppSettings>) => void;
   updateSettingsAndWait: (patch: Partial<AppSettings>) => Promise<void>;
 }) {
+  const tr = useAhaTranslation();
   const provider = props.config.provider;
   const providerLabel = PROVIDER_DISPLAY_NAMES[provider];
   const usageQuery = useQuery(
@@ -1164,13 +1167,13 @@ function ProviderAccountsControl(props: {
           key={field.settingsKey}
           className="flex items-center justify-between gap-3 sm:col-span-2"
         >
-          <span className="text-ui-sm font-medium text-foreground">{field.label}</span>
+          <span className="text-ui-sm font-medium text-foreground">{tr(field.label)}</span>
           <Switch
             checked={readConfigBoolean(instance.config, configKey)}
             onCheckedChange={(checked) =>
               updateInstance(instanceId, { config: { [configKey]: checked } })
             }
-            aria-label={`${field.label} for ${instance.displayName || instanceId}`}
+            aria-label={`${tr(field.label)} for ${instance.displayName || instanceId}`}
           />
         </label>
       );
@@ -1185,7 +1188,7 @@ function ProviderAccountsControl(props: {
     return (
       <div className="block" key={field.settingsKey}>
         <label htmlFor={inputId} className="block text-ui-sm font-medium text-foreground">
-          {field.label}
+          {tr(field.label)}
         </label>
         <div className="mt-1 flex items-center gap-2">
           <DebouncedSettingTextInput
@@ -1199,7 +1202,7 @@ function ProviderAccountsControl(props: {
               if (redacted && value.length === 0) return;
               updateInstance(instanceId, { config: { [configKey]: value } }, legacyCodexAccountId);
             }}
-            placeholder={redacted ? "Secret saved — type to replace" : field.placeholder}
+            placeholder={redacted ? tr("Secret saved — type to replace") : field.placeholder}
             spellCheck={false}
           />
           {redacted ? (
@@ -1251,7 +1254,9 @@ function ProviderAccountsControl(props: {
             .map((field) => renderField(field, entry))}
           {provider === "codex" ? (
             <label className="block">
-              <span className="block text-ui-sm font-medium text-foreground">Shadow auth home</span>
+              <span className="block text-ui-sm font-medium text-foreground">
+                {tr("Shadow auth home")}
+              </span>
               <DebouncedSettingTextInput
                 id={`provider-instance-${instanceId}-shadow-home`}
                 size="sm"
@@ -1269,7 +1274,7 @@ function ProviderAccountsControl(props: {
           {provider === "claudeAgent" ? (
             <label className="block sm:col-span-2">
               <span className="block text-ui-sm font-medium text-foreground">
-                Claude config directory
+                {tr("Claude config directory")}
               </span>
               <DebouncedSettingTextInput
                 id={`provider-instance-${instanceId}-config-dir`}
@@ -1291,13 +1296,13 @@ function ProviderAccountsControl(props: {
                   "while sharing settings and history with the default account, or a " +
                   "CODEX_HOME to keep everything separate."
                 : "Leave blank and Synara keeps this account's sign-in in its own folder. " +
-                  "Set a directory to use a Claude config folder you already signed in to."}
+                  tr("Set a directory to use a Claude config folder you already signed in to.")}
             </span>
           ) : null}
           {!isAccountProvider && provider !== "pi" && provider !== "omp" ? (
             <label className="block sm:col-span-2">
               <span className="block text-ui-sm font-medium text-foreground">
-                Profile directory
+                {tr("Profile directory")}
               </span>
               <DebouncedSettingTextInput
                 id={`provider-instance-${instanceId}-profile-dir`}
@@ -1306,7 +1311,7 @@ function ProviderAccountsControl(props: {
                 className="mt-1"
                 value={readConfigString(instance.config, "profileDir")}
                 onCommit={(profileDir) => updateInstance(instanceId, { config: { profileDir } })}
-                placeholder="Provider account directory"
+                placeholder={tr("Provider account directory")}
                 spellCheck={false}
               />
               <span className="mt-1 block text-ui-sm text-muted-foreground">
@@ -1317,7 +1322,9 @@ function ProviderAccountsControl(props: {
         </div>
         <ProviderInstanceAdvancedSection>
           <label className="block sm:col-span-2">
-            <span className="block text-ui-sm font-medium text-foreground">Command override</span>
+            <span className="block text-ui-sm font-medium text-foreground">
+              {tr("Command override")}
+            </span>
             <DebouncedSettingTextInput
               id={`provider-instance-${instanceId}-cli-alias`}
               size="sm"
@@ -1347,7 +1354,7 @@ function ProviderAccountsControl(props: {
           {provider === "claudeAgent" ? (
             <label className="block">
               <span className="block text-ui-sm font-medium text-foreground">
-                Claude credential directory
+                {tr("Claude credential directory")}
               </span>
               <DebouncedSettingTextInput
                 id={`provider-instance-${instanceId}-secure-storage-dir`}
@@ -1358,11 +1365,13 @@ function ProviderAccountsControl(props: {
                 onCommit={(secureStorageDir) =>
                   updateInstance(instanceId, { config: { secureStorageDir } })
                 }
-                placeholder="Optional shared credential directory"
+                placeholder={tr("Optional shared credential directory")}
                 spellCheck={false}
               />
               <span className="mt-1 block text-ui-sm text-muted-foreground">
-                Leave blank unless your setup already uses a separate secure-storage directory.
+                {tr(
+                  "Leave blank unless your setup already uses a separate secure-storage directory.",
+                )}
               </span>
             </label>
           ) : null}
@@ -1421,7 +1430,7 @@ function ProviderAccountsControl(props: {
               </span>
               {account.isDefault ? (
                 <span className="shrink-0 rounded-full border border-border/70 px-1.5 py-px text-ui-2xs font-medium text-muted-foreground">
-                  Default
+                  {tr("Default")}
                 </span>
               ) : null}
             </div>
@@ -1446,7 +1455,7 @@ function ProviderAccountsControl(props: {
             ) : (
               <PlayIcon className="size-3.5" />
             )}
-            Sign in
+            {tr("Sign in")}
           </Button>
           {account.isDefault ? (
             defaultIsCustomized ? (
@@ -1466,7 +1475,7 @@ function ProviderAccountsControl(props: {
               }}
             >
               <XIcon className="size-3.5" />
-              Remove
+              {tr("Remove")}
             </Button>
           )}
         </div>
@@ -1479,14 +1488,14 @@ function ProviderAccountsControl(props: {
           </div>
         ) : null}
 
-        <ProviderAccountEditorSection title="Identity">
+        <ProviderAccountEditorSection title={tr("Identity")}>
           <div className="space-y-3">
             <div className="space-y-1">
               <label
                 htmlFor={`provider-instance-${instanceId}-label`}
                 className="block text-ui-sm font-medium text-foreground"
               >
-                Display name
+                {tr("Display name")}
               </label>
               <DebouncedSettingTextInput
                 id={`provider-instance-${instanceId}-label`}
@@ -1505,7 +1514,9 @@ function ProviderAccountsControl(props: {
               />
             </div>
             <div className="space-y-1">
-              <span className="block text-ui-sm font-medium text-foreground">Accent color</span>
+              <span className="block text-ui-sm font-medium text-foreground">
+                {tr("Accent color")}
+              </span>
               <div className="flex min-h-7 items-center">
                 <ProviderAccentColorControl
                   value={account.accentColor}
@@ -1519,7 +1530,7 @@ function ProviderAccountsControl(props: {
           </div>
         </ProviderAccountEditorSection>
 
-        <ProviderAccountEditorSection title="Runtime">
+        <ProviderAccountEditorSection title={tr("Runtime")}>
           {account.isDefault ? (
             <div className="space-y-3">
               {props.config.fields.map((field) => (
@@ -1545,7 +1556,7 @@ function ProviderAccountsControl(props: {
         {/* A migrated Codex account is routed by its saved identity; an environment of
             its own would make the server drop that route, so none is offered. */}
         {legacyCodexAccountId === null ? (
-          <ProviderAccountEditorSection title="Environment">
+          <ProviderAccountEditorSection title={tr("Environment")}>
             <ProviderInstanceEnvironmentEditor
               instanceId={instanceId}
               environment={
@@ -1585,11 +1596,11 @@ function ProviderAccountsControl(props: {
             }
           >
             <FolderOpenIcon className="size-3.5" />
-            Import directory
+            {tr("Import directory")}
           </Button>
           <Button type="button" size="xs" variant="outline" onClick={() => setAddDialogOpen(true)}>
             <PlusIcon className="size-3.5" />
-            Add account
+            {tr("Add account")}
           </Button>
         </div>
       </div>
@@ -1661,7 +1672,9 @@ function ProviderAccountsControl(props: {
       </div>
 
       {signInAccount ? (
-        <Suspense fallback={<p className="text-ui-sm text-muted-foreground">Opening sign-in…</p>}>
+        <Suspense
+          fallback={<p className="text-ui-sm text-muted-foreground">{tr("Opening sign-in…")}</p>}
+        >
           <ProviderSignInDialog
             provider={provider}
             instanceId={String(signInAccount.instanceId)}
@@ -1718,6 +1731,7 @@ function ProviderAccountEditorSection(props: { title: string; children: ReactNod
 }
 
 function ProviderInstanceAdvancedSection(props: { children: ReactNode }) {
+  const tr = useAhaTranslation();
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -1725,7 +1739,7 @@ function ProviderInstanceAdvancedSection(props: { children: ReactNode }) {
         type="button"
         className="mt-3 flex items-center gap-1 text-ui-sm text-muted-foreground"
       >
-        Advanced
+        {tr("Advanced")}
         <DisclosureChevron open={open} className="size-3.5 shrink-0" />
       </CollapsibleTrigger>
       <CollapsiblePanel>
@@ -1753,6 +1767,7 @@ function ProviderToolRow(props: {
   updateSettings: (patch: Partial<AppSettings>) => void;
   updateSettingsAndWait: (patch: Partial<AppSettings>) => Promise<void>;
 }) {
+  const tr = useAhaTranslation();
   const title = PROVIDER_DISPLAY_NAMES[props.config.provider];
   const isDirty = isProviderInstallConfigDirty(props.config, props.settings, props.defaults);
   const showProviderUpdateStatus = props.providerStatus
@@ -1804,7 +1819,7 @@ function ProviderToolRow(props: {
           >
             <span className="min-w-0 flex-1 text-ui-lg font-medium text-foreground">{title}</span>
             {isDirty ? (
-              <span className="shrink-0 text-ui-sm text-muted-foreground">Custom</span>
+              <span className="shrink-0 text-ui-sm text-muted-foreground">{tr("Custom")}</span>
             ) : null}
             {providerUpdateLabel ? (
               <span
@@ -1894,6 +1909,7 @@ export function ProvidersSettingsPanel({
   providerTarget = null,
   resetEpoch,
 }: ProvidersSettingsPanelProps) {
+  const tr = useAhaTranslation();
   const queryClient = useQueryClient();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const localProviderStatuses = useProviderStatusesForLocalConfig();
@@ -2170,7 +2186,7 @@ export function ProvidersSettingsPanel({
                   ),
                 )
               }
-              aria-label={`${enabled ? "Disable" : "Enable"} ${option.title}`}
+              aria-label={`${enabled ? tr("Disable") : tr("Enable")} ${option.title}`}
             />
           </>
         }
@@ -2182,7 +2198,7 @@ export function ProvidersSettingsPanel({
     <div className="space-y-6">
       <SettingsSection title="Provider activity">
         <SettingsRow
-          title="Enabled providers"
+          title={tr("Enabled providers")}
           description="Enable providers across Synara. Disabled providers are hidden from pickers and settings; their saved configuration and existing threads are kept, and running turns continue. Enabling does not install a CLI or sign it in."
           control={
             <Button
@@ -2192,7 +2208,7 @@ export function ProvidersSettingsPanel({
               onClick={() => void refreshProviders()}
             >
               {refreshingProviders ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
-              {refreshingProviders ? "Checking setup" : "Refresh status"}
+              {refreshingProviders ? tr("Checking setup") : tr("Refresh status")}
             </Button>
           }
           status={
@@ -2221,7 +2237,7 @@ export function ProvidersSettingsPanel({
             </div>
           ) : (
             <p className="mt-4 text-ui text-muted-foreground">
-              No providers enabled. Open Disabled providers below to enable one.
+              {tr("No providers enabled. Open Disabled providers below to enable one.")}
             </p>
           )}
           {disabledProviderOptions.length > 0 ? (
@@ -2249,9 +2265,9 @@ export function ProvidersSettingsPanel({
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="Provider picker">
+      <SettingsSection title={tr("Provider picker")}>
         <SettingsRow
-          title="Available CLIs"
+          title={tr("Available CLIs")}
           description="Show or hide installed providers in the picker and drag them into your preferred order. Hiding a provider here does not disable its server activity."
           status={
             serverConfigQuery.isPending || hasPendingProviderStatuses
@@ -2314,7 +2330,7 @@ export function ProvidersSettingsPanel({
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="Performance">
+      <SettingsSection title={tr("Performance")}>
         <SettingsRow
           title="Keep Synara responsive"
           description="Give agent processes and their commands a moderately lower CPU priority when the machine is busy."
@@ -2372,8 +2388,8 @@ export function ProvidersSettingsPanel({
           />
 
           <SettingsRow
-            title="Provider updates"
-            description="Review installed provider tools that Synara can safely update."
+            title={tr("Provider updates")}
+            description={tr("Review installed provider tools that Synara can safely update.")}
             status={
               !settings.enableProviderUpdateChecks
                 ? "Automatic checks off"
@@ -2422,10 +2438,12 @@ export function ProvidersSettingsPanel({
       </div>
 
       <div id={SETTINGS_TARGETS.providerInstalls}>
-        <SettingsSection title="Provider tools">
+        <SettingsSection title={tr("Provider tools")}>
           <SettingsRow
-            title="Installed CLIs"
-            description="Review provider versions and update tools. Open a row only when you need binary overrides."
+            title={tr("Installed CLIs")}
+            description={tr(
+              "Review provider versions and update tools. Open a row only when you need binary overrides.",
+            )}
             status={
               !settings.enableProviderUpdateChecks
                 ? "Automatic checks off"

@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../aha/AppearanceProvider";
 // FILE: EditProjectDialog.tsx
 // Purpose: Edit a project's local name and its look (emoji, or icon and color) in one place.
 // Layer: UI component
@@ -45,11 +46,12 @@ export function EditProjectDialog({
   onOpenChange,
   onSave,
 }: EditProjectDialogProps) {
+  const tr = useAhaTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit project</DialogTitle>
+          <DialogTitle>{tr("Edit project")}</DialogTitle>
         </DialogHeader>
         {/* Field state lives below DialogPopup, which unmounts its children after the close
             transition, so each open seeds a fresh draft from initialValue. */}
@@ -72,6 +74,7 @@ function EditProjectForm({
   onOpenChange,
   onSave,
 }: Omit<EditProjectDialogProps, "open">) {
+  const tr = useAhaTranslation();
   const [name, setName] = useState(initialValue.name);
   const [appearance, setAppearance] = useState(initialValue.appearance);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -119,7 +122,7 @@ function EditProjectForm({
                   render={
                     <button
                       type="button"
-                      aria-label="Choose icon"
+                      aria-label={tr("Choose icon")}
                       className="flex size-full cursor-pointer items-center justify-center rounded-s-[inherit] text-muted-foreground outline-hidden transition-colors hover:bg-foreground/5 focus-visible:bg-foreground/6 data-popup-open:bg-foreground/6"
                     />
                   }
@@ -131,7 +134,7 @@ function EditProjectForm({
               </InputGroupAddon>
               <InputGroupInput
                 id={nameInputId}
-                aria-label="Project name"
+                aria-label={tr("Project name")}
                 value={name}
                 placeholder={folderName}
                 onChange={(event) => setName(event.target.value)}
@@ -158,10 +161,10 @@ function EditProjectForm({
       </DialogPanel>
       <DialogFooter>
         <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-          Cancel
+          {tr("Cancel")}
         </Button>
         <Button size="sm" onClick={save}>
-          Save
+          {tr("Save")}
         </Button>
       </DialogFooter>
     </>

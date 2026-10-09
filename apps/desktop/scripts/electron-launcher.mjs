@@ -34,7 +34,7 @@ const LAUNCHER_VERSION = 7;
 // icon constants in scripts/lib/desktop-platform-build-config.ts. The packaged
 // build compiles the same asset; this launcher does it for dev and Canary,
 // which run from a renamed Electron bundle instead of a packaged app.
-const ICON_COMPOSER_ASSET_NAME = "Synara";
+const ICON_COMPOSER_ASSET_NAME = "Aha";
 const ICON_COMPOSER_DEPLOYMENT_TARGET = "26.0";
 const MICROPHONE_USAGE_DESCRIPTION =
   "Synara needs microphone access so you can record voice notes and transcribe them into the chat composer, and, if you turn it on, to move the chat message trail with your voice.";
@@ -52,6 +52,7 @@ export function configureMacLauncher(electronPath, environment = process.env) {
   const configuration = Object.fromEntries(
     [
       "SYNARA_HOME",
+      "AHA_HOME",
       "SYNARA_DESKTOP_FLAVOR",
       "SYNARA_SOURCE_DESKTOP_BUILD_MARKER",
       "VITE_DEV_SERVER_URL",
@@ -326,8 +327,9 @@ export function buildMacLauncher(
   const targetAppBundlePath = join(runtimeDir, `${APP_DISPLAY_NAME}.app`);
   const targetBinaryPath = join(targetAppBundlePath, "Contents", "MacOS", "Electron");
   const iconPath = join(desktopDirectory, "resources", "icon.icns");
-  const iconComposerPath = resolve(desktopDirectory, "../../assets/prod/Synara.icon");
-  const hasIconComposerSource = existsSync(iconComposerPath);
+  const iconComposerPath = resolve(desktopDirectory, "../../assets/aha/Aha.icon");
+  const hasIconComposerSource =
+    process.env.AHA_ICON_COMPOSER === "1" && existsSync(iconComposerPath);
   const metadataPath = join(runtimeDir, "metadata.json");
   const desktopPackage = JSON.parse(readFileSync(join(desktopDirectory, "package.json"), "utf8"));
 

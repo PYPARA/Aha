@@ -103,10 +103,10 @@ function verifyCanonicalIdentity(): void {
       "Expected the CLI to expose only the Synara entry point and migration recovery binary.",
     );
   }
-  if (SYNARA_PRODUCTION_BUNDLE_ID !== "com.emanueledipietro.synara") {
+  if (SYNARA_PRODUCTION_BUNDLE_ID !== "app.aha.desktop.next") {
     throw new Error(`Unexpected production bundle ID: ${SYNARA_PRODUCTION_BUNDLE_ID}.`);
   }
-  if (SYNARA_DESKTOP_UPDATE_CHANNEL !== "synara") {
+  if (SYNARA_DESKTOP_UPDATE_CHANNEL !== "aha-next") {
     throw new Error(`Unexpected desktop update channel: ${SYNARA_DESKTOP_UPDATE_CHANNEL}.`);
   }
 
@@ -617,7 +617,7 @@ function verifyDesktopStageLockAuthority(): void {
   );
   assertContains(
     buildScript,
-    ")`npm rebuild node-pty --foreground-scripts`,",
+    'npm rebuild node-pty --foreground-scripts --prefix ${path.join(stageAppDir, "node_modules", "node-pty")}',
     "Expected Linux desktop staging to build only node-pty after the script-free frozen install.",
   );
   assertNotContains(

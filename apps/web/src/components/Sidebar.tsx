@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../aha/AppearanceProvider";
 import { useProjectImportDialogStore } from "~/projectImport/projectImportDialogStore";
 // FILE: Sidebar.tsx
 // Purpose: Renders the project/thread sidebar, including row status, sorting, and thread actions.
@@ -134,8 +135,6 @@ import {
   toggleRailShortcutKey,
 } from "../appRail.logic";
 import { useRailShellStore } from "../railShellStore";
-import { useKeepAwakeState } from "../hooks/useKeepAwakeState";
-import { SidebarKeepAwakeMenu } from "./KeepAwakeControls";
 import { isElectron } from "../env";
 import { formatRelativeTime } from "../lib/relativeTime";
 import {
@@ -198,6 +197,8 @@ import {
   pullRequestQueryKeys,
 } from "../lib/pullRequestReactQuery";
 import { prefetchModelsForNewThread } from "../lib/providerModelPrefetch";
+import { resolveProviderDiscoveryCwd } from "../lib/providerDiscovery";
+import { modelQueryOptionsForProviderInstance } from "../hooks/useProviderModelCatalog";
 import {
   hasReconciledServerProviderStatuses,
   serverConfigQueryOptions,
@@ -280,7 +281,7 @@ import {
 } from "./SidebarActivityView";
 import { DesktopUpdateRailButton } from "./DesktopUpdateRailButton";
 import { SidebarIconButton, sidebarIconButtonSlotClass } from "./SidebarIconButton";
-import { useAnnouncementSheetSlot, useAnnouncementSheetSlotStore } from "./announcementSheetSlot";
+import { OneTimeCoachmark, TASKS_COACHMARK } from "./OneTimeCoachmark";
 import { SidebarLeadingIcon } from "./SidebarLeadingIcon";
 import { SidebarPrimaryAction } from "./SidebarPrimaryAction";
 import { RailAutomationsPanel } from "./RailAutomationsPanel";
@@ -441,7 +442,6 @@ import {
   DISCLOSURE_INNER_CLASS,
 } from "~/lib/disclosureMotion";
 import { createClientPointMenuAnchor } from "~/lib/clientPointMenuAnchor";
-import { resolveThreadModelSummary } from "~/lib/threadModelSummary";
 import {
   canCreateThreadHandoff,
   canContinueThreadHandoff,
@@ -870,19 +870,20 @@ function ProjectSortMenu({
   onProjectSortOrderChange: (sortOrder: SidebarProjectSortOrder) => void;
   onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
 }) {
+  const tr = useAhaTranslation();
   return (
     <Menu>
       <SidebarIconButton
         render={<MenuTrigger />}
         icon={SortFilterIcon}
-        label="Sort projects"
-        tooltip="Sort projects"
+        label={tr("Sort projects")}
+        tooltip={tr("Sort projects")}
         tooltipSide="right"
       />
       <ComposerPickerMenuPopup align="end" side="bottom" className="min-w-44">
         <MenuGroup>
           <div className="px-2 py-1 sm:text-ui leading-snug font-medium text-muted-foreground">
-            Sort projects
+            {tr("Sort projects")}
           </div>
           <MenuRadioGroup
             value={projectSortOrder}
@@ -938,6 +939,7 @@ function SidebarHelpMenu({
   /** Rail layout: the trigger takes the rail button look and the menu opens to the side. */
   inRail?: boolean;
 }) {
+  const tr = useAhaTranslation();
   const inRail = inRailProp ?? false;
   // `openCount` keys the dialog so each open remounts the accordion — its rows
   // capture `defaultOpen` in mount state, so a stale mount would ignore a
@@ -958,8 +960,8 @@ function SidebarHelpMenu({
         <SidebarIconButton
           render={<MenuTrigger />}
           icon={CircleQuestionIcon}
-          label="Help"
-          tooltip="Help"
+          label={tr("Help")}
+          tooltip={tr("Help")}
           {...(inRail
             ? {
                 tooltipSide: "right" as const,
@@ -1007,7 +1009,7 @@ function SidebarHelpMenu({
                 onClick={onCustomizeSidebar}
               >
                 <SidebarContextMenuIcon icon={CustomizeIcon} />
-                <span>Customize sidebar</span>
+                <span>{tr("Customize sidebar")}</span>
               </MenuItem>
             ) : null}
             <MenuItem className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME} onClick={onOpenShortcuts}>
@@ -1072,19 +1074,20 @@ export function ChatSortMenu({
   threadSortOrder: SidebarThreadSortOrder;
   onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
 }) {
+  const tr = useAhaTranslation();
   return (
     <Menu>
       <SidebarIconButton
         render={<MenuTrigger />}
         icon={SortFilterIcon}
-        label="Sort chats"
-        tooltip="Sort chats"
+        label={tr("Sort chats")}
+        tooltip={tr("Sort chats")}
         tooltipSide="top"
       />
       <ComposerPickerMenuPopup align="end" side="bottom" className="min-w-44">
         <MenuGroup>
           <div className="px-2 py-1 sm:text-ui leading-snug font-medium text-muted-foreground">
-            Sort chats
+            {tr("Sort chats")}
           </div>
           <ThreadSortMenuItems
             threadSortOrder={threadSortOrder}
@@ -1152,26 +1155,6 @@ function SortableProjectItem({
  * Header Activity toggle: a bell that lights up in the accent tone while the
  * Activity view is on, with an unread dot when completions are waiting.
  */
-const ACTIVITY_ONBOARDING_STORAGE_KEY = "synara:activity-onboarding:v1";
-const ACTIVITY_ONBOARDING_DURATION_MS = 8_000;
-
-function shouldShowActivityOnboarding(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(ACTIVITY_ONBOARDING_STORAGE_KEY) !== "seen";
-  } catch {
-    return true;
-  }
-}
-
-function markActivityOnboardingSeen() {
-  try {
-    window.localStorage.setItem(ACTIVITY_ONBOARDING_STORAGE_KEY, "seen");
-  } catch {
-    // Storage can be unavailable in private or restricted browser contexts.
-  }
-}
-
 export function SidebarActivityBellButton({
   active,
   showUnreadDot,
@@ -1183,55 +1166,28 @@ export function SidebarActivityBellButton({
   shortcutLabel: string | null;
   onClick: () => void;
 }) {
-  const [onboardingVisible, setOnboardingVisible] = useState(shouldShowActivityOnboarding);
-  const [tooltipOpen, setTooltipOpen] = useState(false);
-  const startupSettled = useAnnouncementSheetSlotStore((state) => state.startupSettled);
-  const { open: onboardingOpen } = useAnnouncementSheetSlot(onboardingVisible && startupSettled);
-
-  useEffect(() => {
-    if (!onboardingOpen) return;
-    markActivityOnboardingSeen();
-    const timeout = window.setTimeout(() => {
-      setOnboardingVisible(false);
-      setTooltipOpen(false);
-    }, ACTIVITY_ONBOARDING_DURATION_MS);
-    return () => window.clearTimeout(timeout);
-  }, [onboardingOpen]);
-
-  const dismissOnboarding = () => {
-    if (onboardingVisible) markActivityOnboardingSeen();
-    setOnboardingVisible(false);
-    setTooltipOpen(false);
-  };
-
+  const tr = useAhaTranslation();
   return (
-    <Tooltip
-      open={onboardingVisible ? onboardingOpen : tooltipOpen}
-      onOpenChange={(open) => {
-        if (onboardingVisible) return;
-        setTooltipOpen(open);
-      }}
+    <OneTimeCoachmark
+      storageKey="synara:activity-onboarding:v1"
+      title={tr("Activity")}
+      description={tr("See running tasks, completed work, and anything that needs your attention.")}
+      tooltip={`${tr("Activity view")}${shortcutLabel ? ` (${shortcutLabel})` : ""}`}
+      tooltipSide="bottom"
     >
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label={active ? "Switch to classic view" : "Switch to activity view"}
-            aria-pressed={active}
-            onClick={() => {
-              dismissOnboarding();
-              onClick();
-            }}
-            className={cn(
-              "relative inline-flex shrink-0 cursor-pointer items-center justify-center transition-colors",
-              sidebarIconButtonSlotClass("header"),
-              SIDEBAR_ROW_FOCUS_CLASS_NAME,
-              active
-                ? "bg-[color-mix(in_srgb,var(--color-text-accent)_15%,transparent)] text-[var(--color-text-accent)]"
-                : "sidebar-icon-button text-muted-foreground/75 hover:text-foreground",
-            )}
-          />
-        }
+      <button
+        type="button"
+        aria-label={tr(active ? "Switch to classic view" : "Switch to activity view")}
+        aria-pressed={active}
+        onClick={onClick}
+        className={cn(
+          "relative inline-flex shrink-0 cursor-pointer items-center justify-center transition-colors",
+          sidebarIconButtonSlotClass("header"),
+          SIDEBAR_ROW_FOCUS_CLASS_NAME,
+          active
+            ? "bg-[color-mix(in_srgb,var(--color-text-accent)_15%,transparent)] text-[var(--color-text-accent)]"
+            : "sidebar-icon-button text-muted-foreground/75 hover:text-foreground",
+        )}
       >
         <BellIcon className={sidebarGlyphClass("leading")} />
         {showUnreadDot ? (
@@ -1240,34 +1196,13 @@ export function SidebarActivityBellButton({
             className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-[var(--color-text-accent)] ring-2 ring-[var(--sidebar-background,var(--background))]"
           />
         ) : null}
-      </TooltipTrigger>
-      <TooltipPopup
-        side={onboardingVisible ? "right" : "bottom"}
-        align={onboardingVisible ? "start" : "center"}
-        sideOffset={onboardingVisible ? 8 : 4}
-        className={cn(
-          onboardingVisible &&
-            "max-w-64 border-[var(--color-text-accent)] bg-[var(--color-text-accent)] text-white shadow-lg",
-        )}
-        viewportClassName={cn(onboardingVisible && "px-3 py-2.5")}
-      >
-        {onboardingVisible ? (
-          <div className="text-left">
-            <div className="text-ui leading-snug font-semibold">Activity</div>
-            <div className="mt-0.5 text-ui-sm leading-4 text-white/85">
-              See running tasks, completed work, and anything that needs your attention.
-            </div>
-          </div>
-        ) : (
-          `Activity view${shortcutLabel ? ` (${shortcutLabel})` : ""}`
-        )}
-      </TooltipPopup>
-    </Tooltip>
+      </button>
+    </OneTimeCoachmark>
   );
 }
 
 const SIDEBAR_SURFACE_PICKER_COPY: Record<SidebarView, { title: string; description: string }> = {
-  threads: { title: "Synara", description: "Build, debug, and ship" },
+  threads: { title: "Aha", description: "Build, debug, and ship" },
   groups: { title: "Hubs", description: "Coordinated work across repos" },
 };
 
@@ -1287,6 +1222,7 @@ export function SidebarSurfacePicker({
   onSelectView: (view: SidebarView) => void;
   onPrewarmView?: (view: SidebarView) => void;
 }) {
+  const tr = useAhaTranslation();
   const activeCopy = SIDEBAR_SURFACE_PICKER_COPY[activeView];
 
   return (
@@ -1295,7 +1231,7 @@ export function SidebarSurfacePicker({
         render={
           <button
             type="button"
-            aria-label="Switch sidebar surface"
+            aria-label={tr("Switch sidebar surface")}
             className={cn(
               "flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-lg px-2.5",
               SIDEBAR_ROW_FOCUS_CLASS_NAME,
@@ -1304,7 +1240,7 @@ export function SidebarSurfacePicker({
           />
         }
       >
-        <span className={SIDEBAR_PANEL_TITLE_CLASS_NAME}>{activeCopy.title}</span>
+        <span className={SIDEBAR_PANEL_TITLE_CLASS_NAME}>{tr(activeCopy.title)}</span>
         <DisclosureChevron open className="text-muted-foreground/70" />
       </MenuTrigger>
       <ComposerPickerMenuPopup
@@ -1334,10 +1270,10 @@ export function SidebarSurfacePicker({
               >
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="text-ui-lg font-medium leading-none text-foreground">
-                    {copy.title}
+                    {tr(copy.title)}
                   </span>
                   <span className="text-ui-sm leading-snug text-muted-foreground">
-                    {copy.description}
+                    {tr(copy.description)}
                   </span>
                 </span>
               </MenuRadioItem>
@@ -1350,6 +1286,7 @@ export function SidebarSurfacePicker({
 }
 
 export default function Sidebar() {
+  const tr = useAhaTranslation();
   const githubProvisioningAvailable = useSyncExternalStore(
     subscribeGitHubProvisioningCapability,
     readGitHubProvisioningCapability,
@@ -1454,7 +1391,7 @@ export default function Sidebar() {
         }
       : null;
   }, [automationListQuery.data]);
-  // Tasks is Beta-only: Stable never subscribes to or reads to-dos (the server refuses them).
+  // Subscribe to Tasks unless the connected server has refused it.
   const tasksSurfaceEnabled = useTasksSurfaceEnabled();
   useTodoEventSubscription(tasksSurfaceEnabled);
   const tasksNeedingAttentionCount = useTasksNeedingAttentionCount(tasksSurfaceEnabled);
@@ -1493,7 +1430,6 @@ export default function Sidebar() {
     () => groupAutomationsByContinuedThread(automationListQuery.data?.definitions ?? []),
     [automationListQuery.data],
   );
-  const keepAwakeState = useKeepAwakeState();
   const sidebarProviderInstances = useMemo(
     () => getProviderInstanceOptions(appSettings),
     [appSettings],
@@ -4375,7 +4311,7 @@ export default function Sidebar() {
       tasks: {
         icon: TasksIcon,
         label: "Tasks",
-        // Beta's Tasks entry stands for both views: the list and the Kanban board.
+        // The Tasks entry stands for both views: the list and the Kanban board.
         active: isOnTasks || isOnKanban,
         badge: tasksAttentionBadge,
         onClick: () => {
@@ -5077,7 +5013,7 @@ export default function Sidebar() {
       slotOccupied: Boolean(input.threadJumpLabel),
     });
     return (
-      <div className="relative flex min-w-0 items-center justify-end gap-[3px] group-hover/thread-row:min-w-12 group-focus-within/thread-row:min-w-12">
+      <div className="relative flex min-w-0 items-center justify-end gap-2 group-hover/thread-row:min-w-12 group-focus-within/thread-row:min-w-12">
         {input.rightMetaChips.length > 0 ? (
           <div className={cn("shrink-0", THREAD_ROW_META_CHIP_HOVER_FADE_CLASS_NAME)}>
             <SidebarMetaChipStack chips={input.rightMetaChips} />
@@ -5125,7 +5061,7 @@ export default function Sidebar() {
             SIDEBAR_SECTION_LABEL_CLASS_NAME,
           )}
         >
-          <span className="truncate">{label}</span>
+          <span className="truncate">{tr(label)}</span>
         </div>
         <SidebarSectionToolbar placement="overlay" revealOnHover>
           {toolbar}
@@ -5142,7 +5078,7 @@ export default function Sidebar() {
     return (
       <div className="mb-3">
         <div className="my-1 flex items-center justify-between px-2 py-1">
-          <span className={SIDEBAR_SECTION_LABEL_CLASS_NAME}>Pinned</span>
+          <span className={SIDEBAR_SECTION_LABEL_CLASS_NAME}>{tr("Pinned")}</span>
         </div>
         <div className="flex flex-col gap-0.5">
           {pinnedThreads.map((thread) => renderPinnedThreadRow(thread))}
@@ -5228,7 +5164,18 @@ export default function Sidebar() {
           worktreeName={hoverMetadata.worktreeName}
           pullRequest={prByThreadId.get(thread.id) ?? null}
           onOpenPullRequest={openPrLink}
-          model={resolveThreadModelSummary(thread.modelSelection)}
+          model={thread.modelSelection}
+          modelCatalogQueryOptions={modelQueryOptionsForProviderInstance({
+            provider: thread.modelSelection.provider,
+            instanceId: thread.modelSelection.instanceId ?? thread.modelSelection.provider,
+            settings: appSettings,
+            enabled: false,
+            cwd: resolveProviderDiscoveryCwd({
+              activeThreadWorktreePath: thread.worktreePath,
+              activeProjectCwd: hoverProject?.cwd ?? null,
+              serverCwd,
+            }),
+          })}
           status={hoverStatus}
         />
       </TooltipPopup>
@@ -5603,7 +5550,9 @@ export default function Sidebar() {
         <SidebarIconButton
           icon={NewThreadIcon}
           label={`Create new thread in ${project.name}`}
-          tooltip={newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+          tooltip={
+            newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : tr("New thread")
+          }
           tooltipSide="top"
           data-testid="new-thread-button"
           onMouseEnter={() => {
@@ -5656,7 +5605,7 @@ export default function Sidebar() {
                     showMoreThreadsForProject(project.cwd, threadListExtraPages);
                   }}
                 >
-                  <span>Show more</span>
+                  <span>{tr("Show more")}</span>
                 </SidebarMenuSubButton>
               )}
               {canShowLessThreads && (
@@ -5674,7 +5623,7 @@ export default function Sidebar() {
                     showLessThreadsForProject(project.cwd, threadListExtraPages);
                   }}
                 >
-                  <span>Show less</span>
+                  <span>{tr("Show less")}</span>
                 </SidebarMenuSubButton>
               )}
             </div>
@@ -5909,8 +5858,8 @@ export default function Sidebar() {
           <div className="my-1 flex h-7 min-w-0 items-center gap-1.5 ps-1 pe-1.5">
             <SidebarIconButton
               icon={BackArrowIcon}
-              label="Back to spaces"
-              tooltip="Back to spaces"
+              label={tr("Back to spaces")}
+              tooltip={tr("Back to spaces")}
               tooltipSide="bottom"
               onClick={closeRailSpacesProject}
             />
@@ -5935,7 +5884,7 @@ export default function Sidebar() {
           </SidebarMenu>
           {railSpacesProjectSidebarData.visibleEntries.length === 0 ? (
             <div className="px-2 pt-4 text-center text-ui text-muted-foreground/58">
-              No threads yet
+              {tr("No threads yet")}
             </div>
           ) : null}
         </SidebarGroup>
@@ -5950,12 +5899,12 @@ export default function Sidebar() {
                   section.name,
                   <SidebarIconButton
                     icon={AddPlusIcon}
-                    label="Add project"
+                    label={tr("Add project")}
                     onClick={() => {
                       setCreateProjectSpaceId(section.spaceId);
                       setCreateProjectDialogOpen(true);
                     }}
-                    tooltip="Add project"
+                    tooltip={tr("Add project")}
                     tooltipSide="right"
                   />,
                 )}
@@ -7014,12 +6963,6 @@ export default function Sidebar() {
             void navigate({ to: "/settings", search: { section: "usage" } });
           }}
         />
-        {keepAwakeState?.available ? (
-          <SidebarKeepAwakeMenu
-            state={keepAwakeState}
-            onSelectMode={(keepAwakeMode) => updateSettings({ keepAwakeMode })}
-          />
-        ) : null}
         <SidebarHelpMenu inRail {...sidebarHelpMenuProps} />
         {showDesktopUpdateButton && desktopUpdateState ? (
           <DesktopUpdateRailButton
@@ -7060,7 +7003,7 @@ export default function Sidebar() {
             {railShortcutCustomizeItems.length > 0 ? (
               <>
                 <div className={cn(SIDEBAR_SECTION_LABEL_CLASS_NAME, "ps-2 pt-2.5 pb-1")}>
-                  Shortcuts
+                  {tr("Shortcuts")}
                 </div>
                 <SidebarCustomizeList
                   items={railShortcutCustomizeItems}
@@ -7111,7 +7054,7 @@ export default function Sidebar() {
             {isOnSettings ? (
               <SidebarGroup className="p-0">
                 {/* The rail is the way back, so the panel opens on its title like every section. */}
-                <SidebarPanelTitle title="Settings" />
+                <SidebarPanelTitle title={tr("Settings")} />
                 <SettingsSidebarNav
                   activeSection={activeSettingsSection}
                   onSelectSection={(section, options) => {
@@ -7148,10 +7091,12 @@ export default function Sidebar() {
                   <div className="ml-auto flex items-center gap-1.5">
                     <SidebarIconButton
                       icon={SearchIcon}
-                      label="Search"
+                      label={tr("Search")}
                       glyph="leading"
                       size="header"
-                      tooltip={searchShortcutLabel ? `Search (${searchShortcutLabel})` : "Search"}
+                      tooltip={
+                        searchShortcutLabel ? `Search (${searchShortcutLabel})` : tr("Search")
+                      }
                       tooltipSide="bottom"
                       onClick={() => {
                         setSearchPaletteOpen(true);
@@ -7183,9 +7128,10 @@ export default function Sidebar() {
                           return (
                             <SidebarPrimaryAction
                               key={id}
+                              {...(id === "tasks" ? { coachmark: TASKS_COACHMARK } : {})}
                               icon={item.icon}
                               {...(item.iconClassName ? { iconClassName: item.iconClassName } : {})}
-                              label={item.label}
+                              label={tr(item.label)}
                               active={item.active}
                               badge={item.badge}
                               onClick={item.onClick}
@@ -7290,8 +7236,8 @@ export default function Sidebar() {
                                 allProjectsExpanded
                                   ? focusedProjectId
                                     ? "Collapse all projects except the active project"
-                                    : "Collapse all projects"
-                                  : "Expand all projects"
+                                    : tr("Collapse all projects")
+                                  : tr("Expand all projects")
                               }
                               className="disabled:cursor-default disabled:opacity-45"
                               onClick={handleToggleProjects}
@@ -7299,8 +7245,8 @@ export default function Sidebar() {
                                 allProjectsExpanded
                                   ? focusedProjectId
                                     ? "Collapse all projects except the active chat's project"
-                                    : "Collapse all projects"
-                                  : "Expand all projects"
+                                    : tr("Collapse all projects")
+                                  : tr("Expand all projects")
                               }
                               tooltipSide="bottom"
                             />
@@ -7317,9 +7263,9 @@ export default function Sidebar() {
                           />
                           <SidebarIconButton
                             icon={AddPlusIcon}
-                            label="Add project"
+                            label={tr("Add project")}
                             onClick={handleStartAddProject}
-                            tooltip="Add project"
+                            tooltip={tr("Add project")}
                             tooltipSide="right"
                           />
                         </>,
@@ -7364,7 +7310,7 @@ export default function Sidebar() {
                           aria-label="Loading projects"
                         >
                           <div className="text-center text-ui text-muted-foreground/58">
-                            Loading projects...
+                            {tr("Loading projects...")}
                           </div>
                           <div className="mx-auto grid w-full max-w-42 gap-1.5 opacity-70">
                             <div className="h-2 rounded-full bg-muted/55 animate-pulse" />
@@ -7431,7 +7377,7 @@ export default function Sidebar() {
                     >
                       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
                         <span className="truncate font-system-ui text-ui font-normal text-muted-foreground/79">
-                          Chats
+                          {tr("Chats")}
                         </span>
                         <DisclosureChevron
                           open={chatSectionExpanded}
@@ -7448,14 +7394,16 @@ export default function Sidebar() {
                       />
                       <SidebarIconButton
                         icon={NewThreadIcon}
-                        label="Open new chat home"
+                        label={tr("Open new chat home")}
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
                           void handleCreateHomeChat();
                         }}
                         tooltip={
-                          newChatShortcutLabel ? `New chat (${newChatShortcutLabel})` : "New chat"
+                          newChatShortcutLabel
+                            ? `New chat (${newChatShortcutLabel})`
+                            : tr("New chat")
                         }
                         tooltipSide="top"
                       />
@@ -7478,7 +7426,7 @@ export default function Sidebar() {
                           )
                         ) : (
                           <div className="px-2 py-2 text-ui text-muted-foreground/48">
-                            No chats yet
+                            {tr("No chats yet")}
                           </div>
                         )}
                         {canShowMoreChatThreads || canShowLessChatThreads ? (
@@ -7495,7 +7443,7 @@ export default function Sidebar() {
                                     )
                                   }
                                 >
-                                  <span>Show more</span>
+                                  <span>{tr("Show more")}</span>
                                 </SidebarMenuButton>
                               ) : null}
                               {canShowLessChatThreads ? (
@@ -7515,7 +7463,7 @@ export default function Sidebar() {
                                     )
                                   }
                                 >
-                                  <span>Show less</span>
+                                  <span>{tr("Show less")}</span>
                                 </SidebarMenuButton>
                               ) : null}
                             </div>
@@ -7614,7 +7562,7 @@ export default function Sidebar() {
                 }
               >
                 <ProjectContextMenuIcon icon={FolderOpenIcon} />
-                <span>Open in Finder</span>
+                <span>{tr("Open in Finder")}</span>
               </MenuItem>
               <MenuItem
                 className={PROJECT_CONTEXT_MENU_ITEM_CLASS_NAME}
@@ -7638,7 +7586,7 @@ export default function Sidebar() {
                 }
               >
                 <ProjectContextMenuIcon icon={CopyIcon} />
-                <span>Copy Path</span>
+                <span>{tr("Copy Path")}</span>
               </MenuItem>
               <MenuSeparator />
               {projectContextMenuIsRunning ? (
@@ -7692,7 +7640,7 @@ export default function Sidebar() {
                       icon={spaceDisplayIcon(projectContextMenuProject.spaceId, spaces, voidSpace)}
                     />
                   </span>
-                  <span>Move to space</span>
+                  <span>{tr("Move to space")}</span>
                 </MenuSubTrigger>
                 <ComposerPickerMenuSubPopup className="min-w-48">
                   <MenuRadioGroup
@@ -7727,7 +7675,7 @@ export default function Sidebar() {
                     <span className={PROJECT_CONTEXT_MENU_ICON_CLASS_NAME}>
                       <AddPlusIcon />
                     </span>
-                    <span>New space…</span>
+                    <span>{tr("New space…")}</span>
                   </MenuItem>
                 </ComposerPickerMenuSubPopup>
               </MenuSub>
@@ -7739,7 +7687,7 @@ export default function Sidebar() {
                 }
               >
                 <ProjectContextMenuIcon icon={PencilIcon} />
-                <span>Edit project</span>
+                <span>{tr("Edit project")}</span>
               </MenuItem>
               {isGroupContainerProject(projectContextMenuProject, {
                 homeDir,
@@ -7814,7 +7762,7 @@ export default function Sidebar() {
                   }
                 >
                   <ProjectContextMenuIcon icon={ArchiveIcon} />
-                  <span>Archive threads</span>
+                  <span>{tr("Archive threads")}</span>
                 </MenuItem>
               ) : null}
               {projectContextMenuHasAnyThreads ? (
@@ -7828,7 +7776,7 @@ export default function Sidebar() {
                   }
                 >
                   <ProjectContextMenuIcon icon={Trash2} />
-                  <span>Delete threads</span>
+                  <span>{tr("Delete threads")}</span>
                 </MenuItem>
               ) : null}
               <MenuSeparator />
@@ -7839,7 +7787,7 @@ export default function Sidebar() {
                 }
               >
                 <ProjectContextMenuIcon icon={XIcon} />
-                <span>Remove</span>
+                <span>{tr("Remove")}</span>
               </MenuItem>
             </MenuGroup>
           </ComposerPickerMenuPopup>
@@ -7871,7 +7819,7 @@ export default function Sidebar() {
                 }}
               >
                 <SidebarContextMenuIcon icon={CustomizeIcon} />
-                <span>Customize</span>
+                <span>{tr("Customize")}</span>
               </MenuItem>
             </MenuGroup>
           </ComposerPickerMenuPopup>
@@ -7893,7 +7841,7 @@ export default function Sidebar() {
               Start dev
             </DialogTitle>
             <DialogDescription>
-              {projectRunDialogProject ? projectRunDialogProject.name : "Project"}
+              {projectRunDialogProject ? projectRunDialogProject.name : tr("Project")}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-2">
@@ -7901,7 +7849,7 @@ export default function Sidebar() {
               htmlFor="project-run-command-input"
               className="block text-ui-xs font-medium text-[var(--color-text-foreground-secondary)]"
             >
-              Command
+              {tr("Command")}
             </label>
             <Input
               id="project-run-command-input"
@@ -7922,12 +7870,12 @@ export default function Sidebar() {
               }}
             />
             {projectRunDialogCommandIsValid ? null : (
-              <p className="text-ui-sm text-destructive">Enter a command to run.</p>
+              <p className="text-ui-sm text-destructive">{tr("Enter a command to run.")}</p>
             )}
           </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={closeProjectRunDialog}>
-              Cancel
+              {tr("Cancel")}
             </Button>
             <Button
               onClick={handleConfirmProjectRun}

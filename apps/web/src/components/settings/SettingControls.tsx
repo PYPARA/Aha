@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 // FILE: SettingControls.tsx
 // Purpose: Reusable settings row controls (reset button, select, segmented control).
 // Layer: Settings UI components
@@ -105,6 +106,7 @@ export function SettingsSegmentedControl<T extends string>({
   options: readonly SettingsSegmentedOption<T>[];
   ariaLabel: string;
 }) {
+  const tr = useAhaTranslation();
   const radioItemProps = useRadioGroupKeyboardNav({
     values: options.map((option) => option.value),
     value,
@@ -133,7 +135,7 @@ export function SettingsSegmentedControl<T extends string>({
             onClick={() => onValueChange(option.value)}
             {...radioItemProps(option.value)}
           >
-            {option.label}
+            {typeof option.label === "string" ? tr(option.label) : option.label}
           </Button>
         );
       })}

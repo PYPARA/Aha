@@ -310,6 +310,15 @@ function setCodeThemeId(variant: ThemeVariant, codeThemeId: string) {
   updateStoredThemeState((state) => setThemeCodeThemeId(state, variant, codeThemeId));
 }
 
+export function previewAhaThemeState(serialized: string) {
+  applyThemeState(parseStoredThemeState(serialized), true);
+}
+
+export function applyAhaThemeState(serialized: string) {
+  const state = parseStoredThemeState(serialized);
+  updateStoredThemeState(() => state);
+}
+
 export function useTheme() {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, () => ({
     state: DEFAULT_THEME_STATE,

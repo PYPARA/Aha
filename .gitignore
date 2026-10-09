@@ -51,3 +51,7 @@ __screenshots__/
 
 # Local implementation plans.
 /plans/
+
+# Aha local migration preservation and isolated development data
+/.migration-backups/
+/.aha-dev/

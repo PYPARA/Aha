@@ -274,7 +274,7 @@ export function providerIsolatedHomePath(input: {
   const pathApi = input.platform === "win32" ? NodePath.win32 : NodePath;
   const isolationRoot =
     input.isolationRootDir?.trim() ||
-    pathApi.join(input.homeDir?.trim() || homedir(), ".synara", "userdata");
+    pathApi.join(input.homeDir?.trim() || homedir(), ".aha-next", "userdata");
   return pathApi.resolve(
     isolationRoot,
     "provider-homes",

@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 import { ProviderInteractionMode } from "@synara/contracts";
 import { type ReactNode } from "react";
 import { GoTasklist } from "react-icons/go";
@@ -65,6 +66,7 @@ export function ChatComposerFooter({
   pendingInput,
   submission,
 }: ChatComposerFooterProps) {
+  const tr = useAhaTranslation();
   return (
     <div
       data-chat-composer-footer="true"
@@ -96,7 +98,7 @@ export function ChatComposerFooter({
                 size="sm"
                 type="button"
                 onClick={resetInteractionMode}
-                title={`${interactionMode === "plan" ? "Plan" : "Debug"} mode — click to return to normal build mode`}
+                title={`${interactionMode === "plan" ? tr("Plan") : "Debug"} mode — click to return to normal build mode`}
               >
                 {interactionMode === "plan" ? (
                   <GoTasklist className="size-3.5" />
@@ -104,7 +106,7 @@ export function ChatComposerFooter({
                   <BugIcon className="size-3.5" />
                 )}
                 <span className="sr-only sm:not-sr-only">
-                  {interactionMode === "plan" ? "Plan" : "Debug"}
+                  {interactionMode === "plan" ? tr("Plan") : "Debug"}
                 </span>
               </Button>
             ) : null}
@@ -166,7 +168,7 @@ export function ChatComposerFooter({
               ? "Submitting..."
               : pendingInput.progress.isLastQuestion
                 ? "Submit answers"
-                : "Next question"}
+                : tr("Next question")}
           </Button>
         ) : submission.phase === "running" || submission.connecting ? (
           <>
@@ -196,7 +198,7 @@ export function ChatComposerFooter({
                 size="icon-xs"
                 className="sm:size-[26px]"
                 onClick={submission.onInterrupt}
-                aria-label="Stop generation"
+                aria-label={tr("Stop generation")}
                 title="Stop the current response. On Mac, press Ctrl+C to interrupt."
               >
                 <span aria-hidden="true" className="block size-2 rounded-[1px] bg-current" />
@@ -217,7 +219,7 @@ export function ChatComposerFooter({
                   submission.hasPendingCacheReview
                 }
               >
-                {submission.connecting || submission.busy ? "Sending..." : "Refine"}
+                {submission.connecting || submission.busy ? tr("Sending...") : tr("Refine")}
               </Button>
             ) : (
               <div className="flex items-center">
@@ -232,7 +234,7 @@ export function ChatComposerFooter({
                     submission.hasPendingCacheReview
                   }
                 >
-                  {submission.connecting || submission.busy ? "Sending..." : "Implement"}
+                  {submission.connecting || submission.busy ? tr("Sending...") : tr("Implement")}
                 </Button>
                 <Menu>
                   <MenuTrigger
@@ -263,7 +265,7 @@ export function ChatComposerFooter({
                       }
                       onClick={() => void submission.onImplementInNewThread()}
                     >
-                      Implement in a new thread
+                      {tr("Implement in a new thread")}
                     </MenuItem>
                   </ComposerPickerMenuPopup>
                 </Menu>
@@ -305,8 +307,8 @@ export function ChatComposerFooter({
                         : submission.preparingWorktree
                           ? "Preparing worktree"
                           : submission.busy
-                            ? "Sending"
-                            : "Send message"
+                            ? tr("Sending")
+                            : tr("Send message")
                 }
                 title={
                   submission.hasPendingCacheReview

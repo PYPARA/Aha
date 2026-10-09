@@ -1,24 +1,24 @@
 // FILE: desktopIdentity.ts
 // Purpose: Defines the canonical desktop application identity across packaging and runtime.
 
-export const SYNARA_DESKTOP_SCHEME = "synara";
+export const SYNARA_DESKTOP_SCHEME = "aha-next";
 export const SYNARA_DESKTOP_ORIGIN = `${SYNARA_DESKTOP_SCHEME}://app`;
 export const SYNARA_DESKTOP_ENTRY_URL = `${SYNARA_DESKTOP_ORIGIN}/index.html`;
-export const SYNARA_DESKTOP_UPDATE_CHANNEL = "synara";
-export const SYNARA_PRODUCTION_BUNDLE_ID = "com.emanueledipietro.synara";
+export const SYNARA_DESKTOP_UPDATE_CHANNEL = "aha-next";
+export const SYNARA_PRODUCTION_BUNDLE_ID = "app.aha.desktop.next";
 export const SYNARA_DEVELOPMENT_BUNDLE_ID = `${SYNARA_PRODUCTION_BUNDLE_ID}.dev`;
 export const SYNARA_CANARY_BUNDLE_ID = `${SYNARA_PRODUCTION_BUNDLE_ID}.canary`;
 /** Display/setup identity of the GUI host; this value does not confer native authority. */
 export const SYNARA_DESKTOP_BUNDLE_ID_ENV = "SYNARA_DESKTOP_BUNDLE_ID";
-export const SYNARA_CANARY_DESKTOP_SCHEME = "synara-canary";
+export const SYNARA_CANARY_DESKTOP_SCHEME = "aha-next-canary";
 export const SYNARA_CANARY_DESKTOP_ORIGIN = `${SYNARA_CANARY_DESKTOP_SCHEME}://app`;
 export const SYNARA_CANARY_DESKTOP_ENTRY_URL = `${SYNARA_CANARY_DESKTOP_ORIGIN}/index.html`;
 export const SYNARA_CUA_BUNDLE_ID = `${SYNARA_PRODUCTION_BUNDLE_ID}.cua`;
-export const SYNARA_CUA_DESKTOP_SCHEME = "synara-cua";
+export const SYNARA_CUA_DESKTOP_SCHEME = "aha-next-cua";
 export const SYNARA_CUA_DESKTOP_ORIGIN = `${SYNARA_CUA_DESKTOP_SCHEME}://app`;
 export const SYNARA_CUA_DESKTOP_ENTRY_URL = `${SYNARA_CUA_DESKTOP_ORIGIN}/index.html`;
 export const SYNARA_BETA_BUNDLE_ID = `${SYNARA_PRODUCTION_BUNDLE_ID}.beta`;
-export const SYNARA_BETA_DESKTOP_SCHEME = "synara-beta";
+export const SYNARA_BETA_DESKTOP_SCHEME = "aha-next-beta";
 export const SYNARA_BETA_DESKTOP_ORIGIN = `${SYNARA_BETA_DESKTOP_SCHEME}://app`;
 export const SYNARA_BETA_DESKTOP_ENTRY_URL = `${SYNARA_BETA_DESKTOP_ORIGIN}/index.html`;
 export const SYNARA_SOURCE_DESKTOP_BUILD_MARKER = "synara-source-desktop-build-v2";
@@ -113,64 +113,64 @@ export function synaraDesktopIdentity(flavor: SynaraDesktopFlavor): SynaraDeskto
   if (flavor === "cua") {
     return {
       flavor,
-      displayName: "Synara Cua",
+      displayName: "Aha Cua",
       bundleId: SYNARA_CUA_BUNDLE_ID,
       scheme: SYNARA_CUA_DESKTOP_SCHEME,
       origin: SYNARA_CUA_DESKTOP_ORIGIN,
       entryUrl: SYNARA_CUA_DESKTOP_ENTRY_URL,
-      userDataDirectoryName: "synara-cua",
-      defaultHomeDirectoryName: ".synara-cua",
+      userDataDirectoryName: "aha-next-cua",
+      defaultHomeDirectoryName: ".aha-next-cua",
       usesScriptedUpdates: true,
     };
   }
   if (flavor === "canary") {
     return {
       flavor,
-      displayName: "Synara Canary",
+      displayName: "Aha Canary",
       bundleId: SYNARA_CANARY_BUNDLE_ID,
       scheme: SYNARA_CANARY_DESKTOP_SCHEME,
       origin: SYNARA_CANARY_DESKTOP_ORIGIN,
       entryUrl: SYNARA_CANARY_DESKTOP_ENTRY_URL,
-      userDataDirectoryName: "synara-canary",
-      defaultHomeDirectoryName: ".synara-canary",
+      userDataDirectoryName: "aha-next-canary",
+      defaultHomeDirectoryName: ".aha-next-canary",
       usesScriptedUpdates: true,
     };
   }
   if (flavor === "beta") {
     return {
       flavor,
-      displayName: "Synara Beta",
+      displayName: "Aha Beta",
       bundleId: SYNARA_BETA_BUNDLE_ID,
       scheme: SYNARA_BETA_DESKTOP_SCHEME,
       origin: SYNARA_BETA_DESKTOP_ORIGIN,
       entryUrl: SYNARA_BETA_DESKTOP_ENTRY_URL,
-      userDataDirectoryName: "synara-beta",
-      defaultHomeDirectoryName: ".synara-beta",
+      userDataDirectoryName: "aha-next-beta",
+      defaultHomeDirectoryName: ".aha-next-beta",
       usesScriptedUpdates: false,
     };
   }
   if (flavor === "development") {
     return {
       flavor,
-      displayName: "Synara (Dev)",
+      displayName: "Aha (Dev)",
       bundleId: SYNARA_DEVELOPMENT_BUNDLE_ID,
       scheme: SYNARA_DESKTOP_SCHEME,
       origin: SYNARA_DESKTOP_ORIGIN,
       entryUrl: SYNARA_DESKTOP_ENTRY_URL,
-      userDataDirectoryName: "synara-dev",
-      defaultHomeDirectoryName: ".synara-dev",
+      userDataDirectoryName: "aha-next-dev",
+      defaultHomeDirectoryName: ".aha-next-dev",
       usesScriptedUpdates: false,
     };
   }
   return {
     flavor,
-    displayName: "Synara",
+    displayName: "Aha",
     bundleId: SYNARA_PRODUCTION_BUNDLE_ID,
     scheme: SYNARA_DESKTOP_SCHEME,
     origin: SYNARA_DESKTOP_ORIGIN,
     entryUrl: SYNARA_DESKTOP_ENTRY_URL,
-    userDataDirectoryName: "synara",
-    defaultHomeDirectoryName: ".synara",
+    userDataDirectoryName: "aha-next",
+    defaultHomeDirectoryName: ".aha-next",
     usesScriptedUpdates: false,
   };
 }

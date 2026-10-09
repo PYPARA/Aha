@@ -1,3 +1,4 @@
+import { registerAhaAppearance } from "./aha/appearance-ipc";
 import { showDiagnosticStartupDialog } from "./startupDiagnosticDialog";
 import { BackendIssueDetector } from "./backendIssueDetector";
 import { CuaDriverHost, sweepOrphanedCuaDrivers } from "./cuaDriverHost";
@@ -111,8 +112,7 @@ import {
   monitorBackendStartupHealth,
   waitForBackendStartupReady,
 } from "./backendStartupReadiness";
-import { DesktopBetaChannel, readBetaImportResult, resolveBetaHomeDir } from "./betaChannel";
-import type { ExpectedTeamId } from "./betaInstaller";
+import { readBetaImportResult } from "./betaChannel";
 import {
   BetaDiagnostics,
   readLogTail,
@@ -158,6 +158,7 @@ import {
   quitConfirmationPresentationForPlatform,
   shouldPromptForRunningChatsBeforeQuit,
 } from "./runningChatsQuitGuard";
+import { installShutdownSignalHandlers } from "./shutdownSignals";
 import {
   hasVerifiedDesktopMigrationRestore,
   hasPendingDesktopMigrationRecovery,
@@ -284,6 +285,7 @@ import { BrowserVault } from "./browserAutomation/browserVault";
 import { BrowserVaultCapture } from "./browserAutomation/browserVaultCapture";
 import { registerBrowserVaultIpc } from "./browserVaultIpc";
 import { registerSafariAccessIpc } from "./safariAccessIpc";
+import { showInFileManager } from "./showInFileManager";
 import { BrowserCookieImport } from "./browserAutomation/browserCookieImport";
 import { shutdownBrowserServices } from "./browserAutomation/browserShutdown";
 import {
@@ -398,10 +400,11 @@ const desktopIdentity = synaraDesktopIdentity(desktopFlavor);
 // Beta never honors SYNARA_HOME: a globally exported stable home would make
 // beta open (and migrate) stable's database.
 const BASE_DIR =
-  (desktopFlavor === "beta"
-    ? process.env.SYNARA_BETA_HOME?.trim()
-    : process.env.SYNARA_HOME?.trim()) ||
-  Path.join(OS.homedir(), desktopIdentity.defaultHomeDirectoryName);
+  process.env.AHA_HOME?.trim() ||
+  (isSourceDesktopBuild ? process.env.SYNARA_HOME?.trim() : undefined) ||
+  (desktopFlavor === "development"
+    ? Path.join(Path.resolve(__dirname, "../../.."), ".aha-dev")
+    : Path.join(OS.homedir(), desktopIdentity.defaultHomeDirectoryName));
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_WINDOW_STATE_PATH = Path.join(STATE_DIR, "desktop-window-state.json");
 const DESKTOP_APP_ICON_PATH = Path.join(STATE_DIR, "desktop-app-icon");
@@ -434,36 +437,42 @@ app.setPath("userData", userDataPath);
 // "beta", so production binaries never run a collection path. The payload
 // schema is an allowlist; error text may still contain fragments of user data,
 // and Electron crash dumps are raw process memory.
-const betaDiagnostics =
-  desktopFlavor === "beta"
-    ? new BetaDiagnostics({
-        homeDir: BASE_DIR,
-        appVersion: app.getVersion(),
-        platform: process.platform,
-        arch: process.arch,
-        sampleMemory: () => {
-          const counters = { mainRssMb: 0, rendererRssMb: 0, gpuRssMb: 0, utilityRssMb: 0 };
-          for (const metric of app.getAppMetrics()) {
-            const mib = metric.memory.workingSetSize / 1024;
-            switch (metric.type) {
-              case "Browser":
-                counters.mainRssMb += mib;
-                break;
-              case "Tab":
-                counters.rendererRssMb += mib;
-                break;
-              case "GPU":
-                counters.gpuRssMb += mib;
-                break;
-              case "Utility":
-                counters.utilityRssMb += mib;
-                break;
-            }
+// Separate product policy from feature flavor. Aha does not upload diagnostics.
+function ahaDiagnosticsEnabled(): boolean {
+  return false;
+}
+function ahaUpdatesEnabled(): boolean {
+  return false;
+}
+const betaDiagnostics = ahaDiagnosticsEnabled()
+  ? new BetaDiagnostics({
+      homeDir: BASE_DIR,
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      sampleMemory: () => {
+        const counters = { mainRssMb: 0, rendererRssMb: 0, gpuRssMb: 0, utilityRssMb: 0 };
+        for (const metric of app.getAppMetrics()) {
+          const mib = metric.memory.workingSetSize / 1024;
+          switch (metric.type) {
+            case "Browser":
+              counters.mainRssMb += mib;
+              break;
+            case "Tab":
+              counters.rendererRssMb += mib;
+              break;
+            case "GPU":
+              counters.gpuRssMb += mib;
+              break;
+            case "Utility":
+              counters.utilityRssMb += mib;
+              break;
           }
-          return counters;
-        },
-      })
-    : null;
+        }
+        return counters;
+      },
+    })
+  : null;
 
 if (betaDiagnostics) {
   crashReporter.start({
@@ -2313,7 +2322,7 @@ function configureAppIdentity(): void {
   app.setAboutPanelOptions({
     applicationName: APP_DISPLAY_NAME,
     applicationVersion: app.getVersion(),
-    version: commitHash ?? "unknown",
+    version: `Aha · Synara v1.0.1-beta.2 / ${commitHash ?? "f176e89"}`,
     copyright: `© ${new Date().getFullYear()} Emanuele Di Pietro`,
   });
 
@@ -3679,6 +3688,12 @@ async function recordDownloadedUpdateIdentity(info: UpdateDownloadedEvent): Prom
 }
 
 function configureAutoUpdater(): void {
+  // Aha source builds are distributed manually; no upstream update feed.
+  if (!ahaUpdatesEnabled()) {
+    setUpdateState({ ...updateState, enabled: false, status: "disabled", releaseUrl: null });
+    return;
+  }
+
   const appUpdateYml = readAppUpdateYml();
   configuredUpdaterCacheDirName = resolveElectronUpdaterCacheDirName(appUpdateYml, app.getName());
   const githubUpdateSource = resolveGitHubUpdateSource(appUpdateYml);
@@ -4070,6 +4085,7 @@ function backendEnv(): NodeJS.ProcessEnv {
     SYNARA_NO_BROWSER: "1",
     SYNARA_PORT: String(backendPort),
     SYNARA_HOME: BASE_DIR,
+    AHA_HOME: BASE_DIR,
     SYNARA_AUTH_TOKEN: backendAuthToken,
     SYNARA_DESKTOP_SHUTDOWN_TOKEN: DESKTOP_BACKEND_SHUTDOWN_TOKEN,
   };
@@ -4924,48 +4940,6 @@ async function confirmRunningChatsThenQuit(reason: string): Promise<void> {
   requestGracefulAppQuit(reason);
 }
 
-function ownMacAppBundlePath(): string {
-  return Path.resolve(process.execPath, "..", "..", "..");
-}
-
-/**
- * Team id of the running app's signature, used to verify a downloaded beta
- * bundle before it is installed. Unsigned builds (dev, local, demo) yield
- * "not set" or a "not signed" exit — the install then skips the check. Any
- * other lookup failure on a packaged app resolves to "unavailable" so the
- * installer fails closed instead of silently skipping verification; a lookup
- * failure must never break startup.
- */
-function ownAppTeamId(): ExpectedTeamId {
-  if (process.platform !== "darwin" || !app.isPackaged) return null;
-  try {
-    const result = ChildProcess.spawnSync(
-      "codesign",
-      ["-dv", "--verbose=4", ownMacAppBundlePath()],
-      { encoding: "utf8" },
-    );
-    if (result.status !== 0) {
-      const output = `${result.stderr ?? ""}\n${result.stdout ?? ""}`;
-      return /not signed|unsigned/i.test(output) ? null : "unavailable";
-    }
-    const teamId = /^TeamIdentifier=(\S+)$/m.exec(result.stderr ?? "")?.[1];
-    if (teamId === undefined) return "unavailable";
-    return teamId === "not set" ? null : teamId;
-  } catch {
-    return "unavailable";
-  }
-}
-
-/** Only ever trash the packaged beta bundle this process runs from. */
-function isTrashableBetaBundle(): boolean {
-  return (
-    desktopFlavor === "beta" &&
-    process.platform === "darwin" &&
-    app.isPackaged &&
-    Path.basename(ownMacAppBundlePath()) === `${APP_DISPLAY_NAME}.app`
-  );
-}
-
 function requestGracefulAppQuit(reason: string): void {
   if (isUpdaterInstallPreparing) {
     deferDesktopQuitUntilUpdaterSettles(reason);
@@ -4983,6 +4957,11 @@ function requestGracefulAppQuit(reason: string): void {
 }
 
 function registerIpcHandlers(): void {
+  registerAhaAppearance(
+    STATE_DIR,
+    () => mainWindow,
+    () => resolveResourcePath("aha/elation/manifest.json"),
+  );
   const storageSnapshotPath = resolveSynaraStorageSnapshotPath(app.getPath("userData"));
 
   ipcMain.removeAllListeners(IPC.betaDiagnostics.enabled);
@@ -5224,15 +5203,7 @@ function registerIpcHandlers(): void {
       throw new Error(`Folder not found: ${resolvedPath}`);
     }
 
-    if (stats.isDirectory()) {
-      const errorMessage = await shell.openPath(resolvedPath);
-      if (errorMessage.trim().length > 0) {
-        throw new Error(errorMessage);
-      }
-      return;
-    }
-
-    shell.showItemInFolder(resolvedPath);
+    await showInFileManager(resolvedPath, stats.isDirectory(), process.platform, shell);
   });
 
   ipcMain.removeHandler(IPC.windowMinimize);
@@ -5365,67 +5336,12 @@ function registerIpcHandlers(): void {
     return listAudioInputDevices(resolveAppSnapHelperPath());
   });
 
-  const betaChannel = new DesktopBetaChannel({
-    platform: process.platform,
-    homeDir: OS.homedir(),
-    betaHomeDir: resolveBetaHomeDir(),
-    flavor:
-      desktopFlavor === "beta"
-        ? "beta"
-        : desktopFlavor === "canary"
-          ? "canary"
-          : desktopFlavor === "cua"
-            ? "cua"
-            : "production",
-    feedUrlOverride: process.env.SYNARA_BETA_FEED_URL,
-    installDirOverride: process.env.SYNARA_BETA_INSTALL_DIR,
-    expectedTeamId: ownAppTeamId(),
-    betaUserDataDir: process.env.SYNARA_BETA_USER_DATA,
-    stableExecutablePath: desktopFlavor === "production" ? process.execPath : undefined,
-    stableHomeDir: desktopFlavor === "production" ? BASE_DIR : undefined,
-    canTrashOwnBundle: isTrashableBetaBundle(),
-  });
-
-  ipcMain.removeHandler(IPC.beta.getState);
-  ipcMain.handle(IPC.beta.getState, async () => betaChannel.getState());
-
-  ipcMain.removeHandler(IPC.beta.install);
-  ipcMain.handle(IPC.beta.install, async () => betaChannel.install());
-
-  ipcMain.removeHandler(IPC.beta.launch);
-  ipcMain.handle(IPC.beta.launch, async () => betaChannel.launch());
-
-  ipcMain.removeHandler(IPC.beta.importAndLaunch);
-  ipcMain.handle(IPC.beta.importAndLaunch, async () => betaChannel.importAndLaunch(BASE_DIR));
-
-  ipcMain.removeHandler(IPC.beta.leave);
-  ipcMain.handle(IPC.beta.leave, async (_event, rawInput: unknown) => {
-    const result = await betaChannel.leave();
-    if (!result.ok) return result;
-    const moveToTrash =
-      typeof rawInput === "object" &&
-      rawInput !== null &&
-      (rawInput as { moveToTrash?: unknown }).moveToTrash === true;
-    if (moveToTrash && isTrashableBetaBundle()) {
-      try {
-        await shell.trashItem(ownMacAppBundlePath());
-      } catch (error) {
-        return {
-          ok: false,
-          error: "internal" as const,
-          message: `Synara is open, but Synara Beta could not be moved to the Trash: ${formatErrorMessage(error)}`,
-        };
-      }
-    }
-    trackBetaDiagnostics("beta.left", {
-      kind: "beta",
-      outcome: moveToTrash && isTrashableBetaBundle() ? "trash" : "keep",
+  for (const channel of Object.values(IPC.beta)) {
+    ipcMain.removeHandler(channel);
+    ipcMain.handle(channel, () => {
+      throw new Error("Aha does not install or switch Synara channels.");
     });
-    // The quit path flushes queued events via dispose() with the bounded
-    // timeout; the event above is already queued by then.
-    setImmediate(() => requestGracefulAppQuit("beta-leave"));
-    return result;
-  });
+  }
 
   ipcMain.removeHandler(IPC.updateGetState);
   ipcMain.handle(IPC.updateGetState, async () => updateState);
@@ -6341,15 +6257,9 @@ if (process.platform !== "win32") {
     requestGracefulAppQuit("EPIPE");
   });
 
-  process.on("SIGINT", () => {
+  installShutdownSignalHandlers(app.whenReady(), (signal) => {
     if (desktopShutdownPromise) return;
-    writeDesktopLogHeader("SIGINT received");
-    requestGracefulAppQuit("SIGINT");
-  });
-
-  process.on("SIGTERM", () => {
-    if (desktopShutdownPromise) return;
-    writeDesktopLogHeader("SIGTERM received");
-    requestGracefulAppQuit("SIGTERM");
+    writeDesktopLogHeader(`${signal} received`);
+    requestGracefulAppQuit(signal);
   });
 }

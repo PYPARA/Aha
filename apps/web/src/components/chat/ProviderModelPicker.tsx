@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "../../aha/AppearanceProvider";
 // FILE: ProviderModelPicker.tsx
 // Purpose: Renders the composer provider/model menu and supports controlled opening for shortcuts.
 // Layer: Chat composer presentation
@@ -325,6 +326,7 @@ type ProviderModelMenuItemsProps = {
 export const ProviderModelMenuItems = function ProviderModelMenuItems(
   props: ProviderModelMenuItemsProps,
 ) {
+  const tr = useAhaTranslation();
   const { onAfterSelection } = props;
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [cursorFavoriteModelSlugs, setCursorFavoriteModelSlugs] = useLocalStorage(
@@ -597,7 +599,7 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
   ) => {
     if (props.loadingModelProviders?.[provider]) {
       return (
-        <div className="space-y-2 px-2 py-2" aria-label="Loading models">
+        <div className="space-y-2 px-2 py-2" aria-label={tr("Loading models")}>
           {Array.from({ length: 6 }, (_, index) => (
             <div key={index} className="flex items-center gap-2 rounded-md px-2 py-1.5">
               <Skeleton className="size-3.5 rounded-full" />
@@ -683,7 +685,7 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
         <div className="px-2 py-2 text-muted-foreground text-ui leading-snug">
           {provider === "pi" && normalizedModelSearchQuery.length === 0
             ? "No Pi models found"
-            : "No matches"}
+            : tr("No matches")}
         </div>
       );
 
@@ -741,7 +743,7 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
     if (status?.enabled === false) {
       return (
         <MenuItem onClick={() => appHistory.push("/settings?section=providers")}>
-          Enable a provider in Settings
+          {tr("Enable a provider in Settings")}
         </MenuItem>
       );
     }
@@ -780,8 +782,17 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
               </span>
             );
             if (accountAvailability.disabled) {
+              const canOpenProviderSettings = accountAvailability.label === "Sign in";
               return (
-                <MenuItem key={account.instanceId} disabled>
+                <MenuItem
+                  key={account.instanceId}
+                  disabled={!canOpenProviderSettings}
+                  onClick={
+                    canOpenProviderSettings
+                      ? () => appHistory.push("/settings?section=providers")
+                      : undefined
+                  }
+                >
                   {accountIcon}
                   <span className="truncate">{accountLabel}</span>
                   <span className="ms-auto text-ui-sm text-muted-foreground/80">
@@ -808,8 +819,17 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
         }
         const availability = resolveProviderOptionAvailability(option.value);
         if (availability.disabled) {
+          const canOpenProviderSettings = availability.label === "Sign in";
           return (
-            <MenuItem key={option.value} disabled>
+            <MenuItem
+              key={option.value}
+              disabled={!canOpenProviderSettings}
+              onClick={
+                canOpenProviderSettings
+                  ? () => appHistory.push("/settings?section=providers")
+                  : undefined
+              }
+            >
               <OptionIcon
                 aria-hidden="true"
                 className={cn(
@@ -817,7 +837,7 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
                   providerIconClassName(option.value, "text-muted-foreground/85"),
                 )}
               />
-              <span>{option.label}</span>
+              <span>{tr(option.label)}</span>
               <span className="ms-auto text-ui-sm text-muted-foreground/80">
                 {availability.label}
               </span>
@@ -834,7 +854,7 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
                   providerIconClassName(option.value, "text-muted-foreground/85"),
                 )}
               />
-              {option.label}
+              {tr(option.label)}
             </MenuSubTrigger>
             <ComposerPickerMenuSubPopup
               fixedWidth
@@ -869,7 +889,7 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
       ) : null}
       <MenuItem onClick={() => appHistory.push("/settings?section=providers")}>
         <PlusIcon aria-hidden="true" className="size-3 shrink-0 text-muted-foreground/85" />
-        <span>Add Providers</span>
+        <span>{tr("Add Providers")}</span>
       </MenuItem>
     </>
   );
@@ -940,6 +960,7 @@ type ProviderModelPickerProps = {
 };
 
 export const ProviderModelPicker = function ProviderModelPicker(props: ProviderModelPickerProps) {
+  const tr = useAhaTranslation();
   const { onOpenChange, onSelectionCommitted, open } = props;
   const [uncontrolledMenuOpen, setUncontrolledMenuOpen] = useState(false);
   const selectionCommitTimerRef = useRef<number | null>(null);
@@ -1061,7 +1082,7 @@ export const ProviderModelPicker = function ProviderModelPicker(props: ProviderM
           {!isMenuOpen ? (
             <TooltipPopup side="top" sideOffset={6} variant="picker">
               <span className="inline-flex items-center gap-2 px-1 py-0.5">
-                <span>Change model</span>
+                <span>{tr("Change model")}</span>
                 <ShortcutKbd
                   shortcutLabel={props.shortcutLabel}
                   className="h-4 min-w-4 text-ui-2xs"
