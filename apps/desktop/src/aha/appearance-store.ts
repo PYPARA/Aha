@@ -161,7 +161,7 @@ export class AhaAppearanceStore {
   async previewBuiltin(id: AhaBuiltinThemeId, directory: string): Promise<AhaThemePreview> {
     AhaBuiltinThemeIdSchema.parse(id);
     const manifest = await readBounded(join(directory, "manifest.json"), 16 * 1024);
-    const { backgrounds, images } = await readBuiltinBackgrounds(manifest, directory);
+    const { backgrounds, images } = await readBuiltinBackgrounds(manifest, directory, id);
     // Validate every resource before adding any to the user image cache.
     for (const image of images) await this.images.store(image);
     return {
@@ -195,10 +195,10 @@ export class AhaAppearanceStore {
       codeSize: old.codeSize,
     };
   }
-  async exportPackage(file: string, nativeTheme: string) {
+  async exportPackage(file: string, nativeTheme: string, current?: AhaAppearance) {
     if (nativeTheme.length > 256 * 1024) throw new Error("主题过大。");
     JSON.parse(nativeTheme);
-    const appearance = this.snapshot().preferences;
+    const appearance = current ?? this.snapshot().preferences;
     const images = [];
     for (const id of backgroundIds(appearance.backgrounds))
       images.push({ id, data: Buffer.from((await this.images.read(id)).bytes).toString("base64") });

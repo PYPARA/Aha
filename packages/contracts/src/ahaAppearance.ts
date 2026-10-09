@@ -3,7 +3,7 @@ import { BackgroundsSchema, defaultBackgrounds, ResourceIdSchema } from "./ahaLe
 
 export { AHA_APPEARANCE_CHANNELS } from "./ahaChannels";
 
-export const AhaBuiltinThemeIdSchema = z.literal("aha-elation");
+export const AhaBuiltinThemeIdSchema = z.enum(["aha-elation", "furina-chanson"]);
 export type AhaBuiltinThemeId = z.infer<typeof AhaBuiltinThemeIdSchema>;
 
 export const AhaAppearanceSchema = z.strictObject({
@@ -63,6 +63,7 @@ export interface AhaThemePreview {
   codeSize?: number;
 }
 export interface AhaAppearanceBridge {
+  skins?: import("./ahaSkins").AhaSkinsBridge;
   get(): Promise<AhaAppearanceSnapshot>;
   save(input: z.infer<typeof AhaSaveAppearanceSchema>): Promise<AhaAppearanceSnapshot>;
   importImage(): Promise<{ id: string } | null>;

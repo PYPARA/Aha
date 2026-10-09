@@ -3,10 +3,11 @@
 // Layer: Shared app branding primitive
 
 import type { SVGProps } from "react";
-import ahaMark from "../../../../assets/aha/elation/icon.png";
+import { useAhaAppearance } from "~/aha/AppearanceProvider";
 import { cn } from "~/lib/utils";
 
 export function SynaraLogo({ className, ...props }: SVGProps<SVGSVGElement>) {
+  const { iconUrl } = useAhaAppearance();
   const ariaLabel = props["aria-label"]?.replace("Synara", "Aha");
 
   return (
@@ -19,7 +20,7 @@ export function SynaraLogo({ className, ...props }: SVGProps<SVGSVGElement>) {
       aria-label={ariaLabel}
       className={cn("shrink-0 text-foreground", className)}
     >
-      <image href={ahaMark} width="512" height="512" />
+      <image href={iconUrl} width="512" height="512" />
     </svg>
   );
 }

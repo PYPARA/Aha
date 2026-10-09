@@ -8,14 +8,26 @@ import {
 } from "@synara/contracts/ahaAppearance";
 import { ResourceIdSchema } from "@synara/contracts/ahaLegacyAppearance";
 import { AhaAppearanceStore } from "./appearance-store";
+import { SkinLibrary, type SkinLibraryOptions } from "./skin-library";
+import { SkinIdSchema, SkinApplySchema, SkinPaletteSchema } from "@synara/contracts/ahaSkins";
 
 export function registerAhaAppearance(
   directory: string,
   getWindow: () => BrowserWindow | null,
-  resolveBuiltinManifest: () => string | null,
+  resolveBuiltinManifest: (id: "aha-elation" | "furina-chanson") => string | null,
+  skinOptions?: SkinLibraryOptions,
 ) {
   const store = new AhaAppearanceStore(join(directory, "aha-appearance.json"));
-  const ready = store.load();
+  const skins = skinOptions
+    ? new SkinLibrary(join(directory, "aha-skins.json"), store, skinOptions)
+    : null;
+  const ready = store.load().then(() => skins?.load());
+  const announce = (window: BrowserWindow) => {
+    if (!skins) return;
+    const value = skins.snapshot();
+    window.webContents.send(C.skinsChanged, value);
+    window.webContents.send(C.changed, value.appearance);
+  };
   const trusted = (event: IpcMainInvokeEvent) => {
     const window = getWindow();
     const frame = event.senderFrame;
@@ -65,11 +77,14 @@ export function registerAhaAppearance(
   };
   handle(C.get, async (_window, input) => {
     z.undefined().parse(input);
-    return store.snapshot();
+    return skins?.snapshot().appearance ?? store.snapshot();
   });
   handle(C.save, async (window, input) => {
     const parsed = AhaSaveAppearanceSchema.parse(input);
-    const snap = await store.save(parsed.preferences, parsed.revision);
+    const snap = skins
+      ? await skins.saveAppearance(parsed.preferences, parsed.revision)
+      : await store.save(parsed.preferences, parsed.revision);
+    announce(window);
     window.webContents.send(C.changed, snap);
     return snap;
   });
@@ -87,7 +102,7 @@ export function registerAhaAppearance(
   handle(C.imageRead, async (_window, input) => store.images.read(ResourceIdSchema.parse(input)));
   handle(C.builtinPreview, async (_window, input) => {
     const id = AhaBuiltinThemeIdSchema.parse(input);
-    const manifest = resolveBuiltinManifest();
+    const manifest = resolveBuiltinManifest(id);
     if (!manifest)
       throw new Error("虚照·欢愉素材尚未安装 / Xuzhao · Elation assets are not installed.");
     return store.previewBuiltin(id, dirname(manifest));
@@ -120,7 +135,92 @@ export function registerAhaAppearance(
       filters: [{ name: "Aha theme", extensions: ["json"] }],
     });
     if (result.canceled || !result.filePath) return false;
-    await store.exportPackage(result.filePath, parsed.nativeTheme);
+    await store.exportPackage(
+      result.filePath,
+      parsed.nativeTheme,
+      skins?.snapshot().appearance.preferences,
+    );
     return true;
   });
+  if (skins) {
+    handle(C.skinsList, async (_window, input) => {
+      const parsed = z.strictObject({ initialPalette: SkinPaletteSchema }).optional().parse(input);
+      return skins.list(parsed?.initialPalette);
+    });
+    handle(C.skinsPreview, async (_window, input) => skins.preview(SkinIdSchema.parse(input)));
+    handle(C.skinsApply, async (window, input) => {
+      const value = await skins.apply(SkinApplySchema.parse(input));
+      announce(window);
+      return value;
+    });
+    handle(C.skinsRename, async (window, input) => {
+      const parsed = z
+        .strictObject({
+          id: SkinIdSchema,
+          name: z.string().trim().min(1).max(80),
+          revision: z.number().int().nonnegative(),
+        })
+        .parse(input);
+      const value = await skins.rename(parsed.id, parsed.name, parsed.revision);
+      announce(window);
+      return value;
+    });
+    handle(C.skinsRemove, async (window, input) => {
+      const parsed = z
+        .strictObject({ id: SkinIdSchema, revision: z.number().int().nonnegative() })
+        .parse(input);
+      const value = await skins.remove(parsed.id, parsed.revision);
+      announce(window);
+      return value;
+    });
+    handle(C.skinsImport, async (window, input) => {
+      z.undefined().parse(input);
+      const result = await dialog.showOpenDialog(window, {
+        title: "导入皮肤 / Import skin",
+        filters: [{ name: "Aha skin / theme", extensions: ["json"] }],
+        properties: ["openFile"],
+      });
+      if (result.canceled || !result.filePaths[0]) return null;
+      const value = await skins.importPackage(result.filePaths[0]);
+      announce(window);
+      return value;
+    });
+    handle(C.skinsDirectory, async (window, input) => {
+      z.undefined().parse(input);
+      const result = await dialog.showOpenDialog(window, {
+        title: "导入旧外观 / Import legacy appearance",
+        properties: ["openDirectory"],
+      });
+      if (result.canceled || !result.filePaths[0]) return null;
+      const value = await skins.importDirectory(result.filePaths[0]);
+      announce(window);
+      return value;
+    });
+    handle(C.skinsIcon, async (window, input) => {
+      z.undefined().parse(input);
+      const result = await dialog.showOpenDialog(window, {
+        title: "选择皮肤图标 / Choose skin icon",
+        filters: [{ name: "PNG / JPEG / WebP", extensions: ["png", "jpg", "jpeg", "webp"] }],
+        properties: ["openFile"],
+      });
+      return result.canceled || !result.filePaths[0]
+        ? null
+        : { id: await skins.importIcon(result.filePaths[0]) };
+    });
+    handle(C.skinsExport, async (window, input) => {
+      z.undefined().parse(input);
+      const result = await dialog.showSaveDialog(window, {
+        defaultPath: "aha-skin.json",
+        filters: [{ name: "Aha skin", extensions: ["json"] }],
+      });
+      if (result.canceled || !result.filePath) return false;
+      await skins.exportPackage(result.filePath);
+      return true;
+    });
+    handle(C.skinsReapply, async (_window, input) => {
+      z.undefined().parse(input);
+      await skins.reapplyIcon();
+    });
+  }
+  return { ready, reapplyIcon: () => skins?.reapplyIcon() ?? Promise.resolve() };
 }

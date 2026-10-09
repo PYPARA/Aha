@@ -1,5 +1,7 @@
 /** Central product copy. User, model and tool content remain verbatim. */
 export const copy: Record<string, string> = {
+  "Could not restore default appearance": "无法恢复默认外观",
+  "Restore the default style without backgrounds": "恢复没有背景图的默认样式",
   "See running tasks, completed work, and anything that needs your attention.":
     "查看运行中的任务、已完成的工作和需要你处理的事项。",
   "Activity view": "活动视图",
@@ -108,6 +110,7 @@ export const copy: Record<string, string> = {
   "Default provider": "默认供应商",
   "Default model": "默认模型",
   "App icon": "应用图标",
+  "Current skin icon": "当前皮肤图标",
   "Aha · Xuzhao · Elation": "Aha · 虚照·欢愉",
   "Updating app icon": "正在应用图标",
   "Use the Aha icon in the dock or taskbar. Click to apply again.":

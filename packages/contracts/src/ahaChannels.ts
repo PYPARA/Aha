@@ -1,5 +1,16 @@
 // Pure IPC names: safe to bundle in the sandboxed Electron preload.
 export const AHA_APPEARANCE_CHANNELS = {
+  skinsList: "aha:skins:list",
+  skinsPreview: "aha:skins:preview",
+  skinsImport: "aha:skins:import",
+  skinsDirectory: "aha:skins:directory",
+  skinsApply: "aha:skins:apply",
+  skinsRename: "aha:skins:rename",
+  skinsRemove: "aha:skins:remove",
+  skinsIcon: "aha:skins:icon",
+  skinsExport: "aha:skins:export",
+  skinsReapply: "aha:skins:reapply",
+  skinsChanged: "aha:skins:changed",
   get: "aha:appearance:get",
   save: "aha:appearance:save",
   changed: "aha:appearance:changed",

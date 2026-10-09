@@ -1,0 +1,55 @@
+{
+  "id": "furina-chanson",
+  "backgrounds": {
+    "window": {
+      "source": "image",
+      "imageId": "46aa70cbce26a8e3062b9a4b2e6ef202906e9b0350498bc3e270d3a53c7842b0",
+      "opacity": 0.48,
+      "overlay": 0.2,
+      "blur": 0,
+      "fit": "cover",
+      "x": 100,
+      "y": 50
+    },
+    "rail": {
+      "source": "image",
+      "imageId": "8e72c3c799fdac92cbe1ad7d51c4f11f9be9b7a860f3b37911f150d21e987ca0",
+      "opacity": 0.2,
+      "overlay": 0.2,
+      "blur": 0,
+      "fit": "cover",
+      "x": 50,
+      "y": 50
+    },
+    "sidebar": {
+      "source": "image",
+      "imageId": "432b7f492d4341d3432fca0ef705f0360b8e45c7ef6b9110b8fc81858c27bad9",
+      "opacity": 0.23,
+      "overlay": 0.2,
+      "blur": 0,
+      "fit": "cover",
+      "x": 50,
+      "y": 50
+    },
+    "content": {
+      "source": "image",
+      "imageId": "32aee38339f7ec19004c98ebf3a052c3a859e9fae354ea9493deac0569071100",
+      "opacity": 0.16,
+      "overlay": 0.2,
+      "blur": 0,
+      "fit": "cover",
+      "x": 50,
+      "y": 50
+    },
+    "composer": {
+      "source": "image",
+      "imageId": "42d87f66747e33d1b7ee42e2a9fb94e851faf43ead1421bdc988b5f280d81b4f",
+      "opacity": 0.18,
+      "overlay": 0.2,
+      "blur": 0,
+      "fit": "cover",
+      "x": 50,
+      "y": 50
+    }
+  }
+}

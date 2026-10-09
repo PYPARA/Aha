@@ -49,13 +49,19 @@
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules scripts/node_modules apps/*/dist apps/*/dist-electron packages/*/dist .turbo apps/*/.turbo packages/*/.turbo",
     "aha:dev": "node scripts/dev-runner.ts dev:desktop --home-dir ./.aha-dev --port 4773",
     "aha:build": "bun run build:desktop",
-    "aha:package": "node scripts/build-desktop-artifact.ts --platform mac --target dir --arch arm64 --flavor production"
+    "aha:package": "node scripts/build-desktop-artifact.ts --platform mac --target dir --arch arm64 --flavor production",
+    "test": "vitest run",
+    "fmt:check": "oxfmt --check",
+    "lint": "oxlint --report-unused-disable-directives"
   },
   "devDependencies": {
     "@effect/tsgo": "0.41.0",
     "@types/node": "catalog:",
     "@typescript/native": "npm:typescript@7.0.2",
-    "turbo": "^2.9.14"
+    "oxfmt": "0.40.0",
+    "oxlint": "1.56.0",
+    "turbo": "^2.9.14",
+    "vitest": "4.1.10"
   },
   "overrides": {
     "@effect/platform-node-shared>effect": "catalog:",

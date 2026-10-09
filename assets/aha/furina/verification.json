@@ -1,0 +1,44 @@
+[
+  {
+    "name": "icon",
+    "width": 1024,
+    "height": 1024,
+    "bytes": 1641514,
+    "sha256": "e706b08fd24de8c26e59f718f9a458595e461c3a1d0dec729797b5b47f3c545c"
+  },
+  {
+    "name": "window",
+    "width": 2048,
+    "height": 1152,
+    "bytes": 4156037,
+    "sha256": "46aa70cbce26a8e3062b9a4b2e6ef202906e9b0350498bc3e270d3a53c7842b0"
+  },
+  {
+    "name": "rail",
+    "width": 768,
+    "height": 2048,
+    "bytes": 2066127,
+    "sha256": "8e72c3c799fdac92cbe1ad7d51c4f11f9be9b7a860f3b37911f150d21e987ca0"
+  },
+  {
+    "name": "sidebar",
+    "width": 1024,
+    "height": 2048,
+    "bytes": 2762018,
+    "sha256": "432b7f492d4341d3432fca0ef705f0360b8e45c7ef6b9110b8fc81858c27bad9"
+  },
+  {
+    "name": "content",
+    "width": 2048,
+    "height": 1152,
+    "bytes": 3461503,
+    "sha256": "32aee38339f7ec19004c98ebf3a052c3a859e9fae354ea9493deac0569071100"
+  },
+  {
+    "name": "composer",
+    "width": 2048,
+    "height": 768,
+    "bytes": 2731776,
+    "sha256": "42d87f66747e33d1b7ee42e2a9fb94e851faf43ead1421bdc988b5f280d81b4f"
+  }
+]

@@ -1,4 +1,5 @@
 import { registerAhaAppearance } from "./aha/appearance-ipc";
+import type { AppearanceImages } from "./aha/appearance-images";
 import { showDiagnosticStartupDialog } from "./startupDiagnosticDialog";
 import { BackendIssueDetector } from "./backendIssueDetector";
 import { CuaDriverHost, sweepOrphanedCuaDrivers } from "./cuaDriverHost";
@@ -19,6 +20,7 @@ import { MODEL_SCREEN_IMAGE_MAX_DIMENSION } from "@synara/shared/modelImageBudge
 import * as ChildProcess from "node:child_process";
 import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
+import * as FSP from "node:fs/promises";
 import * as OS from "node:os";
 import * as Path from "node:path";
 // Electron-only builtin that sees app.asar as a real file instead of a virtual
@@ -2040,6 +2042,7 @@ function resolveNotificationIconPath(): string | null {
   if (process.platform === "darwin") {
     return null;
   }
+  if (activeSkinIconPath) return activeSkinIconPath;
   if (process.platform === "win32") {
     return resolveResourcePath("synara.png") ?? resolveIconPath("ico");
   }
@@ -2286,6 +2289,8 @@ function showDesktopNotification(input: {
  * package.json. We override it to a clean lowercase Synara name.
  */
 function resolveUserDataPath(): string {
+  // An explicit Aha home isolates both backend state and Electron's browser/profile data.
+  if (process.env.AHA_HOME?.trim()) return Path.join(BASE_DIR, "electron-profile");
   const appDataBase = resolveDesktopAppDataBase();
   return resolveDesktopUserDataPath({
     appDataBase,
@@ -2488,6 +2493,52 @@ function toWindowsTaskbarIcoBytes(sourcePath: string): Buffer {
 let windowsShellStampTimer: ReturnType<typeof setImmediate> | null = null;
 let windowsShellStampResolve: (() => void) | null = null;
 let desktopAppIconApplyTail: Promise<void> = Promise.resolve();
+let activeSkinIconPath: string | null = null;
+let ahaSkinController: ReturnType<typeof registerAhaAppearance> | null = null;
+
+async function applySkinIcon(id: string | null, images: AppearanceImages): Promise<void> {
+  let next: string | null = null;
+  if (id) {
+    const resource = await images.read(id);
+    const png = Buffer.from(resource.bytes);
+    const image = nativeImage.createFromBuffer(png);
+    if (image.isEmpty()) throw new Error("皮肤图标无法解码 / Skin icon cannot be decoded.");
+    const directory = Path.join(STATE_DIR, "skin-icons");
+    await FSP.mkdir(directory, { recursive: true });
+    if (process.platform === "win32") {
+      const square = image.resize({ width: 256, height: 256 }).toPNG();
+      const header = Buffer.alloc(22);
+      header.writeUInt16LE(1, 2);
+      header.writeUInt16LE(1, 4);
+      header.writeUInt16LE(1, 10);
+      header.writeUInt16LE(32, 12);
+      header.writeUInt32LE(square.length, 14);
+      header.writeUInt32LE(22, 18);
+      next = Path.join(directory, `${id}.ico`);
+      await FSP.writeFile(next, Buffer.concat([header, square]));
+    } else {
+      next = Path.join(directory, `${id}.png`);
+      await FSP.writeFile(next, png);
+    }
+  }
+  const before = activeSkinIconPath;
+  activeSkinIconPath = next;
+  try {
+    await applyDesktopAppIcon("default", mainWindow, { flushShellIconCache: true });
+  } catch (error) {
+    activeSkinIconPath = before;
+    try {
+      await applyDesktopAppIcon("default", mainWindow, { flushShellIconCache: true });
+    } catch (rollback) {
+      throw new AggregateError(
+        [error, rollback],
+        "皮肤图标应用和恢复失败 / Icon apply and rollback failed.",
+        { cause: rollback },
+      );
+    }
+    throw error;
+  }
+}
 
 async function syncMacAppBundleIcon(image: Electron.NativeImage | null): Promise<void> {
   // Do not customize the shared Electron executable used by development runs.
@@ -2609,7 +2660,7 @@ async function applyDesktopAppIconUnlocked(
     isDarkAppearance: process.platform === "darwin" && nativeTheme.shouldUseDarkColors,
     isBetaFlavor: false,
   });
-  const iconPath = resolveResourcePath(resourceName);
+  const iconPath = activeSkinIconPath ?? resolveResourcePath(resourceName);
   if (!iconPath) throw new Error(`Aha app icon resource is missing: ${resourceName}`);
 
   const image = nativeImage.createFromPath(iconPath);
@@ -4955,11 +5006,33 @@ function requestGracefulAppQuit(reason: string): void {
 }
 
 function registerIpcHandlers(): void {
-  registerAhaAppearance(
+  ahaSkinController = registerAhaAppearance(
     STATE_DIR,
     () => mainWindow,
-    () => resolveResourcePath("aha/elation/manifest.json"),
+    (id) =>
+      resolveResourcePath(
+        id === "aha-elation" ? "aha/elation/manifest.json" : "aha/furina/manifest.json",
+      ),
+    {
+      builtinDirectory: (id) => {
+        const resource =
+          id === "aha-elation"
+            ? "aha/elation/manifest.json"
+            : id === "furina-chanson"
+              ? "aha/furina/manifest.json"
+              : null;
+        const manifest = resource ? resolveResourcePath(resource) : null;
+        return manifest ? Path.dirname(manifest) : null;
+      },
+      defaultIcon: () => resolveResourcePath("icon.png"),
+      applyIcon: applySkinIcon,
+    },
   );
+  void ahaSkinController.ready
+    .then(() => ahaSkinController!.reapplyIcon())
+    .catch((error) => {
+      safeConsoleError("[desktop] Failed to restore active Aha skin icon", error);
+    });
   const storageSnapshotPath = resolveSynaraStorageSnapshotPath(app.getPath("userData"));
 
   ipcMain.removeAllListeners(IPC.betaDiagnostics.enabled);

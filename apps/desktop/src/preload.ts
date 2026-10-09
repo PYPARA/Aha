@@ -131,6 +131,24 @@ function recordBrowserActivity(activity: DesktopDiagnosticActivity): void {
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   ahaAppearance: {
+    skins: {
+      list: (input) => ipcRenderer.invoke(AHA.skinsList, input),
+      preview: (id) => ipcRenderer.invoke(AHA.skinsPreview, id),
+      importPackage: () => ipcRenderer.invoke(AHA.skinsImport),
+      importDirectory: () => ipcRenderer.invoke(AHA.skinsDirectory),
+      apply: (input) => ipcRenderer.invoke(AHA.skinsApply, input),
+      rename: (input) => ipcRenderer.invoke(AHA.skinsRename, input),
+      remove: (input) => ipcRenderer.invoke(AHA.skinsRemove, input),
+      importIcon: () => ipcRenderer.invoke(AHA.skinsIcon),
+      exportPackage: () => ipcRenderer.invoke(AHA.skinsExport),
+      reapplyIcon: () => ipcRenderer.invoke(AHA.skinsReapply),
+      onChanged: (listener) => {
+        const handler = (_event: unknown, snapshot: Parameters<typeof listener>[0]) =>
+          listener(snapshot);
+        ipcRenderer.on(AHA.skinsChanged, handler);
+        return () => ipcRenderer.removeListener(AHA.skinsChanged, handler);
+      },
+    },
     get: () => ipcRenderer.invoke(AHA.get),
     save: (input) => ipcRenderer.invoke(AHA.save, input),
     importImage: () => ipcRenderer.invoke(AHA.imageImport),

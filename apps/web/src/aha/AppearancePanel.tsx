@@ -3,7 +3,13 @@ import type { AhaAppearance, AhaThemePreview } from "@synara/contracts/ahaAppear
 import { defaultAhaAppearance } from "@synara/contracts/ahaAppearance";
 import { REGIONS, type BackgroundRegion } from "@synara/contracts/ahaLegacyAppearance";
 import { useAhaAppearance } from "./AppearanceProvider";
-import { useTheme, applyAhaThemeState, previewAhaThemeState } from "../hooks/useTheme";
+import {
+  useTheme,
+  applyAhaThemeState,
+  previewAhaThemeState,
+  beginAhaThemePreview,
+  cancelAhaThemePreview,
+} from "../hooks/useTheme";
 import { serializeThemeState } from "../theme/theme.logic";
 import { useAppSettings } from "../appSettings";
 import { SettingsRow, SettingsSection } from "../components/settings/SettingsPanelPrimitives";
@@ -11,6 +17,9 @@ import { SettingsSelectControl } from "../components/settings/SettingControls";
 import { SelectItem } from "../components/ui/select";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
+import { Input } from "../components/ui/input";
+import type { SkinPreview } from "@synara/contracts/ahaSkins";
+import { skinName, skinPaletteFromTheme, themeWithSkinPalette } from "./skin-colors";
 
 const labels = {
   window: ["窗口", "Window"],
@@ -20,7 +29,16 @@ const labels = {
   composer: ["输入框", "Composer"],
 };
 export function AhaAppearancePanel() {
-  const { snapshot, savedPreferences, preview, save } = useAhaAppearance();
+  const {
+    snapshot,
+    savedPreferences,
+    preview,
+    save,
+    skins,
+    previewSkin,
+    refreshSkins,
+    acceptSkins,
+  } = useAhaAppearance();
   const { themeState } = useTheme();
   const { updateSettings } = useAppSettings();
   const [draft, setDraft] = useState(snapshot.preferences);
@@ -28,27 +46,58 @@ export function AhaAppearancePanel() {
   const [pendingTheme, setPendingTheme] = useState<AhaThemePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [selectedSkin, setSelectedSkin] = useState<string | null>(null);
+  const [skinPreview, setSkinPreview] = useState<SkinPreview | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const skinThemeBefore = useRef<string | null>(null);
+  const requestId = useRef(0);
   const mounted = useRef(false);
   const themeBeforePreview = useRef<string | null>(null);
   const themeToApply = useRef<string | null>(null);
   const restoreTheme = () => {
-    if (themeBeforePreview.current) previewAhaThemeState(themeBeforePreview.current);
+    cancelAhaThemePreview();
+    beginAhaThemePreview();
     themeBeforePreview.current = null;
     themeToApply.current = null;
   };
   useEffect(() => {
-    setDraft(savedPreferences);
-  }, [savedPreferences]);
+    if (!skinPreview) setDraft(savedPreferences);
+  }, [savedPreferences, skinPreview]);
   useEffect(() => {
     mounted.current = true;
+    beginAhaThemePreview();
     return () => {
       mounted.current = false;
+      // This ref is a numeric response generation, never a DOM node.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      requestId.current++;
+      previewSkin(null);
       preview(null);
-      if (themeBeforePreview.current) previewAhaThemeState(themeBeforePreview.current);
+      cancelAhaThemePreview();
     };
-  }, [preview]);
+  }, [preview, previewSkin]);
   const en = draft.language === "en";
   const t = (zh: string, english: string) => (en ? english : zh);
+  const activeSkinId = selectedSkin ?? skins?.activeId;
+  const selectedEntry = skins?.skins.find((s) => s.id === activeSkinId);
+  const loadSkin = (result: SkinPreview) => {
+    restoreTheme();
+    if (!themeBeforePreview.current) themeBeforePreview.current = serializeThemeState(themeState);
+    skinThemeBefore.current = serializeThemeState(themeState);
+    themeToApply.current = themeWithSkinPalette(themeState, result.definition.palette);
+    previewAhaThemeState(themeToApply.current);
+    setPendingTheme(null);
+    setSelectedSkin(result.id);
+    setSkinPreview(result);
+    previewSkin(result);
+    setRenameValue(skins?.skins.find((s) => s.id === result.id)?.name ?? "");
+    edit({ ...draft, backgrounds: result.definition.backgrounds, clearMode: false });
+  };
+  const selectSkin = async (id: string) => {
+    const token = ++requestId.current;
+    const result = await window.desktopBridge!.ahaAppearance!.skins!.preview(id);
+    if (mounted.current && token === requestId.current) loadSkin(result);
+  };
   const edit = (next: AhaAppearance) => {
     setDraft(next);
     preview(next);
@@ -110,32 +159,181 @@ export function AhaAppearancePanel() {
     );
   return (
     <SettingsSection title={t("Aha 背景与语言", "Aha backgrounds and language")}>
-      <SettingsRow
-        title={t("虚照·欢愉", "Xuzhao · Elation")}
-        description={t(
-          "预览星神阿哈主题的五区域背景，应用后保存。",
-          "Preview five backgrounds inspired by Aeon Aha, then apply to save.",
-        )}
-        control={
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const result =
-                  await window.desktopBridge!.ahaAppearance!.previewBuiltin("aha-elation");
-                if (!mounted.current) return;
-                restoreTheme();
-                setPendingTheme(null);
-                edit({ ...draft, backgrounds: result.preferences.backgrounds, clearMode: false });
-              })
+      {skins ? (
+        <>
+          <SettingsRow
+            title={t("皮肤库", "Skin library")}
+            description={t(
+              "切换图标、五区域背景和配色；预览后点击应用。",
+              "Switch icons, five backgrounds and colors. Preview, then apply.",
+            )}
+            control={
+              <SettingsSelectControl
+                value={activeSkinId ?? ""}
+                disabled={busy}
+                valueContent={
+                  selectedEntry
+                    ? skinName(selectedEntry.id, selectedEntry.name, en)
+                    : t("选择皮肤", "Choose skin")
+                }
+                ariaLabel="Skin library"
+                onValueChange={(id) => {
+                  if (id) void run(() => selectSkin(id));
+                }}
+              >
+                {skins.skins.map((entry) => (
+                  <SelectItem key={entry.id} value={entry.id}>
+                    {skinName(entry.id, entry.name, en)}
+                  </SelectItem>
+                ))}
+              </SettingsSelectControl>
             }
-          >
-            {t("预览背景", "Preview backgrounds")}
-          </Button>
-        }
-      />
+          />
+          <SettingsRow
+            title={t("皮肤操作", "Skin actions")}
+            control={
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void run(() => selectSkin(activeSkinId!))}
+                >
+                  {t("预览皮肤", "Preview skin")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    if (!selectedEntry) return;
+                    void run(async () => {
+                      const validated = await window.desktopBridge!.ahaAppearance!.skins!.preview(
+                        selectedEntry.id,
+                      );
+                      if (mounted.current)
+                        loadSkin({
+                          ...validated,
+                          definition: selectedEntry.original,
+                          effectiveIconId: selectedEntry.original.iconId ?? skins.effectiveIconId,
+                        });
+                    });
+                  }}
+                >
+                  {t("恢复此皮肤默认", "Reset skin defaults")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      const result = await window.desktopBridge!.ahaAppearance!.skins!.importIcon();
+                      if (!result || !mounted.current) return;
+                      const base =
+                        skinPreview ??
+                        (await window.desktopBridge!.ahaAppearance!.skins!.preview(activeSkinId!));
+                      loadSkin({
+                        ...base,
+                        definition: {
+                          ...base.definition,
+                          backgrounds: draft.backgrounds,
+                          palette: skinPaletteFromTheme(themeState),
+                          iconId: result.id,
+                        },
+                        effectiveIconId: result.id,
+                      });
+                    })
+                  }
+                >
+                  {t("选择皮肤图标", "Choose skin icon")}
+                </Button>
+              </div>
+            }
+          />
+          {selectedEntry?.origin !== "builtin" && (
+            <SettingsRow
+              title={t("管理皮肤", "Manage skin")}
+              control={
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    aria-label="Skin name"
+                    value={renameValue}
+                    placeholder={selectedEntry?.name}
+                    maxLength={80}
+                    onChange={(event) => setRenameValue(event.target.value)}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || !renameValue.trim()}
+                    onClick={() =>
+                      void run(async () => {
+                        const value = await window.desktopBridge!.ahaAppearance!.skins!.rename({
+                          id: activeSkinId!,
+                          name: renameValue,
+                          revision: skins.revision,
+                        });
+                        acceptSkins(value);
+                      })
+                    }
+                  >
+                    {t("重命名", "Rename")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || activeSkinId === skins.activeId}
+                    onClick={() =>
+                      void run(async () => {
+                        const value = await window.desktopBridge!.ahaAppearance!.skins!.remove({
+                          id: activeSkinId!,
+                          revision: skins.revision,
+                        });
+                        acceptSkins(value);
+                        setSelectedSkin(null);
+                        setSkinPreview(null);
+                        previewSkin(null);
+                        preview(null);
+                        restoreTheme();
+                      })
+                    }
+                  >
+                    {t("删除皮肤", "Delete skin")}
+                  </Button>
+                </div>
+              }
+            />
+          )}
+        </>
+      ) : (
+        <SettingsRow
+          title={t("虚照·欢愉", "Xuzhao · Elation")}
+          description={t(
+            "预览星神阿哈主题的五区域背景，应用后保存。",
+            "Preview five backgrounds inspired by Aeon Aha, then apply to save.",
+          )}
+          control={
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const result =
+                    await window.desktopBridge!.ahaAppearance!.previewBuiltin("aha-elation");
+                  if (!mounted.current) return;
+                  restoreTheme();
+                  setPendingTheme(null);
+                  edit({ ...draft, backgrounds: result.preferences.backgrounds, clearMode: false });
+                })
+              }
+            >
+              {t("预览背景", "Preview backgrounds")}
+            </Button>
+          }
+        />
+      )}
       <SettingsRow
         title={t("界面语言", "Language")}
         description={t(
@@ -326,8 +524,41 @@ export function AhaAppearancePanel() {
           disabled={busy}
           onClick={() =>
             void run(async () => {
+              if (skins && window.desktopBridge!.ahaAppearance!.skins) {
+                const base =
+                  skinPreview ??
+                  (await window.desktopBridge!.ahaAppearance!.skins!.preview(activeSkinId!));
+                const themeChanged =
+                  skinThemeBefore.current !== null &&
+                  serializeThemeState(themeState) !== skinThemeBefore.current;
+                const definition = {
+                  ...base.definition,
+                  backgrounds: draft.backgrounds,
+                  palette:
+                    !skinPreview || themeChanged
+                      ? skinPaletteFromTheme(themeState)
+                      : base.definition.palette,
+                };
+                const value = await window.desktopBridge!.ahaAppearance!.skins!.apply({
+                  id: base.id,
+                  revision: skins.revision,
+                  preferences: draft,
+                  definition,
+                });
+                acceptSkins(value);
+                preview(null);
+                previewSkin(null);
+                setSkinPreview(null);
+                applyAhaThemeState(themeWithSkinPalette(themeState, value.palette));
+                beginAhaThemePreview();
+                themeBeforePreview.current = null;
+                themeToApply.current = null;
+                skinThemeBefore.current = null;
+                return;
+              }
               await save(draft);
               if (themeToApply.current) applyAhaThemeState(themeToApply.current);
+              beginAhaThemePreview();
               if (pendingTheme?.uiSize) updateSettings({ chatFontSizePx: pendingTheme.uiSize });
               themeBeforePreview.current = null;
               themeToApply.current = null;
@@ -343,6 +574,11 @@ export function AhaAppearancePanel() {
           disabled={busy}
           onClick={() =>
             void run(async () => {
+              requestId.current++;
+              setSelectedSkin(null);
+              setSkinPreview(null);
+              previewSkin(null);
+              skinThemeBefore.current = null;
               const value = await window.desktopBridge!.ahaAppearance!.get();
               setDraft(value.preferences);
               preview(null);
@@ -359,12 +595,18 @@ export function AhaAppearancePanel() {
           disabled={busy}
           onClick={() =>
             void run(async () => {
+              if (window.desktopBridge!.ahaAppearance!.skins) {
+                const result = await window.desktopBridge!.ahaAppearance!.skins!.importPackage();
+                await refreshSkins();
+                if (result && mounted.current) loadSkin(result);
+                return;
+              }
               const result = await window.desktopBridge!.ahaAppearance!.previewPackage();
               if (result) loadPreview(result);
             })
           }
         >
-          {t("导入主题包", "Import theme package")}
+          {skins ? t("导入皮肤包", "Import skin package") : t("导入主题包", "Import theme package")}
         </Button>
         <Button
           size="sm"
@@ -372,6 +614,12 @@ export function AhaAppearancePanel() {
           disabled={busy}
           onClick={() =>
             void run(async () => {
+              if (window.desktopBridge!.ahaAppearance!.skins) {
+                const result = await window.desktopBridge!.ahaAppearance!.skins!.importDirectory();
+                await refreshSkins();
+                if (result && mounted.current) loadSkin(result);
+                return;
+              }
               const result = await window.desktopBridge!.ahaAppearance!.previewDirectory();
               if (result) loadPreview(result);
             })
@@ -385,19 +633,37 @@ export function AhaAppearancePanel() {
           disabled={busy}
           onClick={() =>
             void run(async () => {
+              if (window.desktopBridge!.ahaAppearance!.skins) {
+                await window.desktopBridge!.ahaAppearance!.skins!.exportPackage();
+                return;
+              }
               await window.desktopBridge!.ahaAppearance!.exportPackage({
                 nativeTheme: serializeThemeState(themeState),
               });
             })
           }
         >
-          {t("导出主题包", "Export theme package")}
+          {skins ? t("导出皮肤包", "Export skin package") : t("导出主题包", "Export theme package")}
         </Button>
         <Button
           size="sm"
           variant="ghost"
           disabled={busy}
           onClick={() => {
+            if (skins && selectedEntry) {
+              void run(async () => {
+                const base = await window.desktopBridge!.ahaAppearance!.skins!.preview(
+                  selectedEntry.id,
+                );
+                if (mounted.current)
+                  loadSkin({
+                    ...base,
+                    definition: selectedEntry.original,
+                    effectiveIconId: selectedEntry.original.iconId ?? skins.effectiveIconId,
+                  });
+              });
+              return;
+            }
             restoreTheme();
             setPendingTheme(null);
             edit(defaultAhaAppearance());

@@ -41,6 +41,7 @@ type ThemeSnapshot = {
 };
 
 const STORAGE_KEY = "synara:theme";
+let ahaThemePreviewState: ThemeState | null = null;
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 let listeners: Array<() => void> = [];
@@ -93,7 +94,7 @@ function writeStoredThemeState(state: ThemeState) {
 }
 
 function computeSnapshot(): ThemeSnapshot {
-  const state = readStoredThemeState();
+  const state = ahaThemePreviewState ?? readStoredThemeState();
   const systemDark = state.mode === "system" ? getSystemDark() : false;
   return { state, systemDark, desktopBlurUnavailable };
 }
@@ -119,8 +120,24 @@ function getSnapshot(): ThemeSnapshot {
 }
 
 function updateStoredThemeState(update: (state: ThemeState) => ThemeState) {
-  const nextState = update(readStoredThemeState());
-  writeStoredThemeState(nextState);
+  const stored = readStoredThemeState();
+  const nextState = update(ahaThemePreviewState ?? stored);
+  if (ahaThemePreviewState) {
+    const persisted = structuredClone(nextState);
+    for (const variant of ["dark", "light"] as const) {
+      const { surface, ink, accent, contrast, semanticColors } = stored.chromeThemes[variant];
+      persisted.chromeThemes[variant] = {
+        ...persisted.chromeThemes[variant],
+        surface,
+        ink,
+        accent,
+        contrast,
+        semanticColors,
+      };
+    }
+    writeStoredThemeState(persisted);
+    ahaThemePreviewState = nextState;
+  } else writeStoredThemeState(nextState);
   applyThemeState(nextState, true);
   emitChange();
 }
@@ -134,7 +151,7 @@ function subscribe(listener: () => void): () => void {
 
   const mediaQuery = window.matchMedia(MEDIA_QUERY);
   const handleMediaChange = () => {
-    const state = readStoredThemeState();
+    const state = ahaThemePreviewState ?? readStoredThemeState();
     if (state.mode === "system") {
       applyThemeState(state, true);
     }
@@ -144,7 +161,7 @@ function subscribe(listener: () => void): () => void {
     if (event.key !== STORAGE_KEY) {
       return;
     }
-    applyThemeState(readStoredThemeState(), true);
+    applyThemeState(ahaThemePreviewState ?? readStoredThemeState(), true);
     emitChange();
   };
 
@@ -311,11 +328,24 @@ function setCodeThemeId(variant: ThemeVariant, codeThemeId: string) {
 }
 
 export function previewAhaThemeState(serialized: string) {
-  applyThemeState(parseStoredThemeState(serialized), true);
+  ahaThemePreviewState = parseStoredThemeState(serialized);
+  applyThemeState(ahaThemePreviewState, true);
+  emitChange();
+}
+
+export function beginAhaThemePreview() {
+  if (!ahaThemePreviewState) previewAhaThemeState(serializeThemeState(readStoredThemeState()));
+}
+
+export function cancelAhaThemePreview() {
+  ahaThemePreviewState = null;
+  applyThemeState(readStoredThemeState(), true);
+  emitChange();
 }
 
 export function applyAhaThemeState(serialized: string) {
   const state = parseStoredThemeState(serialized);
+  ahaThemePreviewState = null;
   updateStoredThemeState(() => state);
 }
 

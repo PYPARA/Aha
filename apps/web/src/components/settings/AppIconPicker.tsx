@@ -6,7 +6,7 @@ import { useState } from "react";
 
 import type { DesktopAppIcon } from "@synara/contracts";
 import type { SynaraDesktopFlavor } from "@synara/shared/desktopIdentity";
-import { useAhaTranslation } from "~/aha/AppearanceProvider";
+import { useAhaTranslation, useAhaAppearance } from "~/aha/AppearanceProvider";
 import { Spinner } from "~/components/ui/spinner";
 import { cn } from "~/lib/utils";
 
@@ -30,6 +30,7 @@ export function AppIconPicker({
 }) {
   const [pendingIcon, setPendingIcon] = useState<DesktopAppIcon | null>(null);
   const tr = useAhaTranslation();
+  const { iconUrl, skins } = useAhaAppearance();
   const busy = pendingIcon !== null;
 
   return (
@@ -40,7 +41,7 @@ export function AppIconPicker({
       aria-busy={busy}
     >
       {desktopAppIconsForPlatform(platform).map((icon) => {
-        const label = tr("Aha · Xuzhao · Elation");
+        const label = skins ? tr("Current skin icon") : tr("Aha · Xuzhao · Elation");
         // Saved upstream tokens are compatibility aliases for the single Aha artwork.
         const selected = value === icon || value === "icon" || value === "dark" || value === "beta";
         const applying = pendingIcon === icon;
@@ -67,7 +68,9 @@ export function AppIconPicker({
               setPendingIcon(icon);
               void (async () => {
                 try {
-                  await onValueChange(icon);
+                  if (window.desktopBridge?.ahaAppearance?.skins)
+                    await window.desktopBridge.ahaAppearance.skins.reapplyIcon();
+                  else await onValueChange(icon);
                 } catch {
                   // Native preference synchronization owns rollback. The picker
                   // only owns its transient loading state.
@@ -78,7 +81,7 @@ export function AppIconPicker({
             }}
           >
             <img
-              src="/aha-logo.png"
+              src={iconUrl}
               alt=""
               draggable={false}
               className={cn("size-10 object-contain", applying && "opacity-40")}

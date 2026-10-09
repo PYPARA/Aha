@@ -1,4 +1,4 @@
-import { useAhaTranslation } from "../aha/AppearanceProvider";
+import { useAhaAppearance, useAhaTranslation } from "../aha/AppearanceProvider";
 import { AhaAppearancePanel } from "../aha/AppearancePanel";
 // FILE: _chat.settings.tsx
 // Purpose: Render the dedicated settings experience with its own section sidebar and grouped panels.
@@ -331,6 +331,8 @@ type BooleanSettingKey = {
 
 function SettingsRouteView() {
   const tr = useAhaTranslation();
+  const { skins, restoreDefaultSkin } = useAhaAppearance();
+  const [restoringAppearance, setRestoringAppearance] = useState(false);
   const routeSearch = useSearch({ strict: false }) as Record<string, unknown>;
   const activeSection = normalizeSettingsSection(routeSearch.section);
   const settingsTarget = typeof routeSearch.target === "string" ? routeSearch.target : null;
@@ -584,6 +586,24 @@ function SettingsRouteView() {
   ];
 
   async function restoreDefaults() {
+    if (activeSection === "appearance" && skins) {
+      if (restoringAppearance) return;
+      setRestoringAppearance(true);
+      setResetEpoch((current) => current + 1);
+      try {
+        await restoreDefaultSkin();
+        setResetEpoch((current) => current + 1);
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: tr("Could not restore default appearance"),
+          description: String(error),
+        });
+      } finally {
+        setRestoringAppearance(false);
+      }
+      return;
+    }
     if (changedSettingLabels.length === 0) return;
 
     const api = readNativeApi();
@@ -971,7 +991,7 @@ function SettingsRouteView() {
 
   const renderAppearancePanel = () => (
     <div className="space-y-6">
-      <AhaAppearancePanel />
+      <AhaAppearancePanel key={resetEpoch} />
       <SettingsSectionShell
         title={tr("Theme")}
         action={
@@ -1706,7 +1726,16 @@ function SettingsRouteView() {
                       size="xs"
                       variant="outline"
                       className="shrink-0"
-                      disabled={changedSettingLabels.length === 0}
+                      disabled={
+                        restoringAppearance ||
+                        (!(activeSection === "appearance" && skins) &&
+                          changedSettingLabels.length === 0)
+                      }
+                      title={
+                        activeSection === "appearance" && skins
+                          ? tr("Restore the default style without backgrounds")
+                          : undefined
+                      }
                       onClick={() => void restoreDefaults()}
                     >
                       <ResetIcon className="size-3.5" />
