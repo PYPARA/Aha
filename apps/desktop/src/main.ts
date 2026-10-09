@@ -2322,7 +2322,7 @@ function configureAppIdentity(): void {
   app.setAboutPanelOptions({
     applicationName: APP_DISPLAY_NAME,
     applicationVersion: app.getVersion(),
-    version: `Aha · Synara v1.0.1-beta.2 / ${commitHash ?? "f176e89"}`,
+    version: `Aha · Synara v1.0.1 / f44ce959 · ${commitHash ?? "working-tree"}`,
     copyright: `© ${new Date().getFullYear()} Emanuele Di Pietro`,
   });
 
@@ -2340,13 +2340,10 @@ function usesLegacyMacDockIcon(): boolean {
 }
 
 function readDesktopAppIcon(): DesktopAppIcon {
-  const requestedFallback = desktopFlavor === "beta" ? "beta" : "default";
-  const fallbackIcon = isDesktopAppIcon(requestedFallback) ? requestedFallback : "default";
   return readDesktopAppIconPreference(DESKTOP_APP_ICON_PATH, {
-    fallbackIcon,
-    // Stable leaves a Beta choice inert. Builds without the Beta icon retain
-    // the token too, so returning to a build that supports it restores it.
-    inactiveIcons: desktopFlavor === "beta" && isDesktopAppIcon("beta") ? [] : ["beta"],
+    fallbackIcon: "default",
+    // Preserve old tokens on disk while displaying only the approved Aha artwork.
+    inactiveIcons: ["icon", "dark", "beta"],
     onResetError: (error) => {
       safeConsoleError("[desktop] Failed to reset unrecognized app icon preference", error);
     },
@@ -2595,6 +2592,8 @@ async function applyDesktopAppIconUnlocked(
       platform: process.platform,
       usesLegacyDockIcon: usesLegacyMacDockIcon(),
       isBetaFlavor: desktopFlavor === "beta",
+      // Aha ships flat ICNS/PNG artwork; never reload an old live bundle icon.
+      hasIconComposerAsset: false,
     })
   ) {
     // Remove the persistent override before asking AppKit to reload the bundle
@@ -2608,13 +2607,13 @@ async function applyDesktopAppIconUnlocked(
     icon,
     platform: process.platform,
     isDarkAppearance: process.platform === "darwin" && nativeTheme.shouldUseDarkColors,
-    isBetaFlavor: desktopFlavor === "beta",
+    isBetaFlavor: false,
   });
   const iconPath = resolveResourcePath(resourceName);
-  if (!iconPath) return;
+  if (!iconPath) throw new Error(`Aha app icon resource is missing: ${resourceName}`);
 
   const image = nativeImage.createFromPath(iconPath);
-  if (image.isEmpty()) return;
+  if (image.isEmpty()) throw new Error(`Aha app icon resource cannot be decoded: ${resourceName}`);
 
   if (process.platform === "darwin") {
     app.dock?.setIcon(image);
@@ -2701,9 +2700,8 @@ function registerMacAppearanceIconSync(): void {
   if (process.platform !== "darwin") {
     return;
   }
-  // macOS does not swap a runtime dock image when the system appearance
-  // changes, so re-apply the persisted preference. On macOS 26, Stable's
-  // Default and Beta's Beta choices use the bundle icon, which adapts on its own.
+  // Re-apply Aha's runtime PNG when the system appearance changes. Aha does
+  // not use the upstream appearance-aware Icon Composer bundle artwork.
   nativeTheme.on("updated", () => {
     void applyPersistedDesktopAppIcon().catch((error) => {
       safeConsoleError("[desktop] Failed to persist the macOS app icon", error);
@@ -5092,8 +5090,9 @@ function registerIpcHandlers(): void {
     await applyDesktopAppIcon(icon, mainWindow, { flushShellIconCache: true });
   });
   ipcMain.handle(IPC.setAppIcon, async (_event, rawIcon: unknown) => {
-    if (!isDesktopAppIcon(rawIcon) || (rawIcon === "beta" && desktopFlavor !== "beta")) return;
-    await enqueueDesktopAppIconApply(rawIcon);
+    if (!isDesktopAppIcon(rawIcon)) return;
+    // Keep the upstream IPC tokens accepted, but retired choices all apply Aha.
+    await enqueueDesktopAppIconApply("default");
   });
 
   ipcMain.removeHandler(IPC.contextMenu);

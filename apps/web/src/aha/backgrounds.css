@@ -1,0 +1,89 @@
+/* Extension layers do not participate in transcript or editor measurement. */
+[data-aha-region] {
+  position: relative;
+  isolation: isolate;
+}
+[data-aha-region]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgb(0 0 0 / var(--aha-region-overlay)), rgb(0 0 0 / var(--aha-region-overlay))),
+    var(--aha-region-image);
+  background-size: var(--aha-region-fit);
+  background-position: var(--aha-region-position);
+  background-repeat: no-repeat;
+  opacity: var(--aha-region-opacity);
+  filter: blur(var(--aha-region-blur));
+  border-radius: inherit;
+}
+[data-aha-region="window"] {
+  --aha-region-image: var(--aha-window-image);
+  --aha-region-opacity: var(--aha-window-opacity);
+  --aha-region-overlay: var(--aha-window-overlay);
+  --aha-region-blur: var(--aha-window-blur);
+  --aha-region-fit: var(--aha-window-fit);
+  --aha-region-position: var(--aha-window-position);
+}
+[data-aha-region="rail"] {
+  --aha-region-image: var(--aha-rail-image);
+  --aha-region-opacity: var(--aha-rail-opacity);
+  --aha-region-overlay: var(--aha-rail-overlay);
+  --aha-region-blur: var(--aha-rail-blur);
+  --aha-region-fit: var(--aha-rail-fit);
+  --aha-region-position: var(--aha-rail-position);
+}
+[data-aha-region="sidebar"] {
+  --aha-region-image: var(--aha-sidebar-image);
+  --aha-region-opacity: var(--aha-sidebar-opacity);
+  --aha-region-overlay: var(--aha-sidebar-overlay);
+  --aha-region-blur: var(--aha-sidebar-blur);
+  --aha-region-fit: var(--aha-sidebar-fit);
+  --aha-region-position: var(--aha-sidebar-position);
+}
+[data-aha-region="content"] {
+  --aha-region-image: var(--aha-content-image);
+  --aha-region-opacity: var(--aha-content-opacity);
+  --aha-region-overlay: var(--aha-content-overlay);
+  --aha-region-blur: var(--aha-content-blur);
+  --aha-region-fit: var(--aha-content-fit);
+  --aha-region-position: var(--aha-content-position);
+}
+[data-aha-region="composer"] {
+  --aha-region-image: var(--aha-composer-image);
+  --aha-region-opacity: var(--aha-composer-opacity);
+  --aha-region-overlay: var(--aha-composer-overlay);
+  --aha-region-blur: var(--aha-composer-blur);
+  --aha-region-fit: var(--aha-composer-fit);
+  --aha-region-position: var(--aha-composer-position);
+}
+html[data-aha-content="image"] .chat-content-card {
+  background: transparent;
+}
+html[data-aha-composer="image"] [data-aha-region="composer"] {
+  background: transparent;
+}
+html[data-aha-sidebar="image"] [data-slot="sidebar-inner"] {
+  background: transparent;
+}
+body {
+  font-weight: var(--aha-ui-weight, 400);
+}
+.chat-markdown {
+  font-weight: var(--aha-content-weight, 400);
+}
+pre,
+code {
+  font-weight: var(--aha-code-weight, 400);
+}
+
+html[data-aha-composer="image"] [data-aha-region="composer"] .chat-composer-shell {
+  background: transparent;
+}
+
+.chat-markdown pre,
+.chat-markdown code {
+  font-size: var(--aha-code-size, var(--app-font-size-chat-code));
+}

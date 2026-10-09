@@ -2,7 +2,7 @@
 // Purpose: Beta-only diagnostics queue for Synara Beta desktop builds.
 // Layer: Desktop telemetry (runs only when the baked build flavor is "beta").
 //
-// Privacy contract (also documented in docs/diagnostics.md):
+// Privacy contract:
 // - Only the fixed event names and payload fields declared in BetaDiagnosticsEvent
 //   are ever written. There is no generic "metadata" bag.
 // - Free-text fields (error message, stack, log tail) are capped and passed

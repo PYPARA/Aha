@@ -34,8 +34,7 @@
     "prepare": "effect-language-service patch",
     "typecheck": "node ../../node_modules/@typescript/native/bin/tsc --noEmit",
     "typecheck:native": "bun run typecheck",
-    "typecheck:legacy": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck:legacy": "tsc --noEmit"
   },
   "dependencies": {
     "effect": "catalog:",
@@ -43,9 +42,7 @@
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
-    "@effect/vitest": "catalog:",
     "tsdown": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "catalog:"
   }
 }

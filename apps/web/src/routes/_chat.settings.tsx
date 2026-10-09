@@ -1007,7 +1007,7 @@ function SettingsRouteView() {
         <SettingsSection title="App">
           <SettingsRow
             title={tr("App icon")}
-            description={tr("Choose the icon Synara uses in the dock or taskbar.")}
+            description={tr("Use the Aha icon in the dock or taskbar. Click to apply again.")}
             resetAction={
               settings.desktopAppIcon !== defaultDesktopAppIcon ? (
                 <SettingResetButton

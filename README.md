@@ -1,163 +1,48 @@
-<div align="center">
-  <img src="./assets/prod/logo.svg" width="112" alt="Synara logo">
-  <h1>Synara</h1>
-  <p><strong>A focused workspace for coding agents.</strong><br>
-  Projects, provider sessions, execution surfaces, and review tools in one local-first desktop application.</p>
-  <p>
-    <a href="https://github.com/Emanuele-web04/synara/releases/latest">Download</a>
-    &nbsp;·&nbsp;
-    <a href="https://www.trysynara.com/">Website</a>
-    &nbsp;·&nbsp;
-    <a href="https://www.trysynara.com/docs">Documentation</a>
-    &nbsp;·&nbsp;
-    <a href="./docs/external-mcp.md">MCP integration</a>
-    &nbsp;·&nbsp;
-    <a href="https://github.com/Emanuele-web04/synara/issues/new/choose">Report an issue</a>
-  </p>
-</div>
+# Aha
 
-<p align="center">
-  <img src="./assets/prod/readme-workspace-light.png" width="1200" alt="Synara workspace with an agent conversation and pull request review side by side">
-</p>
+<img src="apps/web/public/aha-logo.png" alt="Aha 图标" width="96" />
 
-<details open>
-  <summary><strong>Table of contents</strong></summary>
+Aha 是基于 [Synara](https://github.com/Emanuele-web04/synara) 二次开发的本地编程 Agent 工作台，将项目、对话、供应商会话和开发工具放在一个桌面应用中。当前源码基线为 Synara **v1.0.1**。
 
-| Workspace layer      | Responsibility                                                |
-| -------------------- | ------------------------------------------------------------- |
-| **Project**          | Repository context, settings, and related work.               |
-| **Thread**           | Task-specific conversation, state, files, and history.        |
-| **Provider session** | The authenticated coding-agent runtime executing the task.    |
-| **Workspace tools**  | Changes, terminal, browser, files, editor, previews, and Git. |
+## 可以做什么
 
-> [!NOTE]
-> Synara is early-stage software. APIs and interface details remain under active development.
+- 管理项目与对话，选择供应商和模型，查看代码变更、文件、编辑器与 Git。
+- 在任务中使用终端和浏览器，管理 Tasks、Hubs、工作树、供应商切换与自动化。
+- 使用核心中文/英文界面，调整字体、字号、字重、主题与材质；部分界面仍保留英文。
+- 自定义窗口、功能栏、侧栏、内容区和输入区的背景，使用清晰模式、主题包和内置「虚照 · 欢愉」套装。
 
-## Capabilities
+## 运行
 
-### 1. Projects, threads, and context
+需要 Bun **1.4.2** 和 Node.js **24.13.1**。在仓库根目录执行：
 
-Organize work around projects and threads. Projects define the workspace; threads preserve the task-specific conversation, state, files, and history.
-
-- Project-aware navigation and conversations
-- Provider and model selection per task
-- Thread history, status, recaps, notes, and side chats
-- Search and quick access across active work
-
-### 2. Integrated workspace tools
-
-The tools surrounding an agent session remain available from the same task surface, keeping execution and review connected.
-
-| Surface            | Purpose                                                                                           |
-| ------------------ | ------------------------------------------------------------------------------------------------- |
-| **Changes**        | Inspect diffs, changed files, and review state.                                                   |
-| **Terminal**       | Run commands in the project environment.                                                          |
-| **Browser**        | Keep local previews next to the thread and let agents use semantic or page-declared WebMCP tools. |
-| **Files / Editor** | Browse, inspect, and edit project files in context.                                               |
-| **Git**            | Work with branches, commits, pushes, and pull requests.                                           |
-
-### 3. Split views and previews
-
-Keep an active conversation alongside the surface it is changing. Split views, browser previews, and device previews make the result part of the working context.
-
-<p align="center">
-  <img src="./assets/prod/readme-split-view-dark.png" width="900" alt="Synara split view with an agent thread and iOS simulator preview">
-</p>
-
-### 4. Provider-native integrations
-
-Synara connects to coding-agent runtimes that are installed and authenticated locally. The current development build includes the following integrations:
-
-| Runtime         | Local integration                           |
-| --------------- | ------------------------------------------- |
-| **Codex**       | Codex CLI / app-server                      |
-| **Claude**      | Claude Code                                 |
-| **Cursor**      | Cursor agent runtime                        |
-| **Antigravity** | Antigravity CLI                             |
-| **Grok**        | Grok Build                                  |
-| **Droid**       | Factory Droid                               |
-| **OpenCode**    | OpenCode and its configured model providers |
-| **Pi**          | Pi and its configured model providers       |
-| **Devin**       | Devin CLI                                   |
-
-### 5. Isolated parallel work
-
-Managed worktrees provide a boundary for parallel changes. Handoffs preserve project context when a task needs to continue with another provider or toolchain.
-
-- Run work in a local checkout or an isolated managed worktree
-- Keep parallel threads from modifying the same checkout unintentionally
-- Hand off a task without losing its project context
-- Review the resulting diff before it leaves the workspace
-
-### 6. Automations and external MCP
-
-Automations support recurring agent runs and keep their outcomes attached to projects and threads. External MCP integrations provide scoped, user-approved access for other local clients.
-
-See [External MCP integrations](./docs/external-mcp.md) for setup, pairing, project access, and permission boundaries.
-
-### 7. Appearance and workspace preferences
-
-Configure the shell to match the way you work with light and dark themes, typography controls, density preferences, and workspace settings.
-
-<p align="center">
-  <img src="./assets/prod/readme-appearance-dark.png" width="900" alt="Synara Appearance settings with theme, typography, and density controls">
-</p>
-
-### Additional capabilities
-
-| Workflow          | Included surfaces                                               |
-| ----------------- | --------------------------------------------------------------- |
-| **Workspace**     | Local projects, chats, history, and multiple provider runtimes. |
-| **Execution**     | Terminals, browser previews, files, and editor.                 |
-| **Delivery**      | Diffs, Git actions, managed worktrees, and pull requests.       |
-| **Orchestration** | Provider handoffs, automations, and scoped external MCP.        |
-| **Development**   | Desktop shell plus focused server and web modes.                |
-
-## Installation
-
-### Desktop application
-
-Download the latest build from [GitHub Releases](https://github.com/Emanuele-web04/synara/releases) or visit [trysynara.com](https://www.trysynara.com/).
-
-Current native release targets are Windows x64, macOS Intel, macOS Apple Silicon, and Linux x64.
-
-Workspace Git features require [Git 2.29 or newer](https://github.com/git/git/blob/v2.29.0/Documentation/RelNotes/2.29.0.txt). Background refreshes preserve the FETCH_HEAD used by explicit fetch workflows. Ahead/behind counts use local refs and can update on the next status poll, up to 60 seconds after a successful background refresh; status reads do not wait for the remote.
-
-### Provider setup
-
-Synara uses the provider installations and subscriptions already configured on the local machine. Install and authenticate the runtime you intend to use before starting a session. For Codex sessions, follow the [Codex CLI setup](https://github.com/openai/codex).
-
-### Run from source
-
-The development checkout uses [Bun 1.4.2](https://bun.sh/) and [Node.js 24.13.1](https://nodejs.org/).
-
-```console
-git clone https://github.com/Emanuele-web04/synara.git
-cd synara
-bun install
-bun run dev
+```sh
+bun install --frozen-lockfile
+bun run aha:dev
 ```
 
-`bun run typecheck` checks all seven workspaces with TypeScript 7 and the native
-Effect checker. CI and each workspace's `typecheck` script use the same compiler.
-`bun run typecheck:native` remains an alias for the default check.
+源码编译和 macOS arm64 本地打包命令：
 
-The native Effect checker does not enforce every legacy rule: in particular,
-`importFromBarrel` errors are currently missed. `bun run typecheck:legacy` keeps
-the TypeScript 5 check available for explicit comparisons; it is not run by CI.
-The existing compiler also remains installed for build and declaration tools
-that require its JavaScript API. Native and legacy checks use separate caches.
+```sh
+bun run aha:build
+bun run aha:package
+```
 
-Use these named scripts rather than a bare `tsc`, whose version depends on the
-current directory. Normal installation patches the native compiler for Effect;
-the root `typecheck` command also ensures that patch is applied before checking.
+原生构建需要相应平台工具链；macOS 需要 Xcode。其他平台的构建入口在根 package.json 中。官网源码保留在 apps/marketing，可使用 `bun run dev:marketing` 单独运行。
 
-## Contributing
+## 供应商与外观
 
-Bug fixes, reliability improvements, performance work, documentation, and maintenance changes are welcome.
+先安装并认证准备使用的本地供应商运行时，再在 Aha 的设置中配置账号，在对话中选择供应商和模型。保留 Codex、Claude、OpenCode 等上游集成；可用能力取决于相应运行时、账号和权限。
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request. For a reproducible problem, [open an issue](https://github.com/Emanuele-web04/synara/issues/new/choose) with the Synara version, operating system, runtime, and relevant logs.
+背景与语言位于 **设置 → 外观 → Aha 背景与语言**。可预览背景或导入主题包，确认后应用；取消预览会恢复原外观。内置背景不会自动覆盖现有设置。应用图标使用「Aha · 虚照·欢愉」。
 
-## License
+## 数据与版本
 
-Synara is licensed under the [MIT License](./LICENSE).
+普通应用使用 `~/.aha-next`，开发入口使用仓库内 `.aha-dev`；可通过 `AHA_HOME` 指定独立目录。Aha 使用独立应用身份和 profile，关闭官方 Synara 自动更新、渠道安装和诊断上传。不会自动导入历史聊天数据。
+
+本地已有 v1.0.1 图标修复开发包，旧 beta.2 开发包也继续保留在 release/。这些是本地开发产物；本仓库未提供正式下载发布。
+
+## 来源与许可
+
+保留 Synara 的内部包名、核心实现与许可。Aha 扩展集中在品牌、独立身份、双语和外观模块。
+
+项目采用 [MIT License](LICENSE)。原生 CUA 组件保留 [CUA 许可证](licenses/CUA-LICENSE.txt) 和对应版权声明。

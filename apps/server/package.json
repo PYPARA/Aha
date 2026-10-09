@@ -22,8 +22,7 @@
     "prepare": "effect-language-service patch",
     "typecheck": "node ../../node_modules/@typescript/native/bin/tsc --noEmit --tsBuildInfoFile node_modules/.cache/typescript-native.tsbuildinfo",
     "typecheck:native": "bun run typecheck",
-    "typecheck:legacy": "tsc --noEmit",
-    "test": "vitest run --maxWorkers=1 --no-file-parallelism"
+    "typecheck:legacy": "tsc --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.2.1",
@@ -48,7 +47,6 @@
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
-    "@effect/vitest": "catalog:",
     "@synara/contracts": "workspace:*",
     "@synara/shared": "workspace:*",
     "@synara/web": "workspace:*",
@@ -56,8 +54,7 @@
     "@types/node": "catalog:",
     "@types/ws": "^8.5.13",
     "tsdown": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "catalog:"
   },
   "engines": {
     "node": "^22.19 || ^23.11 || >=24.10"

@@ -1,0 +1,55 @@
+{
+  "id": "aha-elation",
+  "backgrounds": {
+    "window": {
+      "source": "image",
+      "imageId": "51b42384697826383a93eed38f586b543979aefacc7b63f308a8a3f4849ff9c2",
+      "opacity": 0.48,
+      "overlay": 0.2,
+      "blur": 0,
+      "fit": "cover",
+      "x": 100,
+      "y": 50
+    },
+    "rail": {
+      "source": "image",
+      "imageId": "3ef1703a250e9a4a66f470d4e3f56419c034b1fba6e009e7a4aa8c35d3892699",
+      "opacity": 0.2,
+      "overlay": 0.2,
+      "blur": 0,
+      "fit": "cover",
+      "x": 50,
+      "y": 50
+    },
+    "sidebar": {
+      "source": "image",
+      "imageId": "81e68598cbded79fbbd500886f70dd8d466716bbc36bfce859df8961b4a24654",
+      "opacity": 0.23,
+      "overlay": 0.2,
+      "blur": 0,
+      "fit": "cover",
+      "x": 50,
+      "y": 50
+    },
+    "content": {
+      "source": "image",
+      "imageId": "45ef6fce2e96a7c7ec5cdb5a04e01a4f0e3cf3f3f16e6520b54ab9277ed85d7f",
+      "opacity": 0.16,
+      "overlay": 0.2,
+      "blur": 0,
+      "fit": "cover",
+      "x": 50,
+      "y": 50
+    },
+    "composer": {
+      "source": "image",
+      "imageId": "0a5badc2102ca633f44051986351cc7ea17b012f991ed89d962b6f543c88ddee",
+      "opacity": 0.18,
+      "overlay": 0.2,
+      "blur": 0,
+      "fit": "cover",
+      "x": 50,
+      "y": 50
+    }
+  }
+}

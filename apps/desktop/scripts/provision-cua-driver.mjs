@@ -371,7 +371,7 @@ try {
   provenance.platform = platform;
   await writeFile(join(destination, "provenance.json"), JSON.stringify(provenance, null, 2) + "\n");
   await copyFile(
-    fileURLToPath(new URL("../../../docs/computer-use-cua/CUA-LICENSE.txt", import.meta.url)),
+    fileURLToPath(new URL("../../../licenses/CUA-LICENSE.txt", import.meta.url)),
     join(destination, "LICENSE.txt"),
   );
   provisionSucceeded = true;

@@ -74,6 +74,7 @@ import {
 import { pinActionLabel } from "~/lib/pin";
 import { syncAnimationsToTimelineOrigin } from "~/lib/animationTimelineSync";
 import { Button } from "../ui/button";
+import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { LiveStatusSpinner } from "../ui/spinner";
 import { composerOverlayScrollFadeVars } from "./composerOverlay";
 import { CrossTaskOriginLabel, type CrossTaskOrigin } from "./CrossTaskOriginLabel";
@@ -3705,6 +3706,7 @@ function UserInputExchange(props: {
   answerTypographyStyle: CSSProperties;
   labelStyle: CSSProperties;
 }) {
+  const tr = useAhaTranslation();
   return (
     <div className="flex min-w-0 flex-col gap-2 py-0.5">
       {props.items.map((item) => (
@@ -3724,10 +3726,10 @@ function UserInputExchange(props: {
           </div>
           <div className={cn(USER_INPUT_EXCHANGE_BUBBLE_CLASS_NAME, "self-end")}>
             <p className={MUTED_LABEL_TEXT_CLASS_NAME} style={props.labelStyle}>
-              Answer
+              {tr("Answer")}
             </p>
             <p className="whitespace-pre-wrap break-words" style={props.answerTypographyStyle}>
-              {item.answer ?? "No answer"}
+              {item.answer ?? tr("No answer")}
             </p>
           </div>
         </div>

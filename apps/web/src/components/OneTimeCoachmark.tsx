@@ -9,6 +9,7 @@ import {
 import { useAnnouncementSheetSlot, useAnnouncementSheetSlotStore } from "./announcementSheetSlot";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { cn } from "~/lib/utils";
+import { useAhaTranslation } from "~/aha/AppearanceProvider";
 
 /** A remembered hint sharing the startup announcement slot with Activity and the tour. */
 export function OneTimeCoachmark({
@@ -26,6 +27,7 @@ export function OneTimeCoachmark({
   tooltipSide?: "top" | "right" | "bottom" | "left";
   children: ReactElement<ButtonHTMLAttributes<HTMLButtonElement>>;
 }) {
+  const tr = useAhaTranslation();
   const [visible, setVisible] = useState(() => {
     if (typeof window === "undefined") return false;
     try {
@@ -87,11 +89,11 @@ export function OneTimeCoachmark({
       >
         {visible ? (
           <div className="text-left">
-            <div className="text-ui leading-snug font-semibold">{title}</div>
-            <div className="mt-0.5 text-ui-sm leading-4 text-white/85">{description}</div>
+            <div className="text-ui leading-snug font-semibold">{tr(title)}</div>
+            <div className="mt-0.5 text-ui-sm leading-4 text-white/85">{tr(description)}</div>
           </div>
         ) : (
-          tooltip
+          tr(tooltip)
         )}
       </TooltipPopup>
     </Tooltip>

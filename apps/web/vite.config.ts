@@ -46,12 +46,6 @@ function centralIconPrunePlugin(): Plugin {
           path.resolve(resolvedRoot, "../../packages/contracts/src"),
           path.resolve(resolvedRoot, "../../packages/shared/src"),
         ]);
-        // MSW is used by the dev-served browser tests, never the production app.
-        await Promise.all(
-          ["", ".gz", ".br"].map((suffix) =>
-            fs.rm(path.join(resolvedOutDir, `mockServiceWorker.js${suffix}`), { force: true }),
-          ),
-        );
       },
     },
   };

@@ -79,6 +79,7 @@ interface MacBundleAppIconInput {
   readonly platform: DesktopPlatform;
   readonly usesLegacyDockIcon: boolean;
   readonly isBetaFlavor: boolean;
+  readonly hasIconComposerAsset?: boolean;
 }
 
 // macOS 26 renders the bundled Icon Composer asset with the Liquid Glass
@@ -87,7 +88,12 @@ interface MacBundleAppIconInput {
 // Beta use their bundled artwork; Beta Default explicitly selects the white
 // bitmap, distinct from its blue bundled icon.
 export function usesMacBundleAppIcon(input: MacBundleAppIconInput): boolean {
-  if (input.platform !== "darwin" || input.usesLegacyDockIcon) return false;
+  if (
+    input.platform !== "darwin" ||
+    input.usesLegacyDockIcon ||
+    input.hasIconComposerAsset === false
+  )
+    return false;
   return (
     (input.icon === "default" && !input.isBetaFlavor) ||
     (input.icon === "beta" && input.isBetaFlavor)

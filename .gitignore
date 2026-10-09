@@ -41,12 +41,12 @@ __screenshots__/
 /preload.js.map
 /bootstrap.js.map
 
-# Generated ASAR smoke fixture (bundled from scripts/betterwright-smoke.ts)
+# Local smoke artifacts
 .smoke/
 
 # Unlazy pipeline state (machine-local ledgers, dispatch, approvals log)
 .unlazy/
-# Claude Code worktrees are local scratch checkouts, not part of the repo.
+# Local agent worktrees
 .claude/worktrees/
 
 # Local implementation plans.
@@ -55,3 +55,13 @@ __screenshots__/
 # Aha local migration preservation and isolated development data
 /.migration-backups/
 /.aha-dev/
+
+# Local generated assets, recordings, and build caches
+/output/
+/.playwright-mcp/
+/.playwright-cli/
+/apps/marketing/.source/
+/apps/marketing/.next/
+/apps/marketing/.open-next/
+/apps/marketing/playwright-report/
+/apps/marketing/test-results/

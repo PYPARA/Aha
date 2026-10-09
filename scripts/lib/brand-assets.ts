@@ -47,18 +47,9 @@ export interface DesktopIconAssetPaths {
   readonly windowsIconIco: string;
 }
 
-/** Beta builds carry their own vivid-blue + white BETA pill brand; every other flavor keeps production. */
+/** Aha flavors share the approved character artwork; upstream Beta assets remain archived. */
 export function desktopIconAssetPaths(flavor: DesktopBuildFlavor): DesktopIconAssetPaths {
-  if (flavor === "beta") {
-    return {
-      macIconPng: BETA_ASSET_PATHS.betaMacIconPng,
-      macIconComposer: BETA_ASSET_PATHS.betaMacIconComposer,
-      macLegacyIconPng: BETA_ASSET_PATHS.betaMacLegacyIconPng,
-      macLegacyDarkIconPng: BETA_ASSET_PATHS.betaMacLegacyDarkIconPng,
-      linuxIconPng: BETA_ASSET_PATHS.betaLinuxIconPng,
-      windowsIconIco: BETA_ASSET_PATHS.betaWindowsIconIco,
-    };
-  }
+  void flavor;
   return {
     macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
     macIconComposer: BRAND_ASSET_PATHS.productionMacIconComposer,

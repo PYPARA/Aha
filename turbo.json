@@ -50,10 +50,6 @@
       "dependsOn": ["^typecheck:legacy"],
       "outputs": [],
       "cache": false
-    },
-    "test": {
-      "cache": false,
-      "outputs": []
     }
   }
 }

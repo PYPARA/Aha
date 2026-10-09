@@ -582,14 +582,14 @@ export const AppSettingsSchema = Schema.Struct({
 export type AppSettings = typeof AppSettingsSchema.Type;
 
 /**
- * First-launch icon default per desktop flavor. The schema keeps "default" so
- * persisted renderer state stays stable; the native side owns first-launch
- * defaulting via getAppIcon, and the Appearance reset uses this for its target.
+ * All Aha flavors use the approved character artwork. Keep the upstream
+ * preference token so existing renderer/native settings remain compatible.
  */
 export function defaultDesktopAppIconForFlavor(
   flavor: SynaraDesktopFlavor | "unknown",
 ): DesktopAppIcon {
-  return flavor === "beta" ? "beta" : "default";
+  void flavor;
+  return "default";
 }
 
 /** The settings values and mutation used by a mounted settings panel.

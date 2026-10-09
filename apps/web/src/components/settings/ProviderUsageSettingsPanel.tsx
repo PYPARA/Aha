@@ -13,6 +13,7 @@ import {
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { useAppSettings, type RailUsageWindow } from "~/appSettings";
 import {
   MAX_RAIL_USAGE_ACCOUNTS,
@@ -161,6 +162,7 @@ function ProviderUsageCard({
 }
 
 export function ProviderUsageSettingsPanel() {
+  const tr = useAhaTranslation();
   const queryClient = useQueryClient();
   const { settings, updateSettings } = useAppSettings();
   const serverSettingsQuery = useQuery(serverSettingsQueryOptions());
@@ -219,7 +221,12 @@ export function ProviderUsageSettingsPanel() {
 
   return (
     <>
-      <SettingsSection title={`Sidebar · up to ${MAX_RAIL_USAGE_ACCOUNTS} accounts`}>
+      <SettingsSection
+        title={tr("Sidebar · up to {count} accounts").replace(
+          "{count}",
+          String(MAX_RAIL_USAGE_ACCOUNTS),
+        )}
+      >
         {railUsageAccounts.map(({ instance, label }) => {
           const checked = railUsageInstanceIds.includes(instance.instanceId);
           return (
@@ -249,21 +256,27 @@ export function ProviderUsageSettingsPanel() {
                       ),
                     })
                   }
-                  aria-label={`Show ${label} usage at the bottom of the sidebar`}
+                  aria-label={tr("Show {account} usage at the bottom of the sidebar").replace(
+                    "{account}",
+                    label,
+                  )}
                 />
               }
             />
           );
         })}
         <SettingsListRow
-          title="Ring"
-          description="Show both limits as two rings, or a single ring for one of them."
+          title={tr("Ring")}
+          description={tr("Show both limits as two rings, or a single ring for one of them.")}
           actions={
             <SettingsSegmentedControl
               value={settings.railUsageWindow}
               onValueChange={(value) => updateSettings({ railUsageWindow: value })}
-              ariaLabel="Sidebar usage ring"
-              options={RAIL_USAGE_WINDOW_OPTIONS}
+              ariaLabel={tr("Sidebar usage ring")}
+              options={RAIL_USAGE_WINDOW_OPTIONS.map((option) => ({
+                ...option,
+                label: tr(option.label),
+              }))}
             />
           }
         />
