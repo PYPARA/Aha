@@ -18,6 +18,7 @@ export const SETTINGS_SECTION_IDS = [
   "archived",
   "models",
   "providers",
+  "imageProviders",
   "skills",
   "usage",
   "integrations",
@@ -66,6 +67,14 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
 ] as const;
 
 export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
+  {
+    id: "imageProviders",
+    group: "integrations",
+    label: "Image providers",
+    description: "Configure independent image APIs and choose models.",
+    icon: "images-sparkle",
+    eyebrow: "Image generation",
+  },
   {
     id: "general",
     group: "personal",

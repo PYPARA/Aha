@@ -1,0 +1,9 @@
+{
+  "source": "furina/icon.png",
+  "sourceSize": [1254, 1254],
+  "sourceAlpha": false,
+  "finalSize": [1024, 1024],
+  "sha256": "e83231c423532c679e8291422821fcde67218a12fa80c17b1f88e009b937409a",
+  "bytes": 1347013,
+  "processing": "Resize, geometric rounded mask, transparent outer padding; no black-pixel removal or synthesized detail."
+}

@@ -21,6 +21,16 @@ import {
 } from "./automation";
 import { TodoCreateInput, TodoDeleteInput, TodoStreamEvent, TodoUpdateInput } from "./todo";
 import {
+  ImageJobCreateInput,
+  ImageProviderDiscoveryInput,
+  ImageProviderInput,
+  ImageJobListInput,
+  ImageJobEvent,
+  ImageDraft,
+  ImageIdInput,
+  ImageTestInput,
+} from "./imageGeneration";
+import {
   ProjectAgentConfigureInput,
   ProjectAgentLinkProjectInput,
   ProjectAgentUnlinkProjectInput,
@@ -371,6 +381,20 @@ export const WS_METHODS = {
   todoUpdate: "todo.update",
   todoDelete: "todo.delete",
   subscribeTodoEvents: "todo.subscribe",
+  imageProviderList: "imageProvider.list",
+  imageProviderUpsert: "imageProvider.upsert",
+  imageProviderDelete: "imageProvider.delete",
+  imageProviderDiscoverModels: "imageProvider.discoverModels",
+  imageProviderTest: "imageProvider.testModel",
+  imageJobGet: "imageJob.get",
+  imageJobDelete: "imageJob.delete",
+  imageDraftGet: "imageDraft.get",
+  imageDraftUpsert: "imageDraft.upsert",
+  imageDraftDelete: "imageDraft.delete",
+  imageJobList: "imageJob.list",
+  imageJobCreate: "imageJob.create",
+  imageJobCancel: "imageJob.cancel",
+  subscribeImageJobs: "imageJob.subscribe",
   projectAgentGetOverview: "projectAgent.getOverview",
   projectAgentListSummaries: "projectAgent.listSummaries",
   projectAgentConfigure: "projectAgent.configure",
@@ -416,6 +440,7 @@ export const WS_METHODS = {
 export const WS_CHANNELS = {
   automationEvent: "automation.event",
   todoEvent: "todo.event",
+  imageJobEvent: "imageJob.event",
   gitActionProgress: "git.actionProgress",
   gitWorktreeSetupProgress: "git.worktreeSetupProgress",
   projectProvisionProgress: "project.provisionProgress",
@@ -644,6 +669,20 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.todoUpdate, TodoUpdateInput),
   tagRequestBody(WS_METHODS.todoDelete, TodoDeleteInput),
   tagRequestBody(WS_METHODS.subscribeTodoEvents, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.imageProviderList, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.imageProviderUpsert, ImageProviderInput),
+  tagRequestBody(WS_METHODS.imageProviderDelete, Schema.Struct({ id: Schema.String })),
+  tagRequestBody(WS_METHODS.imageProviderDiscoverModels, ImageProviderDiscoveryInput),
+  tagRequestBody(WS_METHODS.imageJobList, ImageJobListInput),
+  tagRequestBody(WS_METHODS.imageJobCreate, ImageJobCreateInput),
+  tagRequestBody(WS_METHODS.imageJobCancel, Schema.Struct({ id: Schema.String })),
+  tagRequestBody(WS_METHODS.subscribeImageJobs, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.imageProviderTest, ImageTestInput),
+  tagRequestBody(WS_METHODS.imageJobGet, ImageIdInput),
+  tagRequestBody(WS_METHODS.imageJobDelete, ImageIdInput),
+  tagRequestBody(WS_METHODS.imageDraftGet, ImageIdInput),
+  tagRequestBody(WS_METHODS.imageDraftUpsert, ImageDraft),
+  tagRequestBody(WS_METHODS.imageDraftDelete, ImageIdInput),
   tagRequestBody(WS_METHODS.projectAgentGetOverview, ProjectAgentGetOverviewInput),
   tagRequestBody(WS_METHODS.projectAgentListSummaries, ProjectAgentListSummariesInput),
   tagRequestBody(WS_METHODS.projectAgentConfigure, ProjectAgentConfigureInput),
@@ -725,6 +764,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.serverSettingsUpdated]: typeof ServerSettingsUpdatedPayload.Type;
   readonly [WS_CHANNELS.automationEvent]: typeof AutomationStreamEvent.Type;
   readonly [WS_CHANNELS.todoEvent]: typeof TodoStreamEvent.Type;
+  readonly [WS_CHANNELS.imageJobEvent]: ImageJobEvent;
   readonly [WS_CHANNELS.projectAgentEvent]: typeof ProjectAgentStreamEvent.Type;
   readonly [WS_CHANNELS.gitActionProgress]: typeof GitActionProgressEvent.Type;
   readonly [WS_CHANNELS.gitWorktreeSetupProgress]: typeof GitWorktreeSetupProgressEvent.Type;
@@ -777,6 +817,7 @@ export const WsPushAutomationEvent = makeWsPushSchema(
   WS_CHANNELS.automationEvent,
   AutomationStreamEvent,
 );
+export const WsPushImageJobEvent = makeWsPushSchema(WS_CHANNELS.imageJobEvent, ImageJobEvent);
 export const WsPushTodoEvent = makeWsPushSchema(WS_CHANNELS.todoEvent, TodoStreamEvent);
 export const WsPushProjectAgentEvent = makeWsPushSchema(
   WS_CHANNELS.projectAgentEvent,
@@ -846,6 +887,7 @@ export const WsPush = Schema.Union([
   WsPushServerSettingsUpdated,
   WsPushAutomationEvent,
   WsPushTodoEvent,
+  WsPushImageJobEvent,
   WsPushProjectAgentEvent,
   WsPushGitActionProgress,
   WsPushGitWorktreeSetupProgress,

@@ -64,6 +64,13 @@ function projectAppearance(preferences: AhaAppearance, urls: Record<string, stri
   if (preferences.codeSize) root.style.setProperty("--aha-code-size", `${preferences.codeSize}px`);
   else root.style.removeProperty("--aha-code-size");
   const backgrounds = BackgroundsSchema.parse(preferences.backgrounds);
+  root.dataset.ahaBackgrounds = String(
+    !preferences.clearMode &&
+      Object.values(backgrounds).some(
+        (background) =>
+          background.source === "image" && background.imageId && urls[background.imageId],
+      ),
+  );
   for (const region of REGIONS) {
     const own = backgrounds[region],
       resolved = own.source === "inherit" ? backgrounds.window : own;

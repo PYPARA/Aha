@@ -1,3 +1,4 @@
+import { ImageProvidersSettingsPanel } from "~/components/settings/ImageProvidersSettingsPanel";
 import { useAhaAppearance, useAhaTranslation } from "../aha/AppearanceProvider";
 import { AhaAppearancePanel } from "../aha/AppearancePanel";
 // FILE: _chat.settings.tsx
@@ -1785,6 +1786,7 @@ function SettingsRouteView() {
                   updateSettingsAndWait={updateSettingsAndWait}
                   resetEpoch={resetEpoch}
                 />
+                <ImageProvidersSettingsPanel active={activeSection === "imageProviders"} />
                 <ExternalMcpSettingsPanel active={activeSection === "integrations"} />
                 <AdvancedSettingsPanel
                   active={activeSection === "advanced"}

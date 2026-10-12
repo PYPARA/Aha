@@ -47,8 +47,9 @@ function filenameFromContentDisposition(headerValue: string | null): string | nu
 export async function downloadUrlAsBlob(input: {
   readonly url: string;
   readonly filename: string;
+  readonly credentials?: RequestCredentials;
 }): Promise<void> {
-  const response = await fetch(input.url);
+  const response = await fetch(input.url, { credentials: input.credentials ?? "same-origin" });
   if (!response.ok) {
     throw await downloadResponseError(response);
   }

@@ -42,6 +42,7 @@ import {
   WsProjectAgentRpcGroup,
   type AutomationStreamEvent,
   type TodoStreamEvent,
+  type ImageJobEvent,
   type GitActionProgressEvent,
   type GitCreateDetachedWorktreeResult,
   type GitRunStackedActionResult,
@@ -1882,6 +1883,14 @@ export class WsTransport {
             "todo.events",
             client[WS_METHODS.subscribeTodoEvents]({}),
             (event: TodoStreamEvent) => this.emit(WS_CHANNELS.todoEvent, event),
+            restartChannel,
+          );
+        } else if (channel === WS_CHANNELS.imageJobEvent) {
+          this.startStream(
+            client,
+            "image.jobs",
+            client[WS_METHODS.subscribeImageJobs]({}),
+            (event: ImageJobEvent) => this.emit(WS_CHANNELS.imageJobEvent, event),
             restartChannel,
           );
         } else if (channel === DEVICE_WS_CHANNELS.event) {

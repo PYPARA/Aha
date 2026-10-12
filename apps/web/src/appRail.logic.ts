@@ -30,7 +30,11 @@ export const RAIL_PANEL_ITEM_LABELS: Record<RailPanelItemId, string> = {
  * Rail items that navigate to a route. "New thread" stays in the panel, never the rail;
  * Inbox is available in Stable and Beta (see INBOX_ON).
  */
-export type RailRouteItemId = Exclude<SidebarNavItemId, "newThread"> | "studio" | "settings";
+export type RailRouteItemId =
+  | Exclude<SidebarNavItemId, "newThread">
+  | "studio"
+  | "settings"
+  | "drawing";
 export type RailItemId = RailPanelItemId | RailRouteItemId;
 
 /**
@@ -39,6 +43,7 @@ export type RailItemId = RailPanelItemId | RailRouteItemId;
  */
 export const RAIL_ORDERABLE_ITEM_IDS = [
   "home",
+  "drawing",
   "inbox",
   "spaces",
   "kanban",
@@ -64,7 +69,12 @@ export function railItemCanHide(id: RailOrderableItemId): boolean {
 export function normalizeRailItemOrder(order: readonly string[]): RailOrderableItemId[] {
   const normalized = normalizeIdOrder(order, RAIL_ORDERABLE_ITEM_IDS, isRailOrderableItemId);
   // Inbox shipped after users saved an order: it joins next to Home, as by default.
-  return placeNewIdAfter(normalized, order, "inbox", "home");
+  return placeNewIdAfter(
+    placeNewIdAfter(normalized, order, "inbox", "home"),
+    order,
+    "drawing",
+    "home",
+  );
 }
 
 export function normalizeHiddenRailItems(hidden: readonly string[]): RailOrderableItemId[] {
@@ -187,7 +197,9 @@ export function resolveActiveRailShortcutKey(input: {
  * their page layout.
  */
 export function railItemShowsPanel(id: RailItemId): boolean {
-  return id !== "kanban" && id !== "tasks" && id !== "pullRequests" && id !== "inbox";
+  return (
+    id !== "drawing" && id !== "kanban" && id !== "tasks" && id !== "pullRequests" && id !== "inbox"
+  );
 }
 
 function matchesRoute(pathname: string, route: string): boolean {
@@ -196,6 +208,7 @@ function matchesRoute(pathname: string, route: string): boolean {
 
 /** The route rail item that owns a pathname, or null for thread and chat-index routes. */
 export function railItemForPathname(pathname: string): RailRouteItemId | null {
+  if (matchesRoute(pathname, "/drawing")) return "drawing";
   if (matchesRoute(pathname, "/inbox")) return "inbox";
   if (matchesRoute(pathname, "/kanban")) return "kanban";
   if (matchesRoute(pathname, "/tasks")) return "tasks";

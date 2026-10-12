@@ -1,4 +1,6 @@
 import { readEventLoopStatus } from "./eventLoopMonitor";
+import { ImageGenerationService } from "./imageGeneration/Services/ImageGenerationService";
+import { IMAGE_INPUT_MAX_BYTES } from "@synara/contracts";
 import * as fs from "node:fs/promises";
 import nodePath from "node:path";
 
@@ -224,6 +226,7 @@ function localPreviewCorsHeaders(input: {
   }
   return {
     "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Credentials": "true",
     Vary: "Origin",
   };
 }
@@ -242,11 +245,100 @@ export function makeEffectHttpRouteLayer(
     siteFaviconEffectRouteLayer,
     editorIconEffectRouteLayer,
     localImageEffectRouteLayer,
+    drawingAssetEffectRouteLayer,
     binaryUploadEffectRouteLayer,
     attachmentsEffectRouteLayer,
     staticAndDevEffectRouteLayer,
   );
 }
+
+export const drawingAssetEffectRouteLayer = Layer.mergeAll(
+  HttpRouter.add(
+    "GET",
+    "/api/drawing/assets/*",
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const url = HttpServerRequest.toURL(request);
+      if (!url) return HttpServerResponse.text("Bad Request", { status: 400 });
+      const config = yield* ServerConfig;
+      if (!isLegacyTokenAuthorized({ config, url })) yield* requireAuthenticatedRequest;
+      const id = url.pathname.split("/").at(-1) ?? "";
+      if (!/^[0-9a-f]{64}$/u.test(id)) return HttpServerResponse.text("Not Found", { status: 404 });
+      const service = yield* ImageGenerationService;
+      const asset = yield* service.getAsset(id);
+      if (url.searchParams.has("metadata"))
+        return HttpServerResponse.jsonUnsafe(asset, {
+          headers: localPreviewCorsHeaders({ config, request, url }),
+        });
+      const variant =
+        url.searchParams.get("variant") === "thumbnail"
+          ? "thumbnail"
+          : url.searchParams.get("variant") === "edit"
+            ? "edit"
+            : "original";
+      const bytes = yield* service.readAsset(asset, variant);
+      return HttpServerResponse.uint8Array(bytes, {
+        contentType:
+          variant === "thumbnail"
+            ? "image/webp"
+            : variant === "edit"
+              ? "image/png"
+              : asset.mimeType,
+        headers: {
+          ...localPreviewCorsHeaders({ config, request, url }),
+          Vary: "Origin",
+          "Cache-Control": "private, max-age=31536000, immutable",
+          ...(url.searchParams.has("download")
+            ? { "Content-Disposition": attachmentContentDisposition(asset.name) }
+            : {}),
+        },
+      });
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          error instanceof AuthError
+            ? authErrorResponse(error)
+            : HttpServerResponse.text("Not Found", { status: 404 }),
+        ),
+      ),
+    ),
+  ),
+  HttpRouter.add(
+    "*",
+    "/api/drawing/upload",
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const url = HttpServerRequest.toURL(request);
+      if (!url) return HttpServerResponse.text("Bad Request", { status: 400 });
+      const config = yield* ServerConfig;
+      const cors = trustedMutationCorsHeaders({ config, request, url });
+      if (cors === null)
+        return HttpServerResponse.text("Trusted request origin required", { status: 403 });
+      if (request.method === "OPTIONS")
+        return HttpServerResponse.empty({ status: 204, headers: cors });
+      if (request.method !== "POST")
+        return HttpServerResponse.text("Method Not Allowed", { status: 405, headers: cors });
+      if (!isLegacyTokenAuthorized({ config, url })) yield* requireAuthenticatedMutationRequest;
+      const bytes = yield* readEffectBinary(request, IMAGE_INPUT_MAX_BYTES);
+      const asset = yield* (yield* ImageGenerationService).upload(
+        bytes,
+        url.searchParams.get("name") ?? "reference.png",
+      );
+      return HttpServerResponse.jsonUnsafe(asset, { status: 201, headers: cors });
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          error instanceof AuthError
+            ? authErrorResponse(error)
+            : HttpServerResponse.jsonUnsafe(
+                { error: error instanceof Error ? error.message : "Could not upload image." },
+                { status: 400 },
+              ),
+        ),
+      ),
+    ),
+  ),
+);
 
 export function makeDesktopShutdownEffectRouteLayer(shutdownController: ServerShutdownController) {
   return HttpRouter.add(

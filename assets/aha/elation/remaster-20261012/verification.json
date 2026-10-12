@@ -1,0 +1,55 @@
+{
+  "version": "remaster-20261012",
+  "icon": {
+    "sha256": "f46932a4ca3642e9bc1f7046f0c9c251d0344a2ffc2ea57fabc6bc1b45397af8",
+    "size": [1024, 1024],
+    "bytes": 1860936
+  },
+  "backgrounds": [
+    {
+      "region": "window",
+      "source": "output/imagegen/remaster-continuation-20261012/elation/window.png",
+      "generatedSize": [1672, 941],
+      "method": "Image API output, locally resized",
+      "size": [2048, 1152],
+      "bytesCount": 2625323,
+      "sha256": "cece4c29f1d673a2c2cbd3a65ec957db1613c877030659b87c5289a1a0f69116"
+    },
+    {
+      "region": "rail",
+      "source": "output/imagegen/remaster-continuation-20261012/elation/rail.png",
+      "generatedSize": [768, 2048],
+      "method": "Image API output, locally resized",
+      "size": [768, 2048],
+      "bytesCount": 1709693,
+      "sha256": "5591e49c34cb7fea263e457696360e035d8a5f2e91c687f86de4f30305fb0144"
+    },
+    {
+      "region": "sidebar",
+      "source": "output/imagegen/remaster-continuation-20261012/elation/sidebar.png",
+      "generatedSize": [887, 1774],
+      "method": "Image API output, locally resized",
+      "size": [1024, 2048],
+      "bytesCount": 2039898,
+      "sha256": "f285245d47122c2e8c769211dd6932a63b8f2a9c0d24fe3fe89ddf94166cbe25"
+    },
+    {
+      "region": "content",
+      "source": "output/imagegen/remaster-continuation-20261012/elation/content.png",
+      "generatedSize": [1672, 941],
+      "method": "Image API output, locally resized",
+      "size": [2048, 1152],
+      "bytesCount": 3460837,
+      "sha256": "5ad03a2988e3b5dd8d59f08dee10a41a5f52b59b84d995e222ed16cc36e46336"
+    },
+    {
+      "region": "composer",
+      "source": "output/imagegen/remaster-continuation-20261012/elation/composer-local-crop.png",
+      "generatedSize": [1672, 627],
+      "method": "Local bottom-aligned 8:3 crop of this version’s window image; the distinct API request timed out and was not retried.",
+      "size": [2048, 768],
+      "bytesCount": 1790384,
+      "sha256": "f44c60754049f686c2f2ad1182218f0f47ca01be35be015b0ea8a96cdf790787"
+    }
+  ]
+}

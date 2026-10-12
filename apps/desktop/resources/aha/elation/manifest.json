@@ -3,17 +3,17 @@
   "backgrounds": {
     "window": {
       "source": "image",
-      "imageId": "51b42384697826383a93eed38f586b543979aefacc7b63f308a8a3f4849ff9c2",
+      "imageId": "cece4c29f1d673a2c2cbd3a65ec957db1613c877030659b87c5289a1a0f69116",
       "opacity": 0.48,
       "overlay": 0.2,
       "blur": 0,
       "fit": "cover",
-      "x": 100,
+      "x": 50,
       "y": 50
     },
     "rail": {
       "source": "image",
-      "imageId": "3ef1703a250e9a4a66f470d4e3f56419c034b1fba6e009e7a4aa8c35d3892699",
+      "imageId": "5591e49c34cb7fea263e457696360e035d8a5f2e91c687f86de4f30305fb0144",
       "opacity": 0.2,
       "overlay": 0.2,
       "blur": 0,
@@ -23,7 +23,7 @@
     },
     "sidebar": {
       "source": "image",
-      "imageId": "81e68598cbded79fbbd500886f70dd8d466716bbc36bfce859df8961b4a24654",
+      "imageId": "f285245d47122c2e8c769211dd6932a63b8f2a9c0d24fe3fe89ddf94166cbe25",
       "opacity": 0.23,
       "overlay": 0.2,
       "blur": 0,
@@ -33,17 +33,17 @@
     },
     "content": {
       "source": "image",
-      "imageId": "45ef6fce2e96a7c7ec5cdb5a04e01a4f0e3cf3f3f16e6520b54ab9277ed85d7f",
+      "imageId": "5ad03a2988e3b5dd8d59f08dee10a41a5f52b59b84d995e222ed16cc36e46336",
       "opacity": 0.16,
       "overlay": 0.2,
       "blur": 0,
       "fit": "cover",
-      "x": 50,
+      "x": 100,
       "y": 50
     },
     "composer": {
       "source": "image",
-      "imageId": "0a5badc2102ca633f44051986351cc7ea17b012f991ed89d962b6f543c88ddee",
+      "imageId": "f44c60754049f686c2f2ad1182218f0f47ca01be35be015b0ea8a96cdf790787",
       "opacity": 0.18,
       "overlay": 0.2,
       "blur": 0,

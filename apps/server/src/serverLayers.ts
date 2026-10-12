@@ -60,6 +60,8 @@ import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment";
 import { AutomationRepositoryLive } from "./persistence/Layers/AutomationRepository";
 import { TodoRepositoryLive } from "./persistence/Layers/TodoRepository";
 import { TodoServiceLive } from "./todo/Layers/TodoService";
+import { ImageGenerationServiceLive } from "./imageGeneration/Services/ImageGenerationService";
+import { ImageGenerationRepositoryLive } from "./persistence/Layers/ImageGenerationRepository";
 import { ProjectAgentRepositoryLive } from "./persistence/Layers/ProjectAgentRepository";
 import { ProjectAgentReactorLive } from "./projectAgent/Layers/ProjectAgentReactor";
 import { ProjectAgentServiceLive } from "./projectAgent/Layers/ProjectAgentService";
@@ -295,6 +297,10 @@ export function makeServerRuntimeServicesLayer(
     automationSchedulerLayer,
     automationRunReactorLayer,
     todoServiceLayer,
+    ImageGenerationServiceLive.pipe(
+      Layer.provideMerge(ImageGenerationRepositoryLive),
+      Layer.provideMerge(ServerSecretStoreLive),
+    ),
     ProjectAgentRepositoryLive,
     projectAgentServiceLayer,
     projectAgentReactorLayer,

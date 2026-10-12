@@ -53,6 +53,8 @@ import { RpcMiddleware, RpcSchema, RpcSerialization, RpcServer } from "effect/un
 
 import { AutomationService } from "./automation/Services/AutomationService";
 import { TodoService } from "./todo/Services/TodoService";
+import { ImageGenerationService } from "./imageGeneration/Services/ImageGenerationService";
+import { ImageApiError } from "./imageGeneration/imageApi";
 import { isServerBetaFeatureEnabled } from "./betaFeatureGate";
 import { ProjectAgentService } from "./projectAgent/Services/ProjectAgentService";
 import { isGroupCoordinatorHostProject } from "./projectAgent/groupCoordinatorHost";
@@ -371,6 +373,14 @@ function readDescendantProcesses(rootPid: number): Promise<ProcessTableRow[]> {
 }
 
 export function toWsRpcError(cause: unknown, fallbackMessage: string) {
+  if (cause instanceof ImageApiError)
+    return new WsRpcError({
+      message: cause.message,
+      code: cause.code,
+      retryable: false,
+      ...(cause.upstreamStatus ? { upstreamStatus: cause.upstreamStatus } : {}),
+      ...(cause.requestId ? { requestId: cause.requestId } : {}),
+    });
   if (Schema.is(WsRpcError)(cause)) {
     return cause;
   }
@@ -496,6 +506,7 @@ const makeWsRpcHandlersLayer = () =>
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
       const automationService = yield* AutomationService;
       const todoService = yield* TodoService;
+      const imageGenerationService = yield* ImageGenerationService;
       const projectAgentService = yield* ProjectAgentService;
       const projectAgentRepository = yield* ProjectAgentRepository;
       const config = yield* ServerConfig;
@@ -3064,6 +3075,47 @@ const makeWsRpcHandlersLayer = () =>
                 ),
               )
             : Stream.fail(tasksUnavailableError()),
+        [WS_METHODS.imageProviderList]: () =>
+          rpcEffect(imageGenerationService.listProviders(), "Failed to list image providers"),
+        [WS_METHODS.imageProviderUpsert]: (input) =>
+          rpcEffect(imageGenerationService.upsertProvider(input), "Failed to save image provider"),
+        [WS_METHODS.imageProviderDelete]: (input) =>
+          rpcEffect(
+            imageGenerationService.deleteProvider(input.id),
+            "Failed to delete image provider",
+          ),
+        [WS_METHODS.imageProviderDiscoverModels]: (input) =>
+          rpcEffect(
+            imageGenerationService.discoverModels(input),
+            "Failed to discover image models",
+          ),
+        [WS_METHODS.imageJobList]: (input) =>
+          rpcEffect(imageGenerationService.listJobs(input), "Failed to list image jobs"),
+        [WS_METHODS.imageJobCreate]: (input) =>
+          rpcEffect(imageGenerationService.createJob(input), "Failed to create image job"),
+        [WS_METHODS.imageJobCancel]: (input) =>
+          rpcEffect(imageGenerationService.cancelJob(input.id), "Failed to cancel image job"),
+        [WS_METHODS.imageProviderTest]: (input) =>
+          rpcEffect(imageGenerationService.testModel(input), "Failed to test image model"),
+        [WS_METHODS.imageJobGet]: (input) =>
+          rpcEffect(imageGenerationService.getJob(input.id), "Failed to get image job"),
+        [WS_METHODS.imageJobDelete]: (input) =>
+          rpcEffect(imageGenerationService.deleteJob(input.id), "Failed to delete image job"),
+        [WS_METHODS.imageDraftGet]: (input) =>
+          rpcEffect(imageGenerationService.getDraft(input.id), "Failed to get drawing draft"),
+        [WS_METHODS.imageDraftUpsert]: (input) =>
+          rpcEffect(imageGenerationService.upsertDraft(input), "Failed to save drawing draft"),
+        [WS_METHODS.imageDraftDelete]: (input) =>
+          rpcEffect(imageGenerationService.deleteDraft(input.id), "Failed to delete drawing draft"),
+        [WS_METHODS.subscribeImageJobs]: (_, { clientId }) =>
+          streamAdmission.guard(
+            clientId,
+            { key: "image.jobs" },
+            Stream.merge(
+              Stream.succeed({ type: "snapshot" as const }),
+              imageGenerationService.events,
+            ).pipe(Stream.mapError((cause) => toWsRpcError(cause, "Image event stream failed"))),
+          ),
 
         ...makeWsDeviceHandlers(deviceService),
         [DEVICE_WS_METHODS.subscribeEvents]: (_, { clientId }) =>

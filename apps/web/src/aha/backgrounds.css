@@ -3,12 +3,23 @@
   position: relative;
   isolation: isolate;
 }
-[data-aha-region]::after {
-  content: "";
+.aha-background-layer {
+  display: none;
   position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: -1;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--color-background-surface);
+}
+html[data-aha-backgrounds="true"] .aha-background-layer {
+  display: block;
+}
+.aha-background-image {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
   background-image:
     linear-gradient(rgb(0 0 0 / var(--aha-region-overlay)), rgb(0 0 0 / var(--aha-region-overlay))),
     var(--aha-region-image);
@@ -18,6 +29,27 @@
   opacity: var(--aha-region-opacity);
   filter: blur(var(--aha-region-blur));
   border-radius: inherit;
+}
+[data-aha-region="rail"] > .aha-background-layer,
+[data-aha-region="window"] > .aha-background-layer {
+  background: var(--app-rail-shell-tone, var(--color-background-surface));
+}
+[data-aha-region="sidebar"] > .aha-background-layer {
+  background: var(--app-rail-panel-tone, var(--color-background-surface));
+}
+/* Keep the upstream top strip, inset gaps and border; only replace the body fill. */
+[data-sidebar-layout="rail"] [data-aha-region="content"] > .aha-background-layer {
+  inset: var(--app-top-strip-height) var(--app-rail-inset-gap) var(--app-rail-inset-gap) 0;
+  border-radius: var(--app-rail-block-radii);
+}
+html[data-aha-backgrounds="true"] .chat-content-card,
+html[data-aha-backgrounds="true"] .chat-content-card::before,
+html[data-aha-backgrounds="true"] [data-slot="sidebar-inner"],
+html[data-aha-backgrounds="true"] [data-aha-region="composer"] .chat-composer-shell {
+  background: transparent;
+}
+[data-aha-region="composer"] > .aha-background-layer {
+  border-radius: var(--composer-radius);
 }
 [data-aha-region="window"] {
   --aha-region-image: var(--aha-window-image);

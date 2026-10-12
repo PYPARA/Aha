@@ -1,0 +1,495 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import sharp from "sharp";
+import { randomUUID } from "node:crypto";
+import type { ImageJobCreateInput, ImageProviderInput } from "@synara/contracts";
+import { layerMemory } from "../persistence/NodeSqliteClient";
+import migration from "../persistence/Migrations/132_ImageGeneration";
+import { ImageGenerationRepositoryLive } from "../persistence/Layers/ImageGenerationRepository";
+import { ImageGenerationRepository } from "../persistence/Services/ImageGenerationRepository";
+import { ImageGenerationEngine } from "./imageGenerationEngine";
+import {
+  discoverImageModels,
+  downloadImage,
+  imageEndpoint,
+  imageRequestParameters,
+  isPublicImageAddress,
+  requestImages,
+} from "./imageApi";
+import type { ServerSecretStoreShape } from "../auth/Services/ServerSecretStore";
+
+const providerInput = (name = "One"): ImageProviderInput => ({
+  name,
+  baseUrl: "https://mock.example/custom/api",
+  apiKey: "test-provider-secret",
+  enabled: true,
+  models: [{ id: "gpt-image-test", source: "manual", lastTestAt: null, lastTestStatus: null }],
+  defaultModel: "gpt-image-test",
+  concurrency: 2,
+  timeoutSeconds: 600,
+});
+async function fixture() {
+  const root = await mkdtemp(path.join(tmpdir(), "aha-drawing-test-"));
+  const runtime = ManagedRuntime.make(
+    ImageGenerationRepositoryLive.pipe(
+      Layer.provideMerge(Layer.effectDiscard(migration).pipe(Layer.provideMerge(layerMemory()))),
+    ),
+  );
+  const repository = await runtime.runPromise(
+    Effect.gen(function* () {
+      return yield* ImageGenerationRepository;
+    }),
+  );
+  const values = new Map<string, Uint8Array>();
+  const secrets: ServerSecretStoreShape = {
+    get: (id) => Effect.succeed(values.get(id) ?? null),
+    set: (id, value) =>
+      Effect.sync(() => {
+        values.set(id, value);
+      }),
+    remove: (id) =>
+      Effect.sync(() => {
+        values.delete(id);
+      }),
+    getOrCreateRandom: () => Effect.succeed(new Uint8Array()),
+  };
+  const engine = new ImageGenerationEngine(repository, secrets, root, async () => {});
+  await engine.initialize();
+  const png = await sharp({ create: { width: 16, height: 12, channels: 4, background: "blue" } })
+    .png()
+    .toBuffer();
+  const response = (n = 1) =>
+    new Response(
+      JSON.stringify({
+        data: Array.from({ length: n }, () => ({ b64_json: png.toString("base64") })),
+        usage: { total_tokens: 4 },
+        size: "16x12",
+      }),
+      { headers: { "x-request-id": "mock-request" } },
+    );
+  const close = async () => {
+    await engine.shutdown();
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  };
+  return { engine, repository, root, png, response, close };
+}
+let f: Awaited<ReturnType<typeof fixture>>;
+beforeEach(async () => {
+  f = await fixture();
+});
+afterEach(async () => {
+  await f.close();
+  vi.unstubAllGlobals();
+});
+const input = (id: string, extra: Partial<ImageJobCreateInput> = {}): ImageJobCreateInput => ({
+  clientRequestId: randomUUID(),
+  providerId: id,
+  model: "gpt-image-test",
+  prompt: "A blue circle",
+  parameters: { n: 1 },
+  inputAssetIds: [],
+  maskAssetId: null,
+  sourceJobId: null,
+  ...extra,
+});
+async function waitFor(id: string, status: string) {
+  await vi.waitFor(async () => expect((await f.engine.getJob(id)).status).toBe(status), {
+    timeout: 3000,
+    interval: 20,
+  });
+  return f.engine.getJob(id);
+}
+
+describe("image provider and Images API contracts", () => {
+  it("preserves explicitly configured root paths and omits default fields", () => {
+    expect(imageEndpoint("https://example.com/custom/v2/", "images/generations")).toBe(
+      "https://example.com/custom/v2/images/generations",
+    );
+    expect(imageEndpoint("http://127.0.0.1:8000/", "models")).toBe("http://127.0.0.1:8000/models");
+    for (const url of [
+      "https://user:pass@example.com/v1",
+      "https://example.com/v1?x=1",
+      "https://example.com/#secret",
+    ])
+      expect(() => imageEndpoint(url, "models")).toThrow();
+    expect(imageRequestParameters({ n: 1 })).toEqual({ n: 1 });
+    expect(() => imageRequestParameters({ n: 1, background: "transparent" })).toThrow();
+    expect(
+      imageRequestParameters({
+        n: 3,
+        size: "1500x700",
+        quality: "max",
+        outputFormat: "webp",
+        background: "transparent",
+      }),
+    ).toEqual({
+      n: 3,
+      size: "1500x700",
+      quality: "max",
+      output_format: "webp",
+      background: "transparent",
+    });
+  });
+  it("keeps independent provider secrets out of configuration and preserves selected models", async () => {
+    const one = await f.engine.upsertProvider(providerInput()),
+      two = await f.engine.upsertProvider({ ...providerInput("Two"), apiKey: "second-secret" });
+    expect(JSON.stringify(await f.engine.listProviders())).not.toContain("secret");
+    expect(await f.engine.key(one.id)).toBe("test-provider-secret");
+    expect(await f.engine.key(two.id)).toBe("second-secret");
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ id: "text-model" }, { id: "gpt-image" }, { id: "gpt-image" }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    expect(
+      (await f.engine.discoverModels({ id: one.id, baseUrl: one.baseUrl })).models.map((m) => m.id),
+    ).toEqual(["gpt-image", "text-model"]);
+    expect((await f.engine.listProviders())[0]?.models.map((m) => m.id)).toEqual([
+      "gpt-image-test",
+    ]);
+    expect(fetcher.mock.calls[0]?.[0]).toBe("https://mock.example/custom/api/models");
+  });
+  it.each([401, 404, 429, 500])("classifies %s errors and redacts credentials", async (status) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: { message: "bad test-provider-secret Bearer test-provider-secret" },
+          }),
+          { status },
+        ),
+      ),
+    );
+    await expect(
+      discoverImageModels("https://mock.example", "test-provider-secret"),
+    ).rejects.toMatchObject({ upstreamStatus: status });
+    try {
+      await discoverImageModels("https://mock.example", "test-provider-secret");
+    } catch (error) {
+      expect(String(error)).not.toContain("test-provider-secret");
+    }
+  });
+  it("reports malformed/empty model lists and timeout without generation", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("invalid"))
+      .mockResolvedValueOnce(new Response("{}"))
+      .mockResolvedValueOnce(new Response('{"data":[]}'))
+      .mockRejectedValueOnce(new DOMException("Timed out", "TimeoutError"))
+      .mockRejectedValueOnce(new TypeError("Fetch failed with test-provider-secret"));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(discoverImageModels("https://mock.example", "")).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+    await expect(discoverImageModels("https://mock.example", "")).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+    expect(await discoverImageModels("https://mock.example", "")).toEqual([]);
+    await expect(discoverImageModels("https://mock.example", "")).rejects.toMatchObject({
+      code: "timeout",
+      message: "Model discovery timed out after 15 seconds.",
+    });
+    await expect(
+      discoverImageModels("https://mock.example", "test-provider-secret"),
+    ).rejects.toMatchObject({
+      code: "request_failed",
+      message: "Could not connect to image provider for model discovery.",
+    });
+  });
+  it("sends edits as multipart with references, mask and explicit parameters once", async () => {
+    const fetcher = vi.fn().mockResolvedValue(f.response(2));
+    vi.stubGlobal("fetch", fetcher);
+    await requestImages({
+      baseUrl: "https://mock.example/v1",
+      key: "test",
+      model: "any-model",
+      prompt: "edit",
+      parameters: {
+        n: 2,
+        quality: "xhigh",
+        size: "16x12",
+        outputFormat: "png",
+        background: "transparent",
+      },
+      images: [f.png, f.png],
+      mask: f.png,
+      signal: new AbortController().signal,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const [url, request] = fetcher.mock.calls[0]!;
+    expect(url).toBe("https://mock.example/v1/images/edits");
+    expect(request.body).toBeInstanceOf(FormData);
+    const form = request.body as FormData;
+    expect(form.getAll("image[]")).toHaveLength(2);
+    expect(form.get("mask")).toBeInstanceOf(Blob);
+    expect(form.get("n")).toBe("2");
+    expect(form.get("quality")).toBe("xhigh");
+  });
+  it("rejects local returned URLs while allowing explicit local provider roots", async () => {
+    for (const address of [
+      "127.0.0.1",
+      "10.1.1.1",
+      "172.16.0.1",
+      "169.254.169.254",
+      "::1",
+      "fc00::1",
+      "::ffff:127.0.0.1",
+    ])
+      expect(isPublicImageAddress(address)).toBe(false);
+    expect(isPublicImageAddress("8.8.8.8")).toBe(true);
+    await expect(
+      downloadImage("http://127.0.0.1/result.png", new AbortController().signal),
+    ).rejects.toMatchObject({ code: "unsafe_image_url" });
+  });
+});
+describe("durable image generation tasks", () => {
+  it("uses per-provider concurrency, idempotent submission and FIFO", async () => {
+    const one = await f.engine.upsertProvider(providerInput()),
+      two = await f.engine.upsertProvider(providerInput("Two"));
+    let inflight = 0,
+      max = 0;
+    const release: Array<() => void> = [];
+    const fetcher = vi.fn().mockImplementation(() => {
+      inflight++;
+      max = Math.max(max, inflight);
+      return new Promise<Response>((resolve) =>
+        release.push(() => {
+          inflight--;
+          resolve(f.response());
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const a = await f.engine.createJob(input(one.id)),
+      b = await f.engine.createJob(input(one.id)),
+      c = await f.engine.createJob(input(one.id)),
+      d = await f.engine.createJob(input(two.id));
+    expect(
+      (await f.engine.createJob(input(one.id, { clientRequestId: a.clientRequestId }))).id,
+    ).toBe(a.id);
+    await f.engine.tick();
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
+    expect(max).toBe(3);
+    expect((await f.engine.getJob(c.id)).status).toBe("queued");
+    release.splice(0).forEach((fn) => fn());
+    await waitFor(a.id, "succeeded");
+    await waitFor(b.id, "succeeded");
+    await waitFor(d.id, "succeeded");
+    await f.engine.tick();
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(4));
+    release.splice(0).forEach((fn) => fn());
+    await waitFor(c.id, "succeeded");
+  });
+  it("saves usable results, metadata and a partial result without resending", async () => {
+    const p = await f.engine.upsertProvider(providerInput());
+    const fetcher = vi.fn().mockResolvedValue(f.response());
+    vi.stubGlobal("fetch", fetcher);
+    const job = await f.engine.createJob(input(p.id, { parameters: { n: 2 } }));
+    await f.engine.tick();
+    const done = await waitFor(job.id, "partial");
+    expect(done.outputs).toHaveLength(1);
+    expect(done.actualParameters.size).toBe("16x12");
+    expect(done.usage).toEqual({ total_tokens: 4 });
+    expect(done.upstreamRequestId).toBe("mock-request");
+    expect(await f.engine.assets.read(done.outputs[0]!)).toBeInstanceOf(Uint8Array);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("does not retry generation errors, saves a failed test and supports cancellation", async () => {
+    const p = await f.engine.upsertProvider(providerInput());
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('{"error":{"message":"test-provider-secret rejected"}}', { status: 429 }),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    const job = await f.engine.testModel({
+      id: p.id,
+      model: p.defaultModel,
+      clientRequestId: randomUUID(),
+    });
+    await f.engine.tick();
+    const failed = await waitFor(job.id, "failed");
+    expect(failed.error?.message).not.toContain("test-provider-secret");
+    expect((await f.engine.listProviders())[0]?.models[0]?.lastTestStatus).toBe("failed");
+    await f.engine.tick();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    fetcher.mockImplementation(
+      (_url, request) =>
+        new Promise((_resolve, reject) =>
+          request.signal.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          ),
+        ),
+    );
+    const running = await f.engine.createJob(input(p.id));
+    await f.engine.tick();
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await f.engine.cancelJob(running.id);
+    expect((await f.engine.getJob(running.id)).status).toBe("cancelled");
+    const queued = await f.engine.createJob(input(p.id));
+    await f.engine.cancelJob(queued.id);
+    await f.engine.tick();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it("pauses disabled providers and rejects queued jobs after connection/key changes", async () => {
+    const p = await f.engine.upsertProvider(providerInput());
+    const job = await f.engine.createJob(input(p.id));
+    await f.engine.upsertProvider({ ...p, enabled: false });
+    await f.engine.tick();
+    expect((await f.engine.getJob(job.id)).status).toBe("queued");
+    await expect(f.engine.deleteProvider(p.id)).rejects.toMatchObject({ code: "provider_busy" });
+    await f.engine.upsertProvider({ ...p, apiKey: "new-secret", enabled: true });
+    await f.engine.tick();
+    expect((await f.engine.getJob(job.id)).error?.code).toBe("provider_changed");
+  });
+  it("normalizes EXIF orientation and validates mask dimensions and alpha", async () => {
+    const rotated = await sharp({
+      create: { width: 12, height: 8, channels: 3, background: "red" },
+    })
+      .jpeg()
+      .withMetadata({ orientation: 6 })
+      .toBuffer();
+    const base = await f.engine.upload(rotated, "rotated.jpg");
+    expect([base.width, base.height]).toEqual([8, 12]);
+    expect((await sharp(await f.engine.assets.read(base)).metadata()).orientation).toBeUndefined();
+    const opaque = await f.engine.upload(
+      await sharp({
+        create: {
+          width: 8,
+          height: 12,
+          channels: 4,
+          background: { r: 255, g: 255, b: 255, alpha: 1 },
+        },
+      })
+        .png()
+        .toBuffer(),
+      "mask.png",
+    );
+    await expect(f.engine.assets.validateMask(opaque, base)).rejects.toMatchObject({
+      code: "empty_mask",
+    });
+    const mask = await f.engine.upload(
+      await sharp({
+        create: {
+          width: 8,
+          height: 12,
+          channels: 4,
+          background: { r: 255, g: 255, b: 255, alpha: 0 },
+        },
+      })
+        .png()
+        .toBuffer(),
+      "mask.png",
+    );
+    await f.engine.assets.validateMask(mask, base);
+    await expect(
+      f.engine.assets.validateMask(mask, await f.engine.upload(f.png, "reference.png")),
+    ).rejects.toMatchObject({ code: "invalid_mask" });
+  });
+  it("reports timeouts, corrupt images and disk failures without retry", async () => {
+    const p = await f.engine.upsertProvider(providerInput());
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException("Timed out", "TimeoutError"))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ data: [{ b64_json: Buffer.from("not an image").toString("base64") }] }),
+        ),
+      )
+      .mockResolvedValueOnce(f.response());
+    vi.stubGlobal("fetch", fetcher);
+    const timeout = await f.engine.createJob(input(p.id));
+    await f.engine.tick();
+    expect((await waitFor(timeout.id, "failed")).error?.code).toBe("timeout");
+    const corrupt = await f.engine.createJob(input(p.id));
+    await f.engine.tick();
+    expect((await waitFor(corrupt.id, "failed")).outputs).toHaveLength(0);
+    vi.spyOn(f.engine.assets, "save").mockRejectedValueOnce(new Error("Disk full"));
+    const disk = await f.engine.createJob(input(p.id));
+    await f.engine.tick();
+    expect((await waitFor(disk.id, "failed")).error?.code).toBe("incomplete_results");
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+  it("keeps assets referenced by later edits/drafts after source deletion and paginates without duplicates", async () => {
+    const p = await f.engine.upsertProvider(providerInput());
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(f.response()));
+    const a = await f.engine.createJob(input(p.id));
+    await f.engine.tick();
+    const done = await waitFor(a.id, "succeeded");
+    const b = await f.engine.createJob(input(p.id, { inputAssetIds: [done.outputs[0]!.id] }));
+    await f.engine.deleteJob(a.id);
+    expect(await f.engine.getAsset(done.outputs[0]!.id)).toBeTruthy();
+    await f.engine.cancelJob(b.id);
+    await f.engine.upsertDraft({
+      id: "draft",
+      prompt: "",
+      providerId: p.id,
+      model: p.defaultModel,
+      parameters: { n: 1 },
+      inputAssetIds: [done.outputs[0]!.id],
+      maskAssetId: null,
+      updatedAt: new Date().toISOString(),
+    });
+    await f.engine.deleteJob(b.id);
+    expect(await f.engine.getAsset(done.outputs[0]!.id)).toBeTruthy();
+    for (let i = 0; i < 32; i++) await f.engine.createJob(input(p.id));
+    const first = await Effect.runPromise(f.repository.listJobs({})),
+      second = await Effect.runPromise(f.repository.listJobs({ cursor: first.nextCursor! }));
+    expect(first.jobs).toHaveLength(30);
+    expect(second.jobs).toHaveLength(2);
+    expect(new Set([...first.jobs, ...second.jobs].map((j) => j.id)).size).toBe(32);
+  });
+  it("recovers interrupted requests and saving checkpoints without generation POSTs", async () => {
+    const p = await f.engine.upsertProvider(providerInput());
+    const a = await f.engine.createJob(input(p.id)),
+      b = await f.engine.createJob(input(p.id, { parameters: { n: 2 } }));
+    const asset = await f.engine.upload(f.png, "result.png");
+    await Effect.runPromise(f.repository.saveJob({ ...a, status: "running" }));
+    await Effect.runPromise(f.repository.saveJob({ ...b, status: "saving", outputs: [asset] }));
+    await writeFile(
+      path.join(f.root, "pending", `${b.id}.json`),
+      JSON.stringify({
+        payload: { data: [{ b64_json: "invalid" }, { b64_json: f.png.toString("base64") }] },
+        saved: { "1": asset.id },
+      }),
+    );
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const recovered = new ImageGenerationEngine(
+      f.repository,
+      f.engine.secrets,
+      f.root,
+      async () => {},
+    );
+    await recovered.initialize();
+    expect((await recovered.getJob(a.id)).status).toBe("interrupted");
+    const restored = await recovered.getJob(b.id);
+    expect(restored.status).toBe("partial");
+    expect(restored.outputs).toHaveLength(1);
+    expect(fetcher).not.toHaveBeenCalled();
+    await recovered.shutdown();
+    expect(JSON.stringify(restored)).not.toContain("test-provider-secret");
+  });
+  it("deletes unreferenced job assets without deleting new uploads", async () => {
+    const p = await f.engine.upsertProvider(providerInput());
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(f.response()));
+    const a = await f.engine.createJob(input(p.id));
+    await f.engine.tick();
+    const done = await waitFor(a.id, "succeeded");
+    const other = await f.engine.upload(
+      await sharp(f.png).negate().png().toBuffer(),
+      "new-upload.png",
+    );
+    await f.engine.deleteJob(a.id);
+    expect(await f.engine.getAsset(other.id)).toBeTruthy();
+    await expect(readFile(f.engine.assets.filePath(done.outputs[0]!.id))).rejects.toThrow();
+  });
+});

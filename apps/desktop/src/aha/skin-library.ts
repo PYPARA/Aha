@@ -29,6 +29,7 @@ import {
   MAX_IMAGE_BYTES,
 } from "./appearance-images";
 import { BUILTIN_PALETTES, paletteFromPreview } from "./skin-palettes";
+import { refreshBuiltinDefinition } from "./skin-upgrade";
 
 const MAX_PACKAGE_BYTES = 100 * 1024 * 1024;
 const definitionIds = (definition: SkinDefinition) => [
@@ -114,24 +115,52 @@ export class SkinLibrary {
           "皮肤库损坏，原文件已保留；当前外观未覆盖 / Skin library is corrupt; existing appearance was preserved.";
     }
     // Register built-ins independently; missing bundles produce preview errors, never erase the library.
+    const beforeBuiltins = structuredClone(this.state);
+    let refreshed = false;
+    let refreshFailed = false;
     for (const [id, name] of [
       ["synara-default", "默认样式"],
       ["aha-elation", "虚照·欢愉"],
       ["furina-chanson", "芙宁娜·众水之歌"],
     ]) {
-      if (this.state.skins.some((s) => s.id === id)) continue;
+      const existing = this.state.skins.find((s) => s.id === id);
       try {
         const definition = await this.readBuiltin(id!);
-        this.state.skins.push({
-          id: id!,
-          name: name!,
-          origin: "builtin",
-          original: definition,
-          adjusted: definition,
-          fingerprint: null,
-        });
+        if (existing) {
+          if (existing.origin !== "builtin" || id === "synara-default") continue;
+          if (stableJson(existing.original) === stableJson(definition)) continue;
+          existing.adjusted = refreshBuiltinDefinition(
+            existing.original,
+            existing.adjusted,
+            definition,
+          );
+          existing.original = definition;
+          refreshed = true;
+        } else
+          this.state.skins.push({
+            id: id!,
+            name: name!,
+            origin: "builtin",
+            original: definition,
+            adjusted: definition,
+            fingerprint: null,
+          });
       } catch {
+        if (existing && id !== "synara-default") refreshFailed = true;
         this.warning ??= "部分内置皮肤资源不可用 / Some built-in skin assets are unavailable.";
+      }
+    }
+    if (refreshFailed || this.blocked) {
+      if (refreshed) this.state = beforeBuiltins;
+    } else if (refreshed && !this.needsInitialization) {
+      const next = structuredClone(this.state);
+      this.state = beforeBuiltins;
+      next.revision++;
+      try {
+        await this.write(next);
+      } catch {
+        this.warning =
+          "内置皮肤更新保存失败，旧配置已保留 / Built-in skin update could not be saved; previous settings were preserved.";
       }
     }
     for (const id of definitionIds({
@@ -164,8 +193,7 @@ export class SkinLibrary {
       id as "aha-elation" | "furina-chanson",
       directory,
     );
-    const icon = id === "aha-elation" ? this.options.defaultIcon() : join(directory, "icon.png");
-    if (!icon) throw new Error("内置皮肤图标缺失 / Built-in skin icon is missing.");
+    const icon = join(directory, "icon.png");
     const iconId = await this.appearance.images.store(
       await this.normalizeIcon(await readBounded(icon, MAX_IMAGE_BYTES)),
     );
@@ -452,14 +480,21 @@ export class SkinLibrary {
   }
   async exportPackage(file: string) {
     const entry = this.state.skins.find((s) => s.id === this.state.activeId)!;
+    // A bundle refresh only changes future previews. Export the applied appearance,
+    // including its old resources, until the user explicitly applies the new skin.
+    const definition: SkinDefinition = {
+      backgrounds: structuredClone(this.state.preferences.backgrounds),
+      palette: this.state.palette,
+      iconId: entry.adjusted.iconId === null ? null : this.state.effectiveIconId,
+    };
     const images = await Promise.all(
-      definitionIds(entry.adjusted).map(async (id) => ({
+      definitionIds(definition).map(async (id) => ({
         id,
         data: Buffer.from((await this.appearance.images.read(id)).bytes).toString("base64"),
       })),
     );
     const bytes = JSON.stringify(
-      SkinPackageSchema.parse({ schemaVersion: 4, name: entry.name, skin: entry.adjusted, images }),
+      SkinPackageSchema.parse({ schemaVersion: 4, name: entry.name, skin: definition, images }),
     );
     if (Buffer.byteLength(bytes) > MAX_PACKAGE_BYTES)
       throw new Error("皮肤包上限100MB / Skin package exceeds 100MB.");

@@ -3,7 +3,7 @@
 // Layer: Chat and composer UI component
 // Exports: ExpandedImageOverlay
 
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useEffect, useRef, type ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "~/lib/icons";
@@ -11,6 +11,7 @@ import { notifyNativeSurfaceOcclusionChange } from "~/lib/nativeSurfaceOcclusion
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 
 interface ExpandedImageOverlayProps {
+  readonly actions?: ReactNode;
   readonly expandedImage: ExpandedImagePreview | null;
   readonly onClose: () => void;
   readonly onNavigate: (direction: -1 | 1) => void;
@@ -18,11 +19,14 @@ interface ExpandedImageOverlayProps {
 
 export function ExpandedImageOverlay({
   expandedImage,
+  actions,
   onClose,
   onNavigate,
 }: ExpandedImageOverlayProps) {
   const expandedImageItem = expandedImage ? expandedImage.images[expandedImage.index] : null;
-  const open = expandedImageItem !== null;
+  const open = Boolean(expandedImageItem);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const hasActions = Boolean(actions);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -33,12 +37,58 @@ export function ExpandedImageOverlay({
     return notifyNativeSurfaceOcclusionChange;
   }, [open]);
 
+  useEffect(() => {
+    if (!open || !actions) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        onNavigate(-1);
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        onNavigate(1);
+      }
+      if (event.key === "Tab") {
+        const buttons = [
+          ...(dialogRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ??
+            []),
+        ];
+        const first = buttons[0],
+          last = buttons.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        }
+        if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, actions, onClose, onNavigate]);
+
+  useEffect(() => {
+    if (!open || !hasActions) return;
+    const previous = document.activeElement;
+    dialogRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, [open, hasActions]);
+
   if (!expandedImage || !expandedImageItem) {
     return null;
   }
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 [-webkit-app-region:no-drag]"
       role="dialog"
       aria-modal="true"
@@ -76,7 +126,7 @@ export function ExpandedImageOverlay({
         <img
           src={expandedImageItem.src}
           alt={expandedImageItem.name}
-          className="max-h-[86vh] max-w-[92vw] select-none rounded-lg border border-[color:var(--color-border)] bg-[var(--color-background-elevated-primary-opaque)] object-contain shadow-2xl"
+          className={`${actions ? "max-h-[78vh]" : "max-h-[86vh]"} max-w-[92vw] select-none rounded-lg border border-[color:var(--color-border)] bg-[var(--color-background-elevated-primary-opaque)] object-contain shadow-2xl`}
           draggable={false}
         />
         <p className="mt-2 max-w-[92vw] truncate text-center text-ui leading-snug text-muted-foreground/80">
@@ -85,6 +135,7 @@ export function ExpandedImageOverlay({
             ? ` (${expandedImage.index + 1}/${expandedImage.images.length})`
             : ""}
         </p>
+        {actions ? <div className="mt-3 rounded-xl bg-background p-2">{actions}</div> : null}
       </div>
       {expandedImage.images.length > 1 ? (
         <Button

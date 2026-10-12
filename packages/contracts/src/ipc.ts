@@ -59,6 +59,19 @@ import type {
   TodoUpdateInput,
 } from "./todo";
 import type {
+  ImageJob,
+  ImageJobCreateInput,
+  ImageJobListResult,
+  ImageJobListInput,
+  ImageJobEvent,
+  ImageDraft,
+  ImageTestInput,
+  ImageProvider,
+  ImageProviderDiscoveryInput,
+  ImageProviderDiscoveryResult,
+  ImageProviderInput,
+} from "./imageGeneration";
+import type {
   ProjectAgentConfigureInput,
   ProjectAgentLinkProjectInput,
   ProjectAgentUnlinkProjectInput,
@@ -1481,6 +1494,22 @@ export interface NativeApi {
     update: (input: TodoUpdateInput) => Promise<Todo>;
     delete: (input: TodoDeleteInput) => Promise<void>;
     onEvent: (callback: (event: TodoStreamEvent) => void) => () => void;
+  };
+  imageGeneration: {
+    listProviders: () => Promise<ReadonlyArray<ImageProvider>>;
+    upsertProvider: (input: ImageProviderInput) => Promise<ImageProvider>;
+    deleteProvider: (input: { id: string }) => Promise<void>;
+    discoverModels: (input: ImageProviderDiscoveryInput) => Promise<ImageProviderDiscoveryResult>;
+    listJobs: (input: ImageJobListInput) => Promise<ImageJobListResult>;
+    getJob: (input: { id: string }) => Promise<ImageJob>;
+    deleteJob: (input: { id: string }) => Promise<void>;
+    testModel: (input: ImageTestInput) => Promise<ImageJob>;
+    getDraft: (input: { id: string }) => Promise<ImageDraft | null>;
+    upsertDraft: (input: ImageDraft) => Promise<ImageDraft>;
+    deleteDraft: (input: { id: string }) => Promise<void>;
+    onEvent: (callback: (event: ImageJobEvent) => void) => () => void;
+    createJob: (input: ImageJobCreateInput) => Promise<ImageJob>;
+    cancelJob: (input: { id: string }) => Promise<ImageJob>;
   };
   browser: BrowserControlMethods & {
     annotations: BrowserAnnotationMethods;

@@ -31,6 +31,20 @@ import {
   TodoUpdateInput,
 } from "./todo";
 import {
+  ImageJob,
+  ImageJobCreateInput,
+  ImageJobEvent,
+  ImageJobListInput,
+  ImageJobListResult,
+  ImageProvider,
+  ImageProviderDiscoveryInput,
+  ImageProviderDiscoveryResult,
+  ImageProviderInput,
+  ImageIdInput,
+  ImageTestInput,
+  ImageDraft,
+} from "./imageGeneration";
+import {
   ProjectAgentConfigureInput,
   ProjectAgentLinkProjectInput,
   ProjectAgentUnlinkProjectInput,
@@ -377,6 +391,8 @@ export class WsRpcError extends Schema.TaggedErrorClass<WsRpcError>()("WsRpcErro
   cause: Schema.optional(Schema.Defect),
   code: Schema.optional(Schema.String),
   retryable: Schema.optional(Schema.Boolean),
+  upstreamStatus: Schema.optional(Schema.Finite),
+  requestId: Schema.optional(Schema.String),
   retryAfterMs: Schema.optional(Schema.Number),
 }) {}
 
@@ -1700,6 +1716,78 @@ export const WsSubscribeTodoEventsRpc = Rpc.make(WS_METHODS.subscribeTodoEvents,
   stream: true,
 });
 
+export const WsImageProviderListRpc = Rpc.make(WS_METHODS.imageProviderList, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(ImageProvider),
+  error: WsRpcError,
+});
+export const WsImageProviderUpsertRpc = Rpc.make(WS_METHODS.imageProviderUpsert, {
+  payload: ImageProviderInput,
+  success: ImageProvider,
+  error: WsRpcError,
+});
+export const WsImageProviderDeleteRpc = Rpc.make(WS_METHODS.imageProviderDelete, {
+  payload: ImageIdInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+export const WsImageProviderDiscoverModelsRpc = Rpc.make(WS_METHODS.imageProviderDiscoverModels, {
+  payload: ImageProviderDiscoveryInput,
+  success: ImageProviderDiscoveryResult,
+  error: WsRpcError,
+});
+export const WsImageProviderTestRpc = Rpc.make(WS_METHODS.imageProviderTest, {
+  payload: ImageTestInput,
+  success: ImageJob,
+  error: WsRpcError,
+});
+export const WsImageJobListRpc = Rpc.make(WS_METHODS.imageJobList, {
+  payload: ImageJobListInput,
+  success: ImageJobListResult,
+  error: WsRpcError,
+});
+export const WsImageJobGetRpc = Rpc.make(WS_METHODS.imageJobGet, {
+  payload: ImageIdInput,
+  success: ImageJob,
+  error: WsRpcError,
+});
+export const WsImageJobCreateRpc = Rpc.make(WS_METHODS.imageJobCreate, {
+  payload: ImageJobCreateInput,
+  success: ImageJob,
+  error: WsRpcError,
+});
+export const WsImageJobCancelRpc = Rpc.make(WS_METHODS.imageJobCancel, {
+  payload: ImageIdInput,
+  success: ImageJob,
+  error: WsRpcError,
+});
+export const WsImageJobDeleteRpc = Rpc.make(WS_METHODS.imageJobDelete, {
+  payload: ImageIdInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+export const WsImageDraftGetRpc = Rpc.make(WS_METHODS.imageDraftGet, {
+  payload: ImageIdInput,
+  success: Schema.NullOr(ImageDraft),
+  error: WsRpcError,
+});
+export const WsImageDraftUpsertRpc = Rpc.make(WS_METHODS.imageDraftUpsert, {
+  payload: ImageDraft,
+  success: ImageDraft,
+  error: WsRpcError,
+});
+export const WsImageDraftDeleteRpc = Rpc.make(WS_METHODS.imageDraftDelete, {
+  payload: ImageIdInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+export const WsSubscribeImageJobsRpc = Rpc.make(WS_METHODS.subscribeImageJobs, {
+  payload: Schema.Struct({}),
+  success: ImageJobEvent,
+  error: WsRpcError,
+  stream: true,
+});
+
 export const WsProjectAgentGetOverviewRpc = Rpc.make(WS_METHODS.projectAgentGetOverview, {
   payload: ProjectAgentGetOverviewInput,
   success: ProjectAgentOverview,
@@ -2047,6 +2135,20 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsTodoUpdateRpc,
   WsTodoDeleteRpc,
   WsSubscribeTodoEventsRpc,
+  WsImageProviderListRpc,
+  WsImageProviderUpsertRpc,
+  WsImageProviderDeleteRpc,
+  WsImageProviderDiscoverModelsRpc,
+  WsImageJobListRpc,
+  WsImageJobCreateRpc,
+  WsImageJobCancelRpc,
+  WsSubscribeImageJobsRpc,
+  WsImageProviderTestRpc,
+  WsImageJobGetRpc,
+  WsImageJobDeleteRpc,
+  WsImageDraftGetRpc,
+  WsImageDraftUpsertRpc,
+  WsImageDraftDeleteRpc,
 );
 
 // Project-agent RPCs live in a satellite group: folding them into

@@ -1,0 +1,55 @@
+{
+  "version": "remaster-20261012",
+  "icon": {
+    "sha256": "e83231c423532c679e8291422821fcde67218a12fa80c17b1f88e009b937409a",
+    "size": [1024, 1024],
+    "bytes": 1347013
+  },
+  "backgrounds": [
+    {
+      "region": "window",
+      "source": "output/imagegen/remaster-continuation-20261012/furina/window.png",
+      "generatedSize": [1672, 941],
+      "method": "Image API output, locally resized",
+      "size": [2048, 1152],
+      "bytesCount": 3902544,
+      "sha256": "02ad8d2aa6990ab1f88b9bf074184ada668381115d4d9a4bd415b20249ac6e93"
+    },
+    {
+      "region": "rail",
+      "source": "output/imagegen/remaster-continuation-20261012/furina/rail.png",
+      "generatedSize": [768, 2048],
+      "method": "Image API output, locally resized",
+      "size": [768, 2048],
+      "bytesCount": 2106634,
+      "sha256": "2ebe484974446b372f4b95c10be4de0462ac498c5ff8e35972d882218c6844e7"
+    },
+    {
+      "region": "sidebar",
+      "source": "output/imagegen/remaster-continuation-20261012/furina/sidebar.png",
+      "generatedSize": [887, 1774],
+      "method": "Image API output, locally resized",
+      "size": [1024, 2048],
+      "bytesCount": 2536592,
+      "sha256": "2f0d730de3c580ed33ca56ab5eb0dab67eb2c16d962425912821f2af3dbaf935"
+    },
+    {
+      "region": "content",
+      "source": "output/imagegen/remaster-20261011/furina/content.png",
+      "generatedSize": [1672, 941],
+      "method": "Image API output, locally resized",
+      "size": [2048, 1152],
+      "bytesCount": 3915322,
+      "sha256": "3412060c8a828a7d1a22681eeda2e1323019f87917c9e0b56984722bef67febe"
+    },
+    {
+      "region": "composer",
+      "source": "output/imagegen/remaster-continuation-20261012/furina/composer.png",
+      "generatedSize": [2043, 770],
+      "method": "Image API output, locally resized",
+      "size": [2048, 768],
+      "bytesCount": 2124902,
+      "sha256": "906f43bd072cf81fe8070ea85938a37b27d68bf0e4ff1be20f0663f5f048fee5"
+    }
+  ]
+}

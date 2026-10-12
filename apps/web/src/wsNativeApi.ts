@@ -47,6 +47,7 @@ import {
   type WsBootstrapNegotiateResult,
   type AutomationStreamEvent,
   type TodoStreamEvent,
+  type ImageJobEvent,
   DEVICE_WS_CHANNELS,
   DEVICE_WS_METHODS,
   type DeviceEvent,
@@ -168,6 +169,7 @@ const terminalEventListeners = createListenerRegistry<TerminalEvent>();
 const projectDevServerEventListeners = createListenerRegistry<ProjectDevServerEvent>();
 const automationEventListeners = createListenerRegistry<AutomationStreamEvent>();
 const todoEventListeners = createListenerRegistry<TodoStreamEvent>();
+const imageJobEventListeners = createListenerRegistry<ImageJobEvent>();
 const deviceEventListeners = createListenerRegistry<DeviceEvent>();
 const projectAgentEventListeners = createListenerRegistry<ProjectAgentStreamEvent>();
 const computerEventListeners = createListenerRegistry<ComputerEvent>();
@@ -193,6 +195,7 @@ function clearWsNativeApiListeners(): void {
   projectDevServerEventListeners.clear();
   automationEventListeners.clear();
   todoEventListeners.clear();
+  imageJobEventListeners.clear();
   deviceEventListeners.clear();
   projectAgentEventListeners.clear();
   computerEventListeners.clear();
@@ -528,6 +531,9 @@ export function createWsNativeApi(): NativeApi {
       todoEventListeners.emit(message.data);
     });
   }
+  transport.subscribe(WS_CHANNELS.imageJobEvent, (message) =>
+    imageJobEventListeners.emit(message.data),
+  );
   transport.subscribe(DEVICE_WS_CHANNELS.event, (message) => {
     deviceEventListeners.emit(message.data);
   });
@@ -977,6 +983,22 @@ export function createWsNativeApi(): NativeApi {
       update: (input) => transport.request(WS_METHODS.todoUpdate, input),
       delete: (input) => transport.request(WS_METHODS.todoDelete, input),
       onEvent: todoEventListeners.subscribe,
+    },
+    imageGeneration: {
+      listProviders: () => transport.request(WS_METHODS.imageProviderList, {}),
+      upsertProvider: (input) => transport.request(WS_METHODS.imageProviderUpsert, input),
+      deleteProvider: (input) => transport.request(WS_METHODS.imageProviderDelete, input),
+      discoverModels: (input) => transport.request(WS_METHODS.imageProviderDiscoverModels, input),
+      listJobs: (input) => transport.request(WS_METHODS.imageJobList, input),
+      getJob: (input) => transport.request(WS_METHODS.imageJobGet, input),
+      deleteJob: (input) => transport.request(WS_METHODS.imageJobDelete, input),
+      testModel: (input) => transport.request(WS_METHODS.imageProviderTest, input),
+      getDraft: (input) => transport.request(WS_METHODS.imageDraftGet, input),
+      upsertDraft: (input) => transport.request(WS_METHODS.imageDraftUpsert, input),
+      deleteDraft: (input) => transport.request(WS_METHODS.imageDraftDelete, input),
+      onEvent: imageJobEventListeners.subscribe,
+      createJob: (input) => transport.request(WS_METHODS.imageJobCreate, input),
+      cancelJob: (input) => transport.request(WS_METHODS.imageJobCancel, input),
     },
     device: {
       list: (input) => transport.request(DEVICE_WS_METHODS.list, input),

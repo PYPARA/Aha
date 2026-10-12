@@ -1,4 +1,5 @@
 import { useAhaTranslation } from "../aha/AppearanceProvider";
+import { AhaBackgroundLayer } from "../aha/BackgroundLayer";
 import { type LegendListRef } from "@legendapp/list/react";
 import {
   parseComputerInvocation,
@@ -5756,6 +5757,7 @@ export default function ChatView({
         data-chat-composer-form="true"
         data-chat-pane-scope={paneScopeId}
       >
+        <AhaBackgroundLayer />
         <ComposerColumnFrame>
           {/* A bare wrapper keeps the normal-flow panels' -mb-px seam onto the input shell
                 via margin collapse. */}

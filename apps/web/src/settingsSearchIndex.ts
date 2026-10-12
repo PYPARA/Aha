@@ -57,6 +57,13 @@ export function settingsSearchEntryTarget(entry: SettingsSearchEntry): string | 
 // null while inactive, so the sidebar cannot read every row at runtime; keep this list in sync
 // when rows are added, renamed, hidden conditionally, or represented as panel-level results.
 export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
+  {
+    id: "imageProviders:api",
+    section: "imageProviders",
+    title: "Image providers",
+    target: null,
+    keywords: "drawing image generation models api key base url 绘图 生图 供应商 模型",
+  },
   // ── General ────────────────────────────────────────────────────────────────
   {
     id: "general:default-provider",

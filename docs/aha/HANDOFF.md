@@ -1,4 +1,30 @@
-# Aha handoff — 2026-10-10
+# Aha handoff — 2026-10-12（完整背景）
+
+新版完整素材已随包接入，开发包 `release/Aha-skin-remaster-dev-1.0.1-20261012-mac-arm64.zip`。独立v4皮肤包：`release/Xuzhao-Elation-remaster-20261012.skin.json`、`release/Furina-Chanson-remaster-20261012.skin.json`，各六张资源。旧ZIP/皮肤包/素材全部保留。外观中选择虚照或芙宁娜，预览并应用后使用新版；启动升级不自动换当前外观/图标，Aha品牌与默认无图样式不变。
+
+续做9次high图片请求，8成功1超时，无自动重试。虚照输入框API超时后，按允许的本地裁切从新窗口图制作8:3横幅；明确记录派生来源，不能报告为9次成功生图。芙宁娜内容图沿用上一轮成功图。所有10张最终背景已齐，官方参考画风约束/逐张视检/尺寸/限额/哈希检查完成；生成图不是官方原画。
+
+版本目录 `assets/aha/{elation,furina}/remaster-20261012/`：preview、README、五区PROMPTS、verification与图标格式。无凭证请求记录 `assets/aha/remaster-continuation-20261012.json`，原始图在output/imagegen的两阶段目录。处理脚本 `apps/desktop/scripts/prepare-remaster-backgrounds.ts`：整套验证后写两套manifest，旧hashed资源保留。
+
+fmt/lint/typecheck通过；Vitest50通过1跳过，Chromium9通过。素材-only本次用显式--skip-build复用已验证JS构建集中重新打包一次。macOS arm64独立旧库实测升级不自动应用、新版五区引用/预览取消/应用/clear/默认恢复/v4去重往返/重启/Dock-Finder/聊天输入与Logo/favicon通过；浅深截图视检，日志 `.tmp/skin-remaster-complete/`。未签名/公证/发布，Windows/Linux及流式测量未验证。
+
+当前任务完成。若要求虚照输入框再单独生一张，需要新的明确请求；当前派生版本已可用。main无提交/推送，已有绘图修改保留，没有Codex/Claude主会话调用，不读取用户历史聊天。以下为此前阶段历史：
+
+# 上一阶段 handoff — 2026-10-12
+
+当前交付为**头像/背景隔离/皮肤升级已完成，背景重制未完成**。新开发包 `release/Aha-skin-remaster-partial-dev-1.0.1-20261012-mac-arm64.zip`；旧 ZIP 保留。打开外观 → 选择虚照或芙宁娜 → 预览 → 应用，才会切换新版运行时头像；启动升级不会自动改变活动外观或原生图标。基础安装图标/Aha品牌/默认无图样式继续保留。
+
+新版图标及 PNG/ICNS/ICO/favicon/Apple Touch Icon：`assets/aha/elation/remaster-20261011/`、`assets/aha/furina/remaster-20261011/`；合览 `assets/aha/remaster-20261011-preview.png`。虚照来自用户480px上传图，仅本地几何处理；芙宁娜来自官方荒性图片输入重绘，用户已接受帽顶裁切。详细来源、哈希与处理见各 README/verification.json。
+
+imagegen 官方 CLI、授权服务、gpt-image-2.5、high、max_retries=0。本轮发3次：头像成功，芙宁娜内容图成功，虚照内容图HTTP524失败。停止后8次未发，无重试。缺虚照5张、芙宁娜4张背景；成功内容图是未接入的候选，当前随包仍是旧背景。原始提示词/参考/记录 `output/imagegen/remaster-20261011/`。接口恢复后续做前检查剩余预算，不自动新增付费请求。
+
+代码入口：`BackgroundLayer.tsx` + `backgrounds.css` + `AppearanceProvider.tsx`（本区不透明底色和独立合成）；`skin-upgrade.ts` + `skin-library.ts`（两套定义幂等刷新，调整保留，当前外观不变，失败旧库保留）；`prepare-skin-remaster.ts`（本地图标处理）。无新IPC或主题包版本。v4导出使用当前实际已应用素材，避免导出尚未应用的升级定义。
+
+fmt/lint/typecheck通过；当前Vitest50通过1跳过，Chromium9通过，嵌套强色像素12项通过。一次普通macOS arm64完整构建，独立App/AHA_HOME真实切换/预览取消/clear/默认重置/v4去重往返/重启/Dock-Finder/聊天五区和输入草稿/Logo/favicon通过。没有发送消息或 provider 请求，Windows/Linux与流式测量未验证。细节及两个测试/转换尝试问题见 STATUS。本轮未提交/推送/发布，已有绘图tracked修改与开始时51234byte patch完全一致。此前AGENTS.md已撤销；保留用户本轮实施计划的约束。
+
+上一轮记录供背景兼容与模块定位使用：
+
+# 上一轮 handoff — 2026-10-10
 
 ## 结果与操作
 

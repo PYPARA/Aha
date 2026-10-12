@@ -369,3 +369,111 @@ describe("Aha skin library", () => {
     expect(library.snapshot().appearance.preferences.uiWeight).toBe("700");
   });
 });
+
+it("refreshes built-in references once without applying them; preserves adjustments and exports the active old artwork", async () => {
+  const { library, appearance, options, applyIcon, dir } = await fixture();
+  const old = await library.preview("aha-elation");
+  old.definition.backgrounds.window.opacity = 0.31;
+  old.definition.backgrounds.content.x = 72;
+  old.definition.palette!.dark.surface = "#123456";
+  const userImage = await appearance.images.store(
+    await sharp({ create: { width: 30, height: 30, channels: 4, background: "#789abc" } })
+      .png()
+      .toBuffer(),
+  );
+  old.definition.backgrounds.sidebar.imageId = userImage;
+  await apply(library, old);
+  const before = library.snapshot();
+  applyIcon.mockClear();
+  const replacement = await appearance.images.store(
+    await sharp({ create: { width: 1024, height: 1024, channels: 4, background: "#234567" } })
+      .png()
+      .toBuffer(),
+  );
+  const definitions = new Map(
+    before.skins
+      .filter((s) => s.origin === "builtin")
+      .map((s) => [s.id, structuredClone(s.original)]),
+  );
+  const newDefinition = definitions.get("aha-elation")!;
+  newDefinition.iconId = replacement;
+  for (const background of Object.values(newDefinition.backgrounds))
+    background.imageId = replacement;
+  const refreshed = new SkinLibrary(library.file, appearance, options);
+  vi.spyOn(
+    refreshed as unknown as { readBuiltin(id: string): Promise<SkinDefinition> },
+    "readBuiltin",
+  ).mockImplementation(async (id) => structuredClone(definitions.get(id)!));
+  await refreshed.load();
+  const next = refreshed.snapshot();
+  expect(next.revision).toBe(before.revision + 1);
+  expect(next.activeId).toBe(before.activeId);
+  expect(next.effectiveIconId).toBe(before.effectiveIconId);
+  expect(next.appearance).toEqual(before.appearance);
+  expect(next.palette).toEqual(before.palette);
+  expect(applyIcon).not.toHaveBeenCalled();
+  const preview = await refreshed.preview("aha-elation");
+  expect(preview.definition.iconId).toBe(replacement);
+  expect(preview.definition.backgrounds.window).toMatchObject({
+    imageId: replacement,
+    opacity: 0.31,
+  });
+  expect(preview.definition.backgrounds.content.x).toBe(72);
+  expect(preview.definition.backgrounds.sidebar.imageId).toBe(userImage);
+  expect(preview.definition.palette!.dark.surface).toBe("#123456");
+  expect((await refreshed.preview("aha-elation", true)).definition).toEqual(newDefinition);
+  const file = join(dir, "active-before-apply.json");
+  await refreshed.exportPackage(file);
+  const exported = JSON.parse(await readFile(file, "utf8"));
+  expect(exported.skin.iconId).toBe(before.effectiveIconId);
+  expect(exported.skin.backgrounds).toEqual(before.appearance.preferences.backgrounds);
+  const persisted = await readFile(library.file, "utf8");
+  await refreshed.load();
+  expect(refreshed.snapshot()).toEqual(next);
+  expect(await readFile(library.file, "utf8")).toBe(persisted);
+  await apply(refreshed, preview);
+  expect(applyIcon.mock.calls.at(-1)?.[0]).toBe(replacement);
+  expect(refreshed.snapshot().effectiveIconId).toBe(replacement);
+  await refreshed.exportPackage(file);
+  expect((await refreshed.importPackage(file)).definition).toEqual(preview.definition);
+});
+
+it.each(["missing", "save"])(
+  "preserves the entire old library when a built-in refresh has a %s failure",
+  async (failure) => {
+    const { library, appearance, options, applyIcon } = await fixture();
+    const before = library.snapshot(),
+      file = await readFile(library.file, "utf8");
+    const definitions = new Map(
+      before.skins
+        .filter((s) => s.origin === "builtin")
+        .map((s) => [s.id, structuredClone(s.original)]),
+    );
+    definitions.get("furina-chanson")!.backgrounds.window.opacity = 0.75;
+    const refreshed = new SkinLibrary(library.file, appearance, options);
+    vi.spyOn(
+      refreshed as unknown as { readBuiltin(id: string): Promise<SkinDefinition> },
+      "readBuiltin",
+    ).mockImplementation(async (id) => {
+      if (failure === "missing" && id === "aha-elation") throw new Error("missing asset");
+      return structuredClone(definitions.get(id)!);
+    });
+    if (failure === "save")
+      vi.spyOn(
+        refreshed as unknown as { write(value: unknown): Promise<void> },
+        "write",
+      ).mockRejectedValue(new Error("save failed"));
+    await refreshed.load();
+    expect(await readFile(library.file, "utf8")).toBe(file);
+    expect(refreshed.snapshot()).toMatchObject({
+      revision: before.revision,
+      activeId: before.activeId,
+      effectiveIconId: before.effectiveIconId,
+      palette: before.palette,
+      skins: before.skins,
+    });
+    expect(refreshed.snapshot().appearance.preferences).toEqual(before.appearance.preferences);
+    expect(refreshed.snapshot().warning).toBeTruthy();
+    expect(applyIcon).not.toHaveBeenCalled();
+  },
+);

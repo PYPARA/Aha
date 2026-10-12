@@ -1,0 +1,9 @@
+{
+  "source": "references/xuzhao-user-avatar.png",
+  "sourceSize": [480, 480],
+  "sourceAlpha": false,
+  "finalSize": [1024, 1024],
+  "sha256": "f46932a4ca3642e9bc1f7046f0c9c251d0344a2ffc2ea57fabc6bc1b45397af8",
+  "bytes": 1860936,
+  "processing": "Resize, geometric rounded mask, transparent outer padding; no black-pixel removal or synthesized detail."
+}

@@ -21,4 +21,9 @@ const patches = parsePatchFiles(
   "diff --git a/smoke.txt b/smoke.txt\n--- a/smoke.txt\n+++ b/smoke.txt\n@@ -1 +1 @@\n-before\n+after\n",
 );
 assert.equal(patches[0]?.files[0]?.name, "smoke.txt");
+const { default: sharp } = await import("sharp");
+const image = await sharp({ create: { width: 8, height: 8, channels: 4, background: "blue" } })
+  .png()
+  .toBuffer();
+assert.equal((await sharp(image).metadata()).width, 8);
 console.log("Packaged runtime dependency smoke passed.");

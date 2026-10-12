@@ -1,4 +1,5 @@
 import type { ResolvedKeybindingsConfig } from "@synara/contracts";
+import { AhaBackgroundLayer } from "../aha/BackgroundLayer";
 import { CHAT_SURFACE_HEADER_HEIGHT_PX } from "@synara/shared/desktopChrome";
 import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
@@ -616,6 +617,7 @@ function ChatRouteLayout() {
       ref={setRouteColumn}
       className="relative flex h-svh min-h-0 min-w-0 flex-1"
     >
+      <AhaBackgroundLayer />
       <div aria-hidden className="app-rail-header-divider" />
       {isEditorView ? null : (
         <SidebarInstanceProvider side="left" resizable={THREAD_SIDEBAR_RESIZABLE}>
@@ -642,6 +644,7 @@ function ChatRouteLayout() {
       data-sidebar-side="left"
       data-sidebar-layout="rail"
     >
+      <AhaBackgroundLayer />
       <ThreadRetentionMaintenanceToast />
       <ChatRouteGlobalShortcuts />
       <AppRailSlotProvider value={railSlot}>
@@ -654,11 +657,14 @@ function ChatRouteLayout() {
             <div className="flex min-h-0 shrink-0 flex-col">
               <AppShellTopStrip />
               <div className="flex min-h-0 flex-1">
-                <div data-aha-region="rail" ref={setRailSlot} className="flex shrink-0" />
+                <div data-aha-region="rail" ref={setRailSlot} className="flex shrink-0">
+                  <AhaBackgroundLayer />
+                </div>
                 <div
                   data-aha-region="sidebar"
                   className="app-rail-panel relative flex shrink-0 overflow-hidden [contain:paint]"
                 >
+                  <AhaBackgroundLayer />
                   {sidebarElement}
                 </div>
               </div>

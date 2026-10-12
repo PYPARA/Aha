@@ -6651,6 +6651,7 @@ export default function Sidebar() {
   // Home and Spaces switch the panel; route items navigate (prewarm included). The store's
   // active item keeps one item selected.
   const isOnThreadsSection =
+    !pathname.startsWith("/drawing") &&
     !isOnSettings &&
     !isOnGroups &&
     !isOnKanban &&
@@ -6697,9 +6698,11 @@ export default function Sidebar() {
   const railItemLabel = (id: RailOrderableItemId): string =>
     id === "home" || id === "spaces"
       ? RAIL_PANEL_ITEM_LABELS[id]
-      : id === "studio"
-        ? "Hubs"
-        : sidebarNavDescriptors[id].label;
+      : id === "drawing"
+        ? "Drawing"
+        : id === "studio"
+          ? "Hubs"
+          : sidebarNavDescriptors[id].label;
   const railItemFor = (id: RailOrderableItemId): AppRailItem => {
     const base = { id, glyphs: railItemGlyphs(id), label: railItemLabel(id) };
     if (id === "home" || id === "spaces") {
@@ -6718,6 +6721,16 @@ export default function Sidebar() {
         },
       };
     }
+    if (id === "drawing")
+      return {
+        ...base,
+        badge: null,
+        active: railActiveItem === "drawing",
+        onSelect: () => {
+          selectRailRouteItem("drawing");
+          void navigate({ to: "/drawing" });
+        },
+      };
     if (id === "studio") {
       return {
         ...base,
@@ -6748,7 +6761,7 @@ export default function Sidebar() {
   });
   const railItems: AppRailItem[] = railVisibleItemIds.map(railItemFor);
   const searchPaletteNavigationActions: SidebarSearchAction[] = (
-    ["inbox", "kanban", "studio", "automations"] as const
+    ["drawing", "inbox", "kanban", "studio", "automations"] as const
   )
     .filter((id) => isRailItemAvailable(id, railAvailability))
     .map((id) => {
