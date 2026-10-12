@@ -1988,7 +1988,7 @@ export const WsSubscribeProjectAgentEventsRpc = Rpc.make(WS_METHODS.subscribePro
 
 export const WsBootstrapRpcGroup = RpcGroup.make(WsBootstrapNegotiateRpc);
 
-export const WsFeatureRpcGroup = RpcGroup.make(
+const WsCoreFeatureRpcGroup = RpcGroup.make(
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationSettleTurnDispatchRpc,
   WsOrchestrationImportThreadRpc,
@@ -2135,6 +2135,12 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsTodoUpdateRpc,
   WsTodoDeleteRpc,
   WsSubscribeTodoEventsRpc,
+  WsSubscribeImageJobsRpc,
+);
+
+// Keep drawing types below the declaration serializer limit while retaining
+// the same feature group and wire protocol for existing callers.
+const WsImageGenerationRpcGroup = RpcGroup.make(
   WsImageProviderListRpc,
   WsImageProviderUpsertRpc,
   WsImageProviderDeleteRpc,
@@ -2142,7 +2148,6 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsImageJobListRpc,
   WsImageJobCreateRpc,
   WsImageJobCancelRpc,
-  WsSubscribeImageJobsRpc,
   WsImageProviderTestRpc,
   WsImageJobGetRpc,
   WsImageJobDeleteRpc,
@@ -2150,6 +2155,10 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsImageDraftUpsertRpc,
   WsImageDraftDeleteRpc,
 );
+
+export const WsFeatureRpcGroup: RpcGroup.RpcGroup<
+  RpcGroup.Rpcs<typeof WsCoreFeatureRpcGroup> | RpcGroup.Rpcs<typeof WsImageGenerationRpcGroup>
+> = WsCoreFeatureRpcGroup.merge(WsImageGenerationRpcGroup);
 
 // Project-agent RPCs live in a satellite group: folding them into
 // WsFeatureRpcGroup pushes its inferred type past the declaration emit limit.

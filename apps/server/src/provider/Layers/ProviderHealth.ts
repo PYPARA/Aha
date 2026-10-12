@@ -132,6 +132,7 @@ export type { CommandResult } from "../providerCliOutput";
 const DEFAULT_TIMEOUT_MS = 4_000;
 const CLAUDE_HEALTH_TIMEOUT_MS = 20_000;
 const OPENCODE_HEALTH_TIMEOUT_MS = 20_000;
+const PI_HEALTH_TIMEOUT_MS = 20_000;
 const CODEX_AUTH_STATUS_ARGS = ["-c", "mcp_servers={}", "login", "status"] as const;
 const CODEX_PROVIDER = "codex" as const;
 const CLAUDE_AGENT_PROVIDER = "claudeAgent" as const;
@@ -1076,7 +1077,9 @@ async function makeCodexProbeEnv(
   const normalizedShadowHomePath = nonEmptyTrimmed(shadowHomePath);
   const normalizedAccountId = nonEmptyTrimmed(accountId);
   return buildCodexProcessEnv({
-    ...(environment ? { env: { ...process.env, ...environment } } : {}),
+    ...(environment
+      ? { env: { ...process.env, ...environment }, explicitProviderEnvironment: environment }
+      : {}),
     ...(normalizedHomePath ? { homePath: normalizedHomePath } : {}),
     ...(normalizedShadowHomePath ? { shadowHomePath: normalizedShadowHomePath } : {}),
     ...(normalizedAccountId ? { accountId: normalizedAccountId } : {}),
@@ -1920,7 +1923,7 @@ export const checkPiProviderStatus = (
 
     const versionProbe = yield* probeProviderCliVersion(
       runPiCommand(["--version"], executable, probeEnv),
-      DEFAULT_TIMEOUT_MS,
+      PI_HEALTH_TIMEOUT_MS,
     );
 
     // Pi itself is SDK-backed in Synara. Keep this CLI probe advisory so health
@@ -2567,11 +2570,13 @@ export function providerStatusesEqual(
 }
 
 function isTransientProviderCommandTimeout(status: ServerProviderStatus): boolean {
-  return (
-    status.status !== "ready" &&
-    status.authStatus === "unknown" &&
-    (status.message ?? "").includes(PROVIDER_COMMAND_TIMEOUT_DETAIL)
-  );
+  const message = status.message ?? "";
+  // Most providers use the shared detail string, but Pi's advisory probe has
+  // a provider-specific explanation. Keep a slow CLI probe from replacing an
+  // already usable status just because its wording differs.
+  const describesTimeout =
+    message.includes(PROVIDER_COMMAND_TIMEOUT_DETAIL) || /\btimed out\b/i.test(message);
+  return status.status !== "ready" && status.authStatus === "unknown" && describesTimeout;
 }
 
 function wasPreviouslyUsableProviderStatus(status: ServerProviderStatus): boolean {

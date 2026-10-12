@@ -1,6 +1,6 @@
 {
   "name": "@synara/cli",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -19,14 +19,13 @@
     "dev": "bun run src/index.ts",
     "build": "node scripts/cli.ts build",
     "start": "node dist/index.mjs",
-    "prepare": "effect-language-service patch",
     "typecheck": "node ../../node_modules/@typescript/native/bin/tsc --noEmit --tsBuildInfoFile node_modules/.cache/typescript-native.tsbuildinfo",
     "typecheck:native": "bun run typecheck",
     "typecheck:legacy": "tsc --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.2.1",
-    "@anthropic-ai/claude-agent-sdk": "0.3.259",
+    "@anthropic-ai/claude-agent-sdk": "0.3.296",
     "@anthropic-ai/sdk": "^0.100.0",
     "@earendil-works/pi-agent-core": "^0.87.1",
     "@earendil-works/pi-ai": "^0.87.1",
@@ -48,6 +47,7 @@
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
+    "@effect/vitest": "catalog:",
     "@synara/contracts": "workspace:*",
     "@synara/shared": "workspace:*",
     "@synara/web": "workspace:*",
@@ -55,7 +55,8 @@
     "@types/node": "catalog:",
     "@types/ws": "^8.5.13",
     "tsdown": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "engines": {
     "node": "^22.19 || ^23.11 || >=24.10"

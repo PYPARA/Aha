@@ -1,6 +1,6 @@
 {
   "name": "@synara/contracts",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "private": true,
   "files": [
     "dist"
@@ -35,7 +35,6 @@
   "scripts": {
     "dev": "tsdown src/index.ts --format cjs --watch --clean",
     "build": "tsdown src/index.ts --format esm,cjs --dts --clean",
-    "prepare": "effect-language-service patch",
     "typecheck": "node ../../node_modules/@typescript/native/bin/tsc --noEmit",
     "typecheck:native": "bun run typecheck",
     "typecheck:legacy": "tsc --noEmit"
@@ -46,7 +45,9 @@
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
+    "@effect/vitest": "catalog:",
     "tsdown": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

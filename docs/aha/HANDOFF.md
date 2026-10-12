@@ -1,3 +1,13 @@
+# Aha handoff — 2026-10-12（Synara v1.0.3）
+
+源码基线升级至 Synara v1.0.3，合并前检查点 `5e65cd344` 已完整保存绘图工作台和重制皮肤。迁移兼容的关键入口为 `apps/server/src/persistence/Migrations.ts` 和 `Migrations/135_ImageGeneration.ts`：只识别历史 `132_ImageGeneration`，补跑上游 132–134，135 幂等保留绘图表与记录。回归用例在 `AhaDrawingMigration.test.ts`。
+
+完整构建 4/4、类型检查 7/7、根测试 5,060 通过/9 跳过，本机 mock 绘图端到端通过。具体冲突处理、验证范围与日志见 [升级记录](SYNARA-UPGRADE-20261012.md)。未生成 v1.0.3 安装包、签名、公证、推送或发布；release 中旧 v1.0.1 ZIP 不能视为本次升级的构建产物。此前撤销的根 AGENTS 与发布工作流保持删除。
+
+以下为此前阶段历史记录；其中工作区未提交的描述已由本轮检查点提交取代。
+
+---
+
 # Aha handoff — 2026-10-12（完整背景）
 
 新版完整素材已随包接入，开发包 `release/Aha-skin-remaster-dev-1.0.1-20261012-mac-arm64.zip`。独立v4皮肤包：`release/Xuzhao-Elation-remaster-20261012.skin.json`、`release/Furina-Chanson-remaster-20261012.skin.json`，各六张资源。旧ZIP/皮肤包/素材全部保留。外观中选择虚照或芙宁娜，预览并应用后使用新版；启动升级不自动换当前外观/图标，Aha品牌与默认无图样式不变。

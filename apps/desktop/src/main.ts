@@ -1,5 +1,6 @@
 import { registerAhaAppearance } from "./aha/appearance-ipc";
 import type { AppearanceImages } from "./aha/appearance-images";
+import "./httpRuntime";
 import { showDiagnosticStartupDialog } from "./startupDiagnosticDialog";
 import { BackendIssueDetector } from "./backendIssueDetector";
 import { CuaDriverHost, sweepOrphanedCuaDrivers } from "./cuaDriverHost";

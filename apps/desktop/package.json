@@ -1,6 +1,6 @@
 {
   "name": "@synara/desktop",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
@@ -19,6 +19,7 @@
     "electron": "43.4.1",
     "electron-updater": "^6.6.2",
     "sharp": "0.34.5",
+    "undici": "8.10.2",
     "ws": "^8.21.0",
     "zod": "4.3.6"
   },
@@ -29,6 +30,7 @@
     "@types/ws": "^8.5.13",
     "tsdown": "catalog:",
     "typescript": "catalog:",
+    "vitest": "catalog:",
     "wait-on": "^8.0.2"
   },
   "productName": "Aha"

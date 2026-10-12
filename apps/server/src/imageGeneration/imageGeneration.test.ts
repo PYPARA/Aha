@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { randomUUID } from "node:crypto";
 import type { ImageJobCreateInput, ImageProviderInput } from "@synara/contracts";
 import { layerMemory } from "../persistence/NodeSqliteClient";
-import migration from "../persistence/Migrations/132_ImageGeneration";
+import migration from "../persistence/Migrations/135_ImageGeneration";
 import { ImageGenerationRepositoryLive } from "../persistence/Layers/ImageGenerationRepository";
 import { ImageGenerationRepository } from "../persistence/Services/ImageGenerationRepository";
 import { ImageGenerationEngine } from "./imageGenerationEngine";

@@ -2,7 +2,7 @@
 
 <img src="apps/web/public/aha-logo.png" alt="Aha 图标" width="96" />
 
-Aha 是基于 [Synara](https://github.com/Emanuele-web04/synara) 二次开发的本地编程 Agent 工作台，将项目、对话、供应商会话和开发工具放在一个桌面应用中。当前源码基线为 Synara **v1.0.1**。
+Aha 是基于 [Synara](https://github.com/Emanuele-web04/synara) 二次开发的本地编程 Agent 工作台，将项目、对话、供应商会话和开发工具放在一个桌面应用中。当前源码基线为 Synara **v1.0.3**。
 
 ## 可以做什么
 

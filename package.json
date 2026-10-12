@@ -17,7 +17,9 @@
       "@types/bun": "^1.4.1",
       "@types/node": "^24.10.13",
       "tsdown": "^0.20.3",
-      "typescript": "^5.7.3"
+      "typescript": "^5.7.3",
+      "@effect/vitest": "https://pkg.pr.new/Effect-TS/effect-smol/@effect/vitest@8881a9b",
+      "vitest": "^4.1.10"
     }
   },
   "type": "module",
@@ -35,7 +37,7 @@
     "build": "turbo run build",
     "build:marketing": "turbo run build --filter=@synara/marketing",
     "build:desktop": "turbo run build --filter=@synara/desktop --filter=@synara/cli",
-    "postinstall": "effect-tsgo patch --typescript --typescript-package @typescript/native",
+    "postinstall": "node scripts/patch-workspace-typescript.ts && effect-tsgo patch --typescript --typescript-package @typescript/native",
     "typecheck": "effect-tsgo patch --typescript --typescript-package @typescript/native && turbo run typecheck",
     "typecheck:native": "bun run typecheck",
     "typecheck:legacy": "turbo run typecheck:legacy",
@@ -58,15 +60,17 @@
     "@effect/tsgo": "0.41.0",
     "@types/node": "catalog:",
     "@typescript/native": "npm:typescript@7.0.2",
+    "@vitest/coverage-v8": "4.1.10",
     "oxfmt": "0.40.0",
     "oxlint": "1.56.0",
     "turbo": "^2.9.14",
-    "vitest": "4.1.10"
+    "vitest": "catalog:"
   },
   "overrides": {
     "@effect/platform-node-shared>effect": "catalog:",
     "@effect/platform-node>effect": "catalog:",
     "@effect/sql-sqlite-bun>effect": "catalog:",
+    "@effect/vitest>effect": "catalog:",
     "axios": "^1.16.0",
     "defu": "^6.1.5",
     "fast-uri": "^3.1.2",

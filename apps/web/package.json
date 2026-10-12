@@ -1,12 +1,11 @@
 {
   "name": "@synara/web",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "prepare": "effect-language-service patch",
     "preview": "vite preview",
     "typecheck": "node ../../node_modules/@typescript/native/bin/tsc --noEmit --tsBuildInfoFile node_modules/.cache/typescript-native.tsbuildinfo",
     "typecheck:native": "bun run typecheck",
@@ -72,12 +71,14 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.0",
-    "@vitest/browser-playwright": "4.1.10",
+    "@vitest/browser-playwright": "^4.1.10",
     "babel-plugin-react-compiler": "1.0.0",
+    "msw": "2.12.11",
     "playwright": "1.62.1",
     "tailwindcss": "^4.0.0",
     "typescript": "catalog:",
     "vite": "^8.1.4",
-    "vitest-browser-react": "2.1.0"
+    "vitest": "catalog:",
+    "vitest-browser-react": "^2.0.5"
   }
 }
