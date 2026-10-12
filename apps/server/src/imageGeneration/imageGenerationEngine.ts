@@ -1,3 +1,4 @@
+import { imageCommentPrompt } from "./imageEditDocuments";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -5,6 +6,9 @@ import { Effect } from "effect";
 import {
   IMAGE_INPUT_MAX_TOTAL_BYTES,
   type ImageDraft,
+  type ImageEditDocument,
+  type ImageEditDocumentCreateInput,
+  type ImageInputReference,
   type ImageGenerationError,
   type ImageJob,
   type ImageJobCreateInput,
@@ -199,6 +203,70 @@ export class ImageGenerationEngine {
   async upload(bytes: Uint8Array, name: string) {
     return this.locked(() => this.assets.save(bytes, name));
   }
+  async getDocument(id: string): Promise<ImageEditDocument> {
+    const document = await Effect.runPromise(this.repository.getDocument(id));
+    if (!document)
+      throw new ImageApiError("document_missing", "Editable image document was not found.");
+    return document;
+  }
+  async createDocument(input: ImageEditDocumentCreateInput): Promise<ImageEditDocument> {
+    return this.locked(async () => {
+      const composite = await this.getAsset(input.compositeAssetId);
+      const base = input.baseAssetId ? await this.getAsset(input.baseAssetId) : null;
+      if (
+        composite.width !== input.width ||
+        composite.height !== input.height ||
+        (base && (base.width !== input.width || base.height !== input.height))
+      )
+        throw new ImageApiError(
+          "document_dimensions",
+          "Editable document dimensions must match its images.",
+        );
+      if (
+        new Set(input.elements.map((e) => e.id)).size !== input.elements.length ||
+        new Set(input.comments.map((c) => c.id)).size !== input.comments.length
+      )
+        throw new ImageApiError("document_ids", "Editable document IDs must be unique.");
+      const document: ImageEditDocument = {
+        ...input,
+        comments: input.comments
+          .filter((c) => c.text.trim())
+          .map((c) => ({ id: c.id, x: c.x, y: c.y, text: c.text.trim() })),
+        id: randomUUID(),
+        version: 1,
+        createdAt: now(),
+      };
+      await Effect.runPromise(this.repository.saveDocument(document));
+      return document;
+    });
+  }
+  private async references(
+    ids: readonly string[],
+    supplied?: readonly ImageInputReference[],
+  ): Promise<ImageInputReference[]> {
+    if (!supplied) return ids.map((assetId) => ({ id: randomUUID(), assetId, documentId: null }));
+    if (
+      supplied.length !== ids.length ||
+      supplied.some((r, i) => r.assetId !== ids[i]) ||
+      new Set(supplied.map((r) => r.id)).size !== supplied.length
+    )
+      throw new ImageApiError(
+        "reference_order",
+        "Reference metadata must match the ordered input images.",
+      );
+    return Promise.all(
+      supplied.map(async (r) => {
+        if (!r.documentId) return { ...r, comments: [] };
+        const document = await this.getDocument(r.documentId);
+        if (document.compositeAssetId !== r.assetId)
+          throw new ImageApiError(
+            "document_asset",
+            "Editable document does not match its reference image.",
+          );
+        return { ...r, comments: document.comments };
+      }),
+    );
+  }
   async createJob(input: ImageJobCreateInput, isTest = false) {
     return this.locked(async () => {
       const existing = await Effect.runPromise(this.repository.getRequest(input.clientRequestId));
@@ -210,7 +278,15 @@ export class ImageGenerationEngine {
       if (!provider.models.some((m) => m.id === input.model))
         throw new ImageApiError("model_missing", "Select a model enabled for this provider.");
       imageRequestParameters(input.parameters);
-      if (!input.prompt.trim()) throw new ImageApiError("prompt_required", "Enter a prompt.");
+      const references = await this.references(input.inputAssetIds, input.inputReferences);
+      const requestPrompt = imageCommentPrompt(input.prompt, references);
+      if (!requestPrompt)
+        throw new ImageApiError("prompt_required", "Enter a prompt or an image comment.");
+      if (requestPrompt.length > 32000)
+        throw new ImageApiError(
+          "prompt_limit",
+          "Prompt and image comments exceed 32,000 characters.",
+        );
       const inputs = await Promise.all(input.inputAssetIds.map((id) => this.getAsset(id)));
       const mask = input.maskAssetId ? await this.getAsset(input.maskAssetId) : null;
       if (inputs.some((a) => a.bytes > 20 * 1024 * 1024))
@@ -234,6 +310,8 @@ export class ImageGenerationEngine {
         providerVersion: provider.version,
         model: input.model,
         prompt: input.prompt.trim(),
+        requestPrompt,
+        inputReferences: references,
         parameters: input.parameters,
         status: "queued",
         error: null,
@@ -335,7 +413,7 @@ export class ImageGenerationEngine {
         baseUrl: provider.baseUrl,
         key,
         model: job.model,
-        prompt: job.prompt,
+        prompt: job.requestPrompt ?? job.prompt,
         parameters: job.parameters,
         images,
         ...(mask ? { mask } : {}),
@@ -535,7 +613,8 @@ export class ImageGenerationEngine {
         throw new ImageApiError("input_limit", "At most 16 reference images are allowed.");
       for (const id of [...draft.inputAssetIds, ...(draft.maskAssetId ? [draft.maskAssetId] : [])])
         await this.getAsset(id);
-      const stored = { ...draft, updatedAt: now() };
+      const inputReferences = await this.references(draft.inputAssetIds, draft.inputReferences);
+      const stored = { ...draft, inputReferences, updatedAt: now() };
       await Effect.runPromise(this.repository.saveDraft(stored));
       return stored;
     });
@@ -543,6 +622,8 @@ export class ImageGenerationEngine {
   async cleanup(_immediate: boolean) {
     await this.locked(async () => {
       const before = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      for (const doc of await Effect.runPromise(this.repository.unusedDocuments(before)))
+        await Effect.runPromise(this.repository.deleteDocument(doc.id));
       for (const asset of await Effect.runPromise(this.repository.unusedAssets(before)))
         await this.assets.remove(asset.id);
     });

@@ -1,4 +1,10 @@
-import { ImageAsset, ImageDraft, ImageJob, ImageProvider } from "@synara/contracts";
+import {
+  ImageAsset,
+  ImageEditDocument,
+  ImageDraft,
+  ImageJob,
+  ImageProvider,
+} from "@synara/contracts";
 import { Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
@@ -16,6 +22,42 @@ export const ImageGenerationRepositoryLive = Layer.effect(
     const guard = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.mapError(error));
     const readJob = (rows: readonly { payload: string }[]) => decode(ImageJob, rows)[0] ?? null;
     const api: ImageGenerationRepositoryShape = {
+      getDocument: (id) =>
+        guard(
+          sql<{ payload: string }>`SELECT payload FROM image_edit_documents WHERE id=${id}`.pipe(
+            Effect.map((rows) => decode(ImageEditDocument, rows)[0] ?? null),
+          ),
+        ),
+      saveDocument: (document) =>
+        guard(
+          sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`INSERT INTO image_edit_documents (id, created_at, payload) VALUES (${document.id}, ${document.createdAt}, ${JSON.stringify(document)})`;
+              for (const id of new Set([
+                document.compositeAssetId,
+                ...(document.baseAssetId ? [document.baseAssetId] : []),
+              ]))
+                yield* sql`INSERT INTO image_edit_document_assets (document_id, asset_id) VALUES (${document.id}, ${id})`;
+            }),
+          ),
+        ),
+      unusedDocuments: (before) =>
+        guard(
+          sql<{
+            payload: string;
+          }>`SELECT payload FROM image_edit_documents d WHERE created_at<${before} AND NOT EXISTS(SELECT 1 FROM image_job_documents WHERE document_id=d.id) AND NOT EXISTS(SELECT 1 FROM image_draft_documents WHERE document_id=d.id)`.pipe(
+            Effect.map((rows) => decode(ImageEditDocument, rows)),
+          ),
+        ),
+      deleteDocument: (id) =>
+        guard(
+          sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`DELETE FROM image_edit_document_assets WHERE document_id=${id}`;
+              yield* sql`DELETE FROM image_edit_documents WHERE id=${id}`;
+            }),
+          ),
+        ),
       listProviders: () =>
         guard(
           sql<{ payload: string }>`SELECT payload FROM image_providers ORDER BY rowid`.pipe(
@@ -56,13 +98,25 @@ export const ImageGenerationRepositoryLive = Layer.effect(
                 return yield* Effect.fail(new Error("Invalid history cursor."));
               }
             }
-            const rows = cursor
-              ? yield* sql<{
-                  payload: string;
-                }>`SELECT payload FROM image_jobs WHERE created_at<${cursor.at} OR (created_at=${cursor.at} AND id<${cursor.id}) ORDER BY created_at DESC, id DESC LIMIT 31`
-              : yield* sql<{
-                  payload: string;
-                }>`SELECT payload FROM image_jobs ORDER BY created_at DESC, id DESC LIMIT 31`;
+            const query = input.query?.trim() ?? "";
+            const search = query
+              ? sql`AND instr(lower(json_extract(payload, '$.prompt')), lower(${query})) > 0`
+              : sql``;
+            const statuses =
+              input.statusGroup === "active"
+                ? ["queued", "running", "saving"]
+                : input.statusGroup === "completed"
+                  ? ["succeeded"]
+                  : input.statusGroup === "issues"
+                    ? ["partial", "failed", "interrupted"]
+                    : [];
+            const status = statuses.length ? sql`AND status IN ${sql.in(statuses)}` : sql``;
+            const page = cursor
+              ? sql`AND (created_at<${cursor.at} OR (created_at=${cursor.at} AND id<${cursor.id}))`
+              : sql``;
+            const rows = yield* sql<{ payload: string }>`SELECT payload FROM image_jobs
+              WHERE 1=1 ${search} ${status} ${page}
+              ORDER BY created_at DESC, id DESC LIMIT 31`;
             const jobs = decode(ImageJob, rows.slice(0, 30));
             const last = jobs.at(-1);
             return {
@@ -102,6 +156,11 @@ export const ImageGenerationRepositoryLive = Layer.effect(
             Effect.gen(function* () {
               yield* sql`INSERT INTO image_jobs (id, client_request_id, provider_id, status, created_at, payload) VALUES (${job.id}, ${job.clientRequestId}, ${job.providerId}, ${job.status}, ${job.createdAt}, ${JSON.stringify(job)}) ON CONFLICT(id) DO UPDATE SET status=excluded.status, payload=excluded.payload`;
               yield* sql`DELETE FROM image_job_assets WHERE job_id=${job.id}`;
+              yield* sql`DELETE FROM image_job_documents WHERE job_id=${job.id}`;
+              for (const id of new Set(
+                (job.inputReferences ?? []).flatMap((r) => (r.documentId ? [r.documentId] : [])),
+              ))
+                yield* sql`INSERT INTO image_job_documents (job_id, document_id) VALUES (${job.id}, ${id})`;
               for (const [role, assets] of [
                 ["input", job.inputs],
                 ["mask", job.mask ? [job.mask] : []],
@@ -116,6 +175,7 @@ export const ImageGenerationRepositoryLive = Layer.effect(
         guard(
           sql.withTransaction(
             Effect.gen(function* () {
+              yield* sql`DELETE FROM image_job_documents WHERE job_id=${id}`;
               yield* sql`DELETE FROM image_job_assets WHERE job_id=${id}`;
               yield* sql`DELETE FROM image_jobs WHERE id=${id}`;
             }),
@@ -151,6 +211,11 @@ export const ImageGenerationRepositoryLive = Layer.effect(
             Effect.gen(function* () {
               yield* sql`INSERT INTO image_drafts (id, updated_at, payload) VALUES (${draft.id}, ${draft.updatedAt}, ${JSON.stringify(draft)}) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at, payload=excluded.payload`;
               yield* sql`DELETE FROM image_draft_assets WHERE draft_id=${draft.id}`;
+              yield* sql`DELETE FROM image_draft_documents WHERE draft_id=${draft.id}`;
+              for (const id of new Set(
+                (draft.inputReferences ?? []).flatMap((r) => (r.documentId ? [r.documentId] : [])),
+              ))
+                yield* sql`INSERT INTO image_draft_documents (draft_id, document_id) VALUES (${draft.id}, ${id})`;
               for (const id of new Set([
                 ...draft.inputAssetIds,
                 ...(draft.maskAssetId ? [draft.maskAssetId] : []),
@@ -163,6 +228,7 @@ export const ImageGenerationRepositoryLive = Layer.effect(
         guard(
           sql.withTransaction(
             Effect.gen(function* () {
+              yield* sql`DELETE FROM image_draft_documents WHERE draft_id=${id}`;
               yield* sql`DELETE FROM image_draft_assets WHERE draft_id=${id}`;
               yield* sql`DELETE FROM image_drafts WHERE id=${id}`;
             }),
@@ -172,7 +238,7 @@ export const ImageGenerationRepositoryLive = Layer.effect(
         guard(
           sql<{
             payload: string;
-          }>`SELECT payload FROM image_assets a WHERE created_at<${before} AND NOT EXISTS(SELECT 1 FROM image_job_assets WHERE asset_id=a.id) AND NOT EXISTS(SELECT 1 FROM image_draft_assets WHERE asset_id=a.id)`.pipe(
+          }>`SELECT payload FROM image_assets a WHERE created_at<${before} AND NOT EXISTS(SELECT 1 FROM image_job_assets WHERE asset_id=a.id) AND NOT EXISTS(SELECT 1 FROM image_draft_assets WHERE asset_id=a.id) AND NOT EXISTS(SELECT 1 FROM image_edit_document_assets WHERE asset_id=a.id)`.pipe(
             Effect.map((rows) => decode(ImageAsset, rows)),
           ),
         ),

@@ -2,6 +2,8 @@ import { Effect, Layer, PubSub, ServiceMap, Stream } from "effect";
 import path from "node:path";
 import type {
   ImageAsset,
+  ImageEditDocument,
+  ImageEditDocumentCreateInput,
   ImageDraft,
   ImageJob,
   ImageJobCreateInput,
@@ -19,6 +21,8 @@ import { ServerSecretStore } from "../../auth/Services/ServerSecretStore";
 import { ImageGenerationRepository } from "../../persistence/Services/ImageGenerationRepository";
 import { ImageGenerationEngine } from "../imageGenerationEngine";
 export interface ImageGenerationServiceShape {
+  createDocument: (input: ImageEditDocumentCreateInput) => Effect.Effect<ImageEditDocument, Error>;
+  getDocument: (id: string) => Effect.Effect<ImageEditDocument, Error>;
   listProviders: () => Effect.Effect<readonly ImageProvider[], Error>;
   upsertProvider: (input: ImageProviderInput) => Effect.Effect<ImageProvider, Error>;
   deleteProvider: (id: string) => Effect.Effect<void, Error>;
@@ -84,6 +88,8 @@ export const ImageGenerationServiceLive = Layer.effect(
       }),
     );
     const service: ImageGenerationServiceShape = {
+      createDocument: (i) => promise(() => engine.createDocument(i)),
+      getDocument: (id) => promise(() => engine.getDocument(id)),
       listProviders: () => promise(() => engine.listProviders()),
       upsertProvider: (i) => promise(() => engine.upsertProvider(i)),
       deleteProvider: (id) => promise(() => engine.deleteProvider(id)),

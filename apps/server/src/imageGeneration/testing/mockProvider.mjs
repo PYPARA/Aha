@@ -38,7 +38,7 @@ const server = http.createServer(async (req, res) => {
     }
     const body = contentType.includes("application/json") ? JSON.parse(text) : {};
     const getField = (name) =>
-      new RegExp('name="' + name + '"\\r\\n\\r\\n([^\\r]+)').exec(text)?.[1];
+      new RegExp('name="' + name + '"\\r\\n\\r\\n([\\s\\S]*?)\\r\\n--').exec(text)?.[1];
     const prompt = body.prompt ?? getField("prompt") ?? "Mock illustration",
       n = Number(body.n ?? getField("n") ?? 1);
     const entry = {
@@ -47,6 +47,12 @@ const server = http.createServer(async (req, res) => {
       n,
       model: body.model ?? getField("model"),
       prompt,
+      parameters: Object.fromEntries(
+        ["size", "quality", "output_format", "background"].flatMap((key) => {
+          const value = body[key] ?? getField(key);
+          return value === undefined ? [] : [[key, value]];
+        }),
+      ),
       hasMask: text.includes('name="mask"'),
       referenceCount: (text.match(/name="image\[\]"/g) ?? []).length,
     };

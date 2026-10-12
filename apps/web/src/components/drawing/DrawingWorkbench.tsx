@@ -1,7 +1,30 @@
+import { normalizeDrawingParameters, updateDrawingParameters } from "./drawingParameters";
+import { RouteInsetSurface } from "../RouteInsetSurface";
+import { ChatSurfaceHeader } from "../chat/ChatSurfaceHeader";
+import {
+  CHAT_SURFACE_HEADER_HEIGHT_CLASS,
+  CHAT_SURFACE_HEADER_PADDING_X_CLASS,
+} from "../chat/chatHeaderControls";
+import {
+  COMPOSER_INPUT_SHELL_CLASS_NAME,
+  COMPOSER_SURFACE_SHADOW_CLASS_NAME,
+} from "../chat/composerPickerStyles";
+import {
+  useDesktopTopBarTrafficLightGutterClassName,
+  useDesktopTopBarWindowControlsGutterClassName,
+} from "~/hooks/useDesktopTopBarGutter";
+import { cn } from "~/lib/utils";
+import { ArrowUpIcon, ChevronDownIcon, MoreHorizontalIcon } from "~/lib/icons";
+import { Menu, MenuTrigger, MenuItem, MenuRadioGroup, MenuRadioItem } from "../ui/menu";
+import { ComposerPickerMenuPopup } from "../chat/ComposerPickerMenuPopup";
+import { DrawingGallery } from "./DrawingGallery";
+import { DrawingJobDialog } from "./DrawingJobDialog";
+import { DrawingAddMenu, DrawingModelPicker, DrawingParameters } from "./DrawingPickers";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ImageAsset,
   ImageDraft,
+  ImageInputReference,
   ImageGenerationParameters,
   ImageJob,
   ImageJobCreateInput,
@@ -11,14 +34,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import {
-  Dialog,
-  DialogPopup,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogPanel,
-} from "../ui/dialog";
 import { ExpandedImageOverlay } from "../chat/ExpandedImageOverlay";
 import { downloadUrlAsBlob } from "~/lib/browserDownload";
 import { ensureNativeApi } from "~/nativeApi";
@@ -26,12 +41,12 @@ import { SidebarHeaderNavigationControls } from "../SidebarHeaderNavigationContr
 import { resolveWsHttpUrl } from "~/lib/wsHttpUrl";
 import { ImageCanvasEditor } from "./ImageCanvasEditor";
 import {
+  saveImageEditDocument,
   drawingApi,
   drawingJobsKey,
   imageUrl,
   uploadDrawingImage,
   useDrawingEvents,
-  useImageJobs,
   useImageProviders,
 } from "./useDrawing";
 
@@ -68,30 +83,21 @@ async function getAsset(id: string): Promise<ImageAsset> {
   if (!response.ok) throw new Error("Could not restore reference image.");
   return response.json();
 }
-const selectClass = "h-9 min-w-0 rounded-lg border bg-background px-2 text-sm";
-function Elapsed({ job }: { job: ImageJob }) {
-  const [time, setTime] = useState(Date.now());
-  useEffect(() => {
-    if (!["queued", "running", "saving"].includes(job.status)) return;
-    const timer = setInterval(() => setTime(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [job.status]);
-  const elapsed = Math.max(
-    0,
-    Math.round(
-      ((job.finishedAt ? Date.parse(job.finishedAt) : time) -
-        Date.parse(job.startedAt ?? job.createdAt)) /
-        1000,
-    ),
-  );
-  return <span>{elapsed}s</span>;
-}
 export default function DrawingWorkbench() {
   const tr = useAhaTranslation(),
     navigate = useNavigate(),
     client = useQueryClient();
-  const providers = useImageProviders(),
-    history = useImageJobs();
+  const providers = useImageProviders();
+  const [search, setSearch] = useState(""),
+    [query, setQuery] = useState("");
+  const [statusGroup, setStatusGroup] = useState<"all" | "active" | "completed" | "issues">("all");
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const trafficLightGutter = useDesktopTopBarTrafficLightGutterClassName();
+  const windowControlsGutter = useDesktopTopBarWindowControlsGutterClassName();
+  const promptInput = useRef<HTMLTextAreaElement>(null);
   useDrawingEvents();
   const [windowId] = useState(draftId),
     [preferences] = useState(readPreferences);
@@ -99,7 +105,16 @@ export default function DrawingWorkbench() {
   const [prompt, setPrompt] = useState(""),
     [providerId, setProviderId] = useState(preferences.provider ?? ""),
     [model, setModel] = useState(""),
-    [parameters, setParameters] = useState<ImageGenerationParameters>({ n: 1 });
+    [parameters, setParameters] = useState<ImageGenerationParameters>(
+      () => normalizeDrawingParameters().parameters,
+    );
+  const [inputReferences, setInputReferences] = useState<ImageInputReference[]>([]);
+  const referenceMetadata = useRef(inputReferences);
+  referenceMetadata.current = inputReferences;
+  const hasInstructions = Boolean(
+    prompt.trim() || inputReferences.some((r) => r.comments?.some((c) => c.text.trim())),
+  );
+  const [parameterNotice, setParameterNotice] = useState<string | null>(null);
   const [inputs, setInputs] = useState<ImageAsset[]>([]),
     [mask, setMask] = useState<ImageAsset | null>(null),
     [sourceJobId, setSourceJobId] = useState<string | null>(null);
@@ -108,13 +123,19 @@ export default function DrawingWorkbench() {
     [submitting, setSubmitting] = useState(false),
     [uploading, setUploading] = useState(false),
     [details, setDetails] = useState<ImageJob | null>(null);
-  const [preview, setPreview] = useState<{ assets: readonly ImageAsset[]; index: number } | null>(
-      null,
-    ),
+  const [preview, setPreview] = useState<{
+      assets: readonly ImageAsset[];
+      index: number;
+      references?: readonly ImageInputReference[] | undefined;
+    } | null>(null),
     [editor, setEditor] = useState<{
       mode: "annotation" | "mask";
       base: ImageAsset | null;
       mask: ImageAsset | null;
+      documentId?: string | null;
+      referenceId?: string;
+      focusComments?: boolean;
+      focusCommentId?: string;
     } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null),
     refs = useRef(inputs),
@@ -133,7 +154,10 @@ export default function DrawingWorkbench() {
         : (selected?.defaultModel ?? "");
       setProviderId(id);
       setModel(valid);
-      setParameters(preferencesRef.current.parameters[`${id}:${valid}`] ?? { n: 1 });
+      setParameters(
+        normalizeDrawingParameters(preferencesRef.current.parameters[`${id}:${valid}`]).parameters,
+      );
+      setParameterNotice(null);
     },
     [providers.data],
   );
@@ -149,8 +173,12 @@ export default function DrawingWorkbench() {
         setPrompt(draft.prompt);
         setProviderId(draft.providerId ?? "");
         setModel(draft.model);
-        setParameters(draft.parameters);
+        setParameters(normalizeDrawingParameters(draft.parameters).parameters);
         setInputs(assets);
+        setInputReferences([
+          ...(draft.inputReferences ??
+            assets.map((a) => ({ id: crypto.randomUUID(), assetId: a.id, documentId: null }))),
+        ]);
         setMask(restoredMask);
       })
       .catch((e) => {
@@ -185,6 +213,7 @@ export default function DrawingWorkbench() {
       model,
       parameters,
       inputAssetIds: inputs.map((a) => a.id),
+      inputReferences,
       maskAssetId: mask?.id ?? null,
       updatedAt: new Date().toISOString(),
     };
@@ -199,9 +228,8 @@ export default function DrawingWorkbench() {
     const timer = setTimeout(persist, 350);
     return () => {
       clearTimeout(timer);
-      persist();
     };
-  }, [hydrated, windowId, prompt, providerId, model, parameters, inputs, mask]);
+  }, [hydrated, windowId, prompt, providerId, model, parameters, inputs, mask, inputReferences]);
   useEffect(() => {
     if (!hydrated || !providerId || !model) return;
     const p = preferencesRef.current;
@@ -210,10 +238,22 @@ export default function DrawingWorkbench() {
     p.parameters[`${providerId}:${model}`] = parameters;
     localStorage.setItem(preferenceKey, JSON.stringify(p));
   }, [hydrated, providerId, model, parameters]);
-  const setReferences = (assets: ImageAsset[]) => {
+  const setReferences = (assets: ImageAsset[], supplied?: readonly ImageInputReference[]) => {
     if (assets[0]?.id !== refs.current[0]?.id) setMask(null);
     refs.current = assets;
     setInputs(assets);
+    const metadata = supplied
+      ? [...supplied]
+      : assets.map(
+          (a) =>
+            referenceMetadata.current.find((r) => r.assetId === a.id) ?? {
+              id: crypto.randomUUID(),
+              assetId: a.id,
+              documentId: null,
+            },
+        );
+    referenceMetadata.current = metadata;
+    setInputReferences(metadata);
   };
   const append = (asset: ImageAsset) => {
     const current = refs.current;
@@ -254,16 +294,22 @@ export default function DrawingWorkbench() {
     setPrompt(job.prompt);
     setProviderId(job.providerId);
     setModel(job.model);
-    setParameters(job.parameters);
-    refs.current = [...job.inputs];
-    setInputs([...job.inputs]);
+    const normalized = normalizeDrawingParameters(job.parameters);
+    setParameters(normalized.parameters);
+    setParameterNotice(
+      normalized.adjusted
+        ? "Unspecified or incompatible parameters were adjusted to current defaults."
+        : null,
+    );
+    setReferences([...job.inputs], job.inputReferences);
     setMask(job.mask);
     setSourceJobId(job.id);
     setDetails(null);
     setError(null);
+    requestAnimationFrame(() => promptInput.current?.focus());
   };
   const submit = async () => {
-    if (submitting || uploading || !hydrated || !provider || !model || !prompt.trim()) return;
+    if (submitting || uploading || !hydrated || !provider || !model || !hasInstructions) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -279,6 +325,7 @@ export default function DrawingWorkbench() {
         prompt,
         parameters,
         inputAssetIds: inputs.map((a) => a.id),
+        inputReferences,
         maskAssetId: mask?.id ?? null,
         sourceJobId,
       };
@@ -321,6 +368,7 @@ export default function DrawingWorkbench() {
         prompt: job.prompt,
         parameters: job.parameters,
         inputAssetIds: job.inputs.map((a) => a.id),
+        inputReferences: job.inputReferences,
         maskAssetId: job.mask?.id ?? null,
         sourceJobId: job.id,
       });
@@ -342,11 +390,13 @@ export default function DrawingWorkbench() {
         model,
         parameters,
         inputAssetIds: refs.current.map((a) => a.id),
+        inputReferences: referenceMetadata.current,
         maskAssetId: mask?.id ?? null,
         updatedAt: new Date().toISOString(),
       });
       if (activeJob(job)) await drawingApi().cancelJob({ id: job.id });
       await drawingApi().deleteJob({ id: job.id });
+      if (details?.id === job.id) setDetails(null);
     });
   };
   const download = (asset: ImageAsset) =>
@@ -362,19 +412,41 @@ export default function DrawingWorkbench() {
     setSourceJobId(null);
     setEditor({ mode: "mask", base: asset, mask: null });
     setPreview(null);
+    setDetails(null);
   };
-  const openAnnotation = (base: ImageAsset | null) => {
-    setEditor({ mode: "annotation", base, mask: null });
+  const openAnnotation = (
+    base: ImageAsset | null,
+    referenceId?: string,
+    focusComments?: boolean,
+    documentId?: string | null,
+    focusCommentId?: string,
+  ) => {
+    const reference = referenceId
+      ? referenceMetadata.current.find((r) => r.id === referenceId)
+      : null;
+    setEditor({
+      mode: "annotation",
+      base,
+      mask: null,
+      ...(referenceId ? { referenceId } : {}),
+      ...((documentId ?? reference?.documentId)
+        ? { documentId: documentId ?? reference!.documentId! }
+        : {}),
+      ...(focusComments ? { focusComments: true } : {}),
+      ...(focusCommentId ? { focusCommentId } : {}),
+    });
     setPreview(null);
+    setDetails(null);
   };
   const settings = () => void navigate({ to: "/settings", search: { section: "imageProviders" } });
-  const jobs = history.data?.pages.flatMap((page) => page.jobs) ?? [];
-  const size = parameters.size ?? "",
-    custom = size && !["1024x1024", "1536x1024", "1024x1536", "auto"].includes(size);
-  const [customMode, setCustomMode] = useState(false);
-  const [customWidth, customHeight] = (custom ? size : "1024x1024").split("x");
-  const updateParameters = (patch: Partial<ImageGenerationParameters>) =>
-    setParameters((prev) => ({ ...prev, ...patch }));
+  const updateParameters = (patch: Partial<ImageGenerationParameters>) => {
+    const updated = updateDrawingParameters(parameters, patch);
+    setParameters(updated.parameters);
+    setParameterNotice(updated.notice);
+  };
+  const previewReference = preview?.references?.find(
+    (r) => r.assetId === preview.assets[preview.index]?.id,
+  );
   const imageActions = (asset: ImageAsset) => (
     <div className="flex flex-wrap justify-center gap-2">
       <Button size="sm" variant="outline" onClick={() => download(asset)}>
@@ -385,7 +457,12 @@ export default function DrawingWorkbench() {
         variant="outline"
         onClick={() => {
           try {
-            append(asset);
+            if (previewReference?.documentId && !refs.current.some((a) => a.id === asset.id))
+              setReferences(
+                [...refs.current, asset],
+                [...referenceMetadata.current, { ...previewReference, id: crypto.randomUUID() }],
+              );
+            else append(asset);
             setPreview(null);
           } catch (e) {
             setError(String(e));
@@ -394,7 +471,18 @@ export default function DrawingWorkbench() {
       >
         {tr("Use as reference")}
       </Button>
-      <Button size="sm" variant="outline" onClick={() => openAnnotation(asset)}>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() =>
+          openAnnotation(
+            asset,
+            inputReferences.find((r) => r.assetId === asset.id)?.id,
+            false,
+            previewReference?.documentId,
+          )
+        }
+      >
         {tr("Annotate")}
       </Button>
       <Button size="sm" variant="outline" onClick={() => openMask(asset)}>
@@ -402,221 +490,240 @@ export default function DrawingWorkbench() {
       </Button>
     </div>
   );
+  useEffect(() => {
+    const field = promptInput.current;
+    if (field) {
+      field.style.height = "0px";
+      field.style.height = `${Math.min(104, Math.max(56, field.scrollHeight))}px`;
+    }
+  }, [prompt]);
   return (
-    <div
-      className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
-      onDragOver={(e) => {
-        if (e.dataTransfer.types.includes("Files")) e.preventDefault();
-      }}
-      onDrop={(e) => {
-        if (e.dataTransfer.files.length) {
-          e.preventDefault();
-          addFiles([...e.dataTransfer.files]);
-        }
-      }}
-      onPaste={(e) => {
-        const files = [...e.clipboardData.files];
-        if (files.length) {
-          e.preventDefault();
-          addFiles(files);
-        }
-      }}
-    >
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b px-6 py-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <SidebarHeaderNavigationControls />
-          <div>
-            <h1 className="text-xl font-medium">{tr("Drawing")}</h1>
-            <p className="text-xs text-muted-foreground">
-              {tr("Your independent image workspace")}
-            </p>
-          </div>
-        </div>
-        <Button variant="outline" size="sm" onClick={settings}>
-          {tr("Image provider settings")}
-        </Button>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
-        <div className="mx-auto max-w-5xl space-y-5">
-          {history.isError ? (
-            <p role="alert" className="text-destructive">
-              {history.error.message}
-            </p>
-          ) : history.isPending ? (
-            <p className="text-muted-foreground">{tr("Loading...")}</p>
-          ) : jobs.length === 0 ? (
-            <div className="rounded-2xl border border-dashed p-10 text-center">
-              <h2 className="font-medium">{tr("Start with an idea")}</h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {tr("Describe an image, add references, or draw on a blank canvas.")}
-              </p>
-              {!provider ? (
-                <Button className="mt-4" onClick={settings}>
-                  {tr("Add image provider")}
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-          {jobs.map((job) => (
-            <article key={job.id} className="rounded-2xl border bg-card p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <span className="font-medium">{job.providerName}</span>
-                  <span className="text-muted-foreground break-all">{job.model}</span>
-                  {job.isTest ? (
-                    <span className="rounded bg-muted px-2 py-1">{tr("Connection test")}</span>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={
-                      job.status === "failed" || job.status === "interrupted"
-                        ? "text-destructive"
-                        : "text-muted-foreground"
-                    }
-                  >
-                    {tr(job.status)}
-                  </span>
-                  <Elapsed job={job} />
-                  <time dateTime={job.createdAt} className="text-muted-foreground">
-                    {new Date(job.createdAt).toLocaleString()}
-                  </time>
-                </div>
-              </div>
-              <p className="my-3 whitespace-pre-wrap break-words text-sm line-clamp-3">
-                {job.prompt}
-              </p>
-              {job.outputs.length ? (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                  {job.outputs.map((asset, index) => (
-                    <button
-                      /* eslint-disable-next-line react/no-array-index-key -- identical output hashes can occupy different result slots */
-                      key={`${asset.id}:${index}`}
-                      className="overflow-hidden rounded-xl border bg-muted/30 text-left"
-                      onClick={() => setPreview({ assets: job.outputs, index })}
-                    >
-                      <img
-                        loading="lazy"
-                        src={imageUrl(asset, "thumbnail")}
-                        alt={job.prompt}
-                        className="aspect-square w-full object-contain"
-                      />
-                      <span className="block px-2 py-1 text-xs text-muted-foreground">
-                        {asset.width} × {asset.height}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              {job.status === "cancelled" && job.startedAt ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {tr("The provider may still process or charge a cancelled request.")}
-                </p>
-              ) : null}
-              {job.error ? (
-                <p role="alert" className="my-2 text-sm text-destructive">
-                  {job.error.message} <span className="text-xs">({job.error.code})</span>
-                </p>
-              ) : null}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="ghost" onClick={() => setDetails(job)}>
-                  {tr("Details")}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => reuse(job)}>
-                  {tr("Reuse parameters")}
-                </Button>
-                {!activeJob(job) ? (
-                  <Button size="sm" variant="outline" onClick={() => void regenerate(job)}>
-                    {tr("Regenerate")} · {job.parameters.n}
-                  </Button>
-                ) : null}
-                {activeJob(job) ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void action(() => drawingApi().cancelJob({ id: job.id }))}
-                  >
-                    {tr("Cancel task")}
-                  </Button>
-                ) : null}
-                <Button size="sm" variant="ghost" onClick={() => void remove(job)}>
-                  {tr("Delete")}
-                </Button>
-              </div>
-            </article>
-          ))}
-          {history.hasNextPage ? (
-            <Button
-              variant="outline"
-              disabled={history.isFetchingNextPage}
-              onClick={() => void history.fetchNextPage()}
-            >
-              {tr("Load more")}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      <form
-        className="shrink-0 border-t bg-background p-3 sm:p-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
+    <RouteInsetSurface>
+      <div
+        className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          if (e.dataTransfer.files.length) {
+            e.preventDefault();
+            addFiles([...e.dataTransfer.files]);
+          }
+        }}
+        onPaste={(e) => {
+          const files = [...e.clipboardData.files];
+          if (files.length) {
+            e.preventDefault();
+            addFiles(files);
+          }
         }}
       >
-        <div className="mx-auto max-w-5xl space-y-3">
-          {inputs.length ? (
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {inputs.map((asset, index) => (
-                <div key={asset.id} className="w-24 shrink-0 rounded-lg border p-1">
-                  <button type="button" onClick={() => setPreview({ assets: inputs, index })}>
-                    <img
-                      src={imageUrl(asset, "thumbnail")}
-                      alt={asset.name}
-                      className="h-16 w-22 object-contain"
-                    />
-                  </button>
-                  <div className="flex items-center justify-between text-xs">
-                    <span>{index + 1}</span>
-                    <button
+        <ChatSurfaceHeader
+          className={cn(
+            "drag-region flex shrink-0 items-center",
+            CHAT_SURFACE_HEADER_HEIGHT_CLASS,
+            CHAT_SURFACE_HEADER_PADDING_X_CLASS,
+            trafficLightGutter,
+            windowControlsGutter,
+          )}
+        >
+          <SidebarHeaderNavigationControls />
+        </ChatSurfaceHeader>
+        <div className="shrink-0 px-4 py-3 sm:px-6">
+          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-2 sm:gap-3">
+            <h1 className="mr-auto text-sm font-medium sm:mr-0">{tr("Drawing")}</h1>
+            <Button
+              type="button"
+              variant="chrome"
+              size="sm"
+              className="order-2 sm:order-last"
+              onClick={settings}
+            >
+              {tr("Image provider settings")}
+            </Button>
+            <div className="order-last flex w-full items-center gap-2 sm:order-none sm:w-auto sm:flex-1">
+              <Input
+                className="min-w-0 flex-1 sm:ml-3 sm:max-w-md"
+                aria-label={tr("Search image history")}
+                placeholder={tr("Search prompts...")}
+                value={search}
+                maxLength={1000}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
                       type="button"
-                      disabled={index === 0}
-                      aria-label={tr("Move reference earlier")}
-                      onClick={() => {
-                        const next = [...inputs];
-                        [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
-                        setReferences(next);
-                      }}
+                      variant="chrome"
+                      size="sm"
+                      aria-label={tr("History status")}
                     >
-                      ←
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={tr("Remove reference")}
-                      onClick={() => setReferences(inputs.filter((_, i) => i !== index))}
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-              ))}
+                      {tr(
+                        {
+                          all: "All",
+                          active: "In progress",
+                          completed: "Completed",
+                          issues: "Issues",
+                        }[statusGroup],
+                      )}
+                      <ChevronDownIcon className="size-3" />
+                    </Button>
+                  }
+                />
+                <ComposerPickerMenuPopup align="end">
+                  <MenuRadioGroup
+                    value={statusGroup}
+                    onValueChange={(v) => setStatusGroup(v as typeof statusGroup)}
+                  >
+                    {[
+                      ["all", "All"],
+                      ["active", "In progress"],
+                      ["completed", "Completed"],
+                      ["issues", "Issues"],
+                    ].map(([value, label]) => (
+                      <MenuRadioItem key={value} value={value!} closeOnClick>
+                        {tr(label!)}
+                      </MenuRadioItem>
+                    ))}
+                  </MenuRadioGroup>
+                </ComposerPickerMenuPopup>
+              </Menu>
             </div>
-          ) : null}
-          <textarea
-            disabled={!hydrated}
-            aria-label={tr("Image prompt")}
-            placeholder={tr("Describe the image you want to create...")}
-            className="block max-h-36 min-h-20 w-full resize-y rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            value={prompt}
-            maxLength={32000}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                void submit();
-              }
+          </div>
+        </div>
+        <DrawingGallery
+          filters={{ query, statusGroup }}
+          hasProvider={Boolean(provider)}
+          onSettings={settings}
+          onOpen={setDetails}
+          onReuse={reuse}
+          onRegenerate={(job) => void regenerate(job)}
+          onCancel={(job) => void action(() => drawingApi().cancelJob({ id: job.id }))}
+          onDelete={(job) => void remove(job)}
+        />
+        <div className="max-h-[55%] shrink-0 overflow-y-auto px-3 pb-3 pt-2 sm:px-6 sm:pb-5">
+          <form
+            data-testid="drawing-composer"
+            className={cn(
+              COMPOSER_INPUT_SHELL_CLASS_NAME,
+              COMPOSER_SURFACE_SHADOW_CLASS_NAME,
+              "mx-auto w-full max-w-[960px] rounded-3xl p-3",
+            )}
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit();
             }}
-          />
-          <div className="flex flex-wrap items-center gap-2">
+          >
+            {inputs.length ? (
+              <div
+                className="mb-2 flex gap-2 overflow-x-auto pb-1"
+                data-testid="drawing-references"
+              >
+                {inputs.map((asset, index) => (
+                  <div
+                    /* eslint-disable-next-line react/no-array-index-key -- key is a persistent reference UUID; index only resolves the ordered metadata */
+                    key={inputReferences[index]?.id ?? asset.id}
+                    className="relative flex shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-muted/20 p-1"
+                  >
+                    <button
+                      type="button"
+                      aria-label={`${tr("Reference images")} ${index + 1}`}
+                      onClick={() =>
+                        setPreview({ assets: inputs, index, references: inputReferences })
+                      }
+                    >
+                      <img
+                        src={imageUrl(asset, "thumbnail")}
+                        alt={asset.name}
+                        className="size-12 object-contain"
+                      />
+                    </button>
+                    {index === 0 && mask ? (
+                      <span className="absolute bottom-1 left-1 rounded bg-background/90 px-1 text-[10px]">
+                        {tr("Mask")}
+                      </span>
+                    ) : null}
+                    <Menu>
+                      <MenuTrigger
+                        render={
+                          <Button
+                            type="button"
+                            size="icon-xs"
+                            variant="chrome"
+                            aria-label={`${tr("Reference actions")} ${index + 1}`}
+                          >
+                            <MoreHorizontalIcon className="size-3" />
+                          </Button>
+                        }
+                      />
+                      <ComposerPickerMenuPopup side="top" align="start">
+                        <MenuItem onClick={() => openAnnotation(asset, inputReferences[index]?.id)}>
+                          {tr("Annotate")}
+                        </MenuItem>
+                        {index === 0 ? (
+                          <MenuItem onClick={() => setEditor({ mode: "mask", base: asset, mask })}>
+                            {tr(mask ? "Edit mask" : "Inpaint")}
+                          </MenuItem>
+                        ) : null}
+                        {index === 0 && mask ? (
+                          <MenuItem onClick={() => setMask(null)}>{tr("Remove mask")}</MenuItem>
+                        ) : null}
+                        <MenuItem
+                          disabled={index === 0}
+                          onClick={() => {
+                            const next = [...inputs];
+                            [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
+                            setReferences(next);
+                          }}
+                        >
+                          {tr("Move reference earlier")}
+                        </MenuItem>
+                        <MenuItem
+                          onClick={() => setReferences(inputs.filter((_, i) => i !== index))}
+                        >
+                          {tr("Remove reference")}
+                        </MenuItem>
+                      </ComposerPickerMenuPopup>
+                    </Menu>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {inputReferences.some((r) => r.comments?.length) ? (
+              <div className="mb-1 flex flex-wrap gap-1 px-2" aria-label={tr("Image comments")}>
+                {inputReferences.map((r, index) =>
+                  r.comments?.length ? (
+                    <Button
+                      key={r.id}
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="rounded-full text-ui-xs"
+                      onClick={() => openAnnotation(inputs[index]!, r.id, true)}
+                    >
+                      {tr("Image")} {index + 1} · {r.comments.length} {tr("comments")}
+                    </Button>
+                  ) : null,
+                )}
+              </div>
+            ) : null}
+            <textarea
+              ref={promptInput}
+              disabled={!hydrated}
+              aria-label={tr("Image prompt")}
+              placeholder={tr("Describe the image you want to create...")}
+              className="block min-h-14 max-h-26 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 outline-none"
+              value={prompt}
+              maxLength={32000}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+            />
             <input
               ref={fileInput}
               type="file"
@@ -628,330 +735,216 @@ export default function DrawingWorkbench() {
                 e.target.value = "";
               }}
             />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={uploading}
-              onClick={() => fileInput.current?.click()}
-            >
-              {tr(uploading ? "Uploading..." : "Reference images")}
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => openAnnotation(null)}>
-              {tr("Blank canvas")}
-            </Button>
-            {inputs[0] ? (
-              <>
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1">
+              <DrawingModelPicker
+                providers={providers.data ?? []}
+                providerId={providerId}
+                model={model}
+                onChange={changeSelection}
+                onSettings={settings}
+              />
+              <div className="hidden h-4 w-px bg-border sm:block" />
+              <DrawingParameters parameters={parameters} onChange={updateParameters} />
+              <div className="ml-auto flex shrink-0 items-center gap-1">
+                <DrawingAddMenu
+                  uploading={uploading}
+                  onUpload={() => fileInput.current?.click()}
+                  onCanvas={() => openAnnotation(null)}
+                />
                 <Button
-                  type="button"
-                  variant="outline"
+                  type="submit"
                   size="sm"
-                  onClick={() => openAnnotation(inputs[0]!)}
+                  className="rounded-full px-3"
+                  disabled={
+                    !hydrated || submitting || uploading || !provider || !model || !hasInstructions
+                  }
+                  title="Cmd/Ctrl + Enter"
                 >
-                  {tr("Annotate")}
+                  {tr(submitting ? "Submitting..." : "Generate")} · {parameters.n}
+                  <ArrowUpIcon className="size-3.5" />
                 </Button>
-                <Button
-                  type="button"
-                  variant={mask ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setEditor({ mode: "mask", base: inputs[0]!, mask })}
-                >
-                  {tr(mask ? "Edit mask" : "Inpaint")}
-                </Button>
-              </>
+              </div>
+            </div>
+            {parameterNotice ? (
+              <p role="status" className="mt-1.5 px-2 text-ui-xs text-muted-foreground">
+                {tr(parameterNotice)}
+              </p>
             ) : null}
             {mask ? (
-              <Button type="button" size="sm" variant="ghost" onClick={() => setMask(null)}>
-                {tr("Remove mask")}
-              </Button>
+              <p className="mt-1.5 px-2 text-ui-xs text-muted-foreground">
+                {tr("Painted areas of the first reference will be regenerated.")}
+              </p>
             ) : null}
-            <label className="flex min-w-0 items-center gap-2 text-xs">
-              {tr("Provider")}
-              <select
-                className={selectClass + " max-w-48"}
-                value={providerId}
-                onChange={(e) => changeSelection(e.target.value)}
-              >
-                <option value="">{tr("Select provider")}</option>
-                {providers.data
-                  ?.filter((p) => p.enabled)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="flex min-w-0 items-center gap-2 text-xs">
-              {tr("Model")}
-              <select
-                className={selectClass + " max-w-52"}
-                value={model}
-                onChange={(e) => changeSelection(providerId, e.target.value)}
-              >
-                <option value="">{tr("Select model")}</option>
-                {provider?.models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button
-              type="submit"
-              className="ml-auto"
-              disabled={
-                !hydrated || submitting || uploading || !provider || !model || !prompt.trim()
-              }
-              title="Cmd/Ctrl + Enter"
-            >
-              {tr(submitting ? "Submitting..." : "Generate")} · {parameters.n}
-            </Button>
-          </div>
-          <details>
-            <summary className="cursor-pointer text-xs text-muted-foreground">
-              {tr("Image parameters")}
-            </summary>
-            <div className="mt-2 flex flex-wrap gap-3 text-xs">
-              <label className="grid gap-1">
-                {tr("Size")}
-                <select
-                  className={selectClass}
-                  value={custom || customMode ? "custom" : size}
-                  onChange={(e) => {
-                    setCustomMode(e.target.value === "custom");
-                    updateParameters({
-                      size: e.target.value === "custom" ? "1024x1024" : e.target.value || undefined,
-                    });
-                  }}
-                >
-                  <option value="">{tr("Provider default")}</option>
-                  {["1024x1024", "1536x1024", "1024x1536"].map((s) => (
-                    <option key={s} value={s}>
-                      {s.replace("x", " × ")}
-                    </option>
-                  ))}
-                  <option value="custom">{tr("Custom size")}</option>
-                </select>
-              </label>
-              {custom || customMode ? (
-                <>
-                  <label className="grid gap-1">
-                    {tr("Width")}
-                    <Input
-                      className="w-24"
-                      type="number"
-                      min={1}
-                      max={99999}
-                      value={customWidth}
-                      onChange={(e) =>
-                        updateParameters({ size: `${e.target.value}x${customHeight}` })
-                      }
-                    />
-                  </label>
-                  <label className="grid gap-1">
-                    {tr("Height")}
-                    <Input
-                      className="w-24"
-                      type="number"
-                      min={1}
-                      max={99999}
-                      value={customHeight}
-                      onChange={(e) =>
-                        updateParameters({ size: `${customWidth}x${e.target.value}` })
-                      }
-                    />
-                  </label>
-                </>
-              ) : null}
-              <label className="grid gap-1">
-                {tr("Quality")}
-                <select
-                  className={selectClass}
-                  value={parameters.quality ?? ""}
-                  onChange={(e) =>
-                    updateParameters({
-                      quality: (e.target.value ||
-                        undefined) as ImageGenerationParameters["quality"],
-                    })
-                  }
-                >
-                  <option value="">{tr("Provider default")}</option>
-                  {["auto", "low", "medium", "high", "xhigh", "max"].map((q) => (
-                    <option key={q} value={q}>
-                      {tr(q)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="grid gap-1">
-                {tr("Image count")}
-                <Input
-                  className="w-20"
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={parameters.n}
-                  onChange={(e) => updateParameters({ n: Number(e.target.value) })}
-                />
-              </label>
-              <label className="grid gap-1">
-                {tr("Output format")}
-                <select
-                  className={selectClass}
-                  value={parameters.outputFormat ?? ""}
-                  onChange={(e) =>
-                    updateParameters({
-                      outputFormat: (e.target.value ||
-                        undefined) as ImageGenerationParameters["outputFormat"],
-                    })
-                  }
-                >
-                  <option value="">{tr("Provider default")}</option>
-                  {["png", "jpeg", "webp"].map((f) => (
-                    <option key={f} value={f}>
-                      {f.toUpperCase()}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="grid gap-1">
-                {tr("Background")}
-                <select
-                  className={selectClass}
-                  value={parameters.background ?? ""}
-                  onChange={(e) =>
-                    updateParameters({
-                      background: (e.target.value ||
-                        undefined) as ImageGenerationParameters["background"],
-                    })
-                  }
-                >
-                  <option value="">{tr("Provider default")}</option>
-                  {["auto", "opaque", "transparent"].map((b) => (
-                    <option key={b} value={b}>
-                      {tr(b)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </details>
-          {mask ? (
-            <p className="text-xs text-muted-foreground">
-              {tr("Painted areas of the first reference will be regenerated.")}
-            </p>
-          ) : null}
-          {!provider ? (
-            <p className="text-xs text-muted-foreground">
-              {tr("Add an image provider to start drawing.")}{" "}
-              <button type="button" className="underline" onClick={settings}>
-                {tr("Image provider settings")}
-              </button>
-            </p>
-          ) : null}
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
+            {!provider ? (
+              <p className="mt-1.5 px-2 text-ui-xs text-muted-foreground">
+                {tr("Add an image provider to start drawing.")}{" "}
+                <button type="button" className="underline" onClick={settings}>
+                  {tr("Image provider settings")}
+                </button>
+              </p>
+            ) : null}
+            {error ? (
+              <p role="alert" className="mt-2 px-2 text-sm break-words text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </form>
         </div>
-      </form>
-      {preview ? (
-        <ExpandedImageOverlay
-          expandedImage={{
-            images: preview.assets.map((a) => ({ src: imageUrl(a), name: a.name })),
-            index: preview.index,
-          }}
-          onClose={() => setPreview(null)}
-          onNavigate={(direction) =>
-            setPreview((p) =>
-              p ? { ...p, index: (p.index + direction + p.assets.length) % p.assets.length } : null,
-            )
-          }
-          actions={imageActions(preview.assets[preview.index]!)}
-        />
-      ) : null}
-      {editor ? (
-        <ImageCanvasEditor
-          key={`${editor.mode}:${editor.base?.id ?? "blank"}`}
-          {...editor}
-          onClose={() => setEditor(null)}
-          onSave={async (blob) => {
-            const asset = await uploadDrawingImage(
-              blob,
-              editor.mode === "mask" ? "mask.png" : "annotations.png",
-            );
-            if (editor.mode === "mask") {
-              if (refs.current[0]?.id !== editor.base?.id)
-                throw new Error(tr("The base image changed. Create a new mask."));
-              setMask(asset);
-            } else append(asset);
-          }}
-        />
-      ) : null}
-      <Dialog
-        open={details !== null}
-        onOpenChange={(open) => {
-          if (!open) setDetails(null);
-        }}
-      >
-        <DialogPopup className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{tr("Image task details")}</DialogTitle>
-            <DialogDescription>
-              {details ? `${details.providerName} · ${details.model}` : ""}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel>
-            {details ? (
-              <div className="space-y-4 text-sm">
-                <p className="whitespace-pre-wrap break-words">{details.prompt}</p>
-                <p>
-                  {tr("Status")}: {tr(details.status)}
-                </p>
-                <h3 className="font-medium">{tr("Requested parameters")}</h3>
-                <pre className="overflow-auto rounded-lg bg-muted p-3 text-xs">
-                  {JSON.stringify(details.parameters, null, 2)}
-                </pre>
-                <h3 className="font-medium">{tr("Reference images")}</h3>
-                <div className="flex flex-wrap gap-2">
-                  {[...details.inputs, ...(details.mask ? [details.mask] : [])].map((asset, i) => (
-                    <button
-                      /* eslint-disable-next-line react/no-array-index-key -- input and mask may share a content hash */
-                      key={`${asset.id}:${i}`}
-                      onClick={() => {
-                        setDetails(null);
-                        setPreview({ assets: [asset], index: 0 });
-                      }}
-                    >
-                      <img
-                        className="h-24 w-24 rounded border object-contain"
-                        src={imageUrl(asset, "thumbnail")}
-                        alt={asset.name}
-                      />
-                    </button>
-                  ))}
-                </div>
-                <h3 className="font-medium">{tr("Returned parameters and usage")}</h3>
-                <pre className="overflow-auto rounded-lg bg-muted p-3 text-xs">
-                  {JSON.stringify(
-                    {
-                      parameters: details.actualParameters,
-                      usage: details.usage,
-                      requestId: details.upstreamRequestId,
-                    },
-                    null,
-                    2,
-                  )}
-                </pre>
-                {details.error ? <p className="text-destructive">{details.error.message}</p> : null}
-                <Button onClick={() => reuse(details)}>{tr("Reuse parameters")}</Button>
-              </div>
-            ) : null}
-          </DialogPanel>
-        </DialogPopup>
-      </Dialog>
-    </div>
+        {details ? (
+          <DrawingJobDialog
+            key={details.id}
+            initialJob={details}
+            onClose={() => setDetails(null)}
+            onDownload={download}
+            onReference={(asset) => {
+              try {
+                append(asset);
+                setDetails(null);
+              } catch (e) {
+                setError(String(e));
+              }
+            }}
+            onAnnotate={openAnnotation}
+            onMask={openMask}
+            onReuse={reuse}
+            onRegenerate={(job) => void regenerate(job)}
+            onCancel={(job) => void action(() => drawingApi().cancelJob({ id: job.id }))}
+            onDelete={(job) => void remove(job)}
+            onPreview={(asset) => {
+              setDetails(null);
+              setPreview({ assets: [asset], index: 0, references: details.inputReferences });
+            }}
+          />
+        ) : null}
+        {preview ? (
+          <ExpandedImageOverlay
+            expandedImage={{
+              images: preview.assets.map((a) => ({ src: imageUrl(a), name: a.name })),
+              index: preview.index,
+            }}
+            onClose={() => setPreview(null)}
+            onNavigate={(direction) =>
+              setPreview((p) =>
+                p
+                  ? { ...p, index: (p.index + direction + p.assets.length) % p.assets.length }
+                  : null,
+              )
+            }
+            actions={imageActions(preview.assets[preview.index]!)}
+            imageOverlay={previewReference?.comments?.map((comment, i) => (
+              <button
+                type="button"
+                key={comment.id}
+                title={comment.text}
+                aria-label={`${tr("Image comment")} ${i + 1}: ${comment.text}`}
+                className="absolute flex size-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-primary/50 bg-background text-ui-xs text-primary shadow-md"
+                style={{ left: `${comment.x * 100}%`, top: `${comment.y * 100}%` }}
+                onClick={() =>
+                  openAnnotation(
+                    preview.assets[preview.index]!,
+                    inputReferences.find((r) => r.id === previewReference.id)?.id,
+                    true,
+                    previewReference.documentId,
+                    comment.id,
+                  )
+                }
+              >
+                {i + 1}
+              </button>
+            ))}
+          />
+        ) : null}
+        {editor ? (
+          <ImageCanvasEditor
+            key={`${editor.mode}:${editor.base?.id ?? "blank"}`}
+            {...editor}
+            blankSize={
+              parameters.size?.match(/^(\d+)x(\d+)$/)
+                ? {
+                    width: Number(parameters.size.split("x")[0]),
+                    height: Number(parameters.size.split("x")[1]),
+                  }
+                : undefined
+            }
+            onClose={() => setEditor(null)}
+            onSave={async (blob, document) => {
+              const asset = await uploadDrawingImage(
+                blob,
+                editor.mode === "mask" ? "mask.png" : "annotations.png",
+              );
+              if (editor.mode === "mask") {
+                if (refs.current[0]?.id !== editor.base?.id)
+                  throw new Error(tr("The base image changed. Create a new mask."));
+                const storedDraft: ImageDraft = {
+                  id: windowId,
+                  prompt,
+                  providerId: providerId || null,
+                  model,
+                  parameters,
+                  inputAssetIds: refs.current.map((a) => a.id),
+                  inputReferences: referenceMetadata.current,
+                  maskAssetId: asset.id,
+                  updatedAt: new Date().toISOString(),
+                };
+                draftWrites.current = draftWrites.current
+                  .catch(() => {})
+                  .then(async () => {
+                    await drawingApi().upsertDraft(storedDraft);
+                  });
+                await draftWrites.current;
+                setMask(asset);
+              } else {
+                if (!document) throw new Error(tr("Could not save editable image document."));
+                const saved = await saveImageEditDocument({
+                  ...document,
+                  compositeAssetId: asset.id,
+                });
+                const metadata: ImageInputReference = {
+                  id: editor.referenceId ?? crypto.randomUUID(),
+                  assetId: asset.id,
+                  documentId: saved.id,
+                  comments: saved.comments,
+                };
+                const next = [...refs.current];
+                const nextMetadata = [...referenceMetadata.current];
+                if (editor.referenceId) {
+                  const index = referenceMetadata.current.findIndex(
+                    (r) => r.id === editor.referenceId,
+                  );
+                  if (index < 0)
+                    throw new Error(tr("The reference image changed. Reopen the editor."));
+                  next[index] = asset;
+                  nextMetadata[index] = metadata;
+                } else {
+                  if (refs.current.length >= 16)
+                    throw new Error(tr("Reference image limit exceeded (16 images / 80 MiB)."));
+                  next.push(asset);
+                  nextMetadata.push(metadata);
+                }
+                // Confirmed editor saves must be durable before the dialog closes.
+                const storedDraft: ImageDraft = {
+                  id: windowId,
+                  prompt,
+                  providerId: providerId || null,
+                  model,
+                  parameters,
+                  inputAssetIds: next.map((a) => a.id),
+                  inputReferences: nextMetadata,
+                  maskAssetId: next[0]?.id === refs.current[0]?.id ? (mask?.id ?? null) : null,
+                  updatedAt: new Date().toISOString(),
+                };
+                draftWrites.current = draftWrites.current
+                  .catch(() => {})
+                  .then(async () => {
+                    await drawingApi().upsertDraft(storedDraft);
+                  });
+                await draftWrites.current;
+                setReferences(next, nextMetadata);
+              }
+            }}
+          />
+        ) : null}
+      </div>
+    </RouteInsetSurface>
   );
 }

@@ -42,12 +42,12 @@ it.effect(
       const before = yield* readDrawing();
       const prefixBefore = (yield* readTracker(sql)).filter((row) => row.migration_id <= 131);
       const backup = yield* inspectMigrationBackupPlan;
-      assert.deepStrictEqual(backup, { sourceVersion: "v132", targetVersion: 135 });
+      assert.deepStrictEqual(backup, { sourceVersion: "v132", targetVersion: 136 });
 
       const executed = yield* runMigrations();
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [132, 133, 134, 135],
+        [132, 133, 134, 135, 136],
       );
       assert.deepStrictEqual(yield* readDrawing(), before);
       const tracker = yield* readTracker(sql);
@@ -86,7 +86,10 @@ it.effect("adds drawing to a native Synara 1.0.3 database and supports a fresh d
     yield* runMigrations({ toMigrationInclusive: 134 });
     const before = yield* sql`SELECT name FROM sqlite_master WHERE name = 'image_jobs'`;
     assert.lengthOf(before, 0);
-    assert.deepStrictEqual(yield* runMigrations(), [[135, "ImageGeneration"]]);
+    assert.deepStrictEqual(yield* runMigrations(), [
+      [135, "ImageGeneration"],
+      [136, "ImageEditDocuments"],
+    ]);
     assert.deepStrictEqual(yield* readTracker(sql), expectedTracker);
     const tables =
       yield* sql`SELECT name FROM sqlite_master WHERE name IN ('image_jobs', 'image_drafts', 'image_assets')`;

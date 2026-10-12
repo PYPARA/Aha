@@ -1,3 +1,4 @@
+import { ImageEditDocumentCreateInput } from "@synara/contracts";
 import { readEventLoopStatus } from "./eventLoopMonitor";
 import { ImageGenerationService } from "./imageGeneration/Services/ImageGenerationService";
 import { IMAGE_INPUT_MAX_BYTES } from "@synara/contracts";
@@ -253,6 +254,74 @@ export function makeEffectHttpRouteLayer(
 }
 
 export const drawingAssetEffectRouteLayer = Layer.mergeAll(
+  HttpRouter.add(
+    "*",
+    "/api/drawing/save-document",
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const url = HttpServerRequest.toURL(request);
+      if (!url) return HttpServerResponse.text("Bad Request", { status: 400 });
+      const config = yield* ServerConfig;
+      const cors = trustedMutationCorsHeaders({ config, request, url });
+      if (cors === null)
+        return HttpServerResponse.text("Trusted request origin required", { status: 403 });
+      if (request.method === "OPTIONS")
+        return HttpServerResponse.empty({ status: 204, headers: cors });
+      if (request.method !== "POST")
+        return HttpServerResponse.text("Method Not Allowed", { status: 405, headers: cors });
+      if (!isLegacyTokenAuthorized({ config, url })) yield* requireAuthenticatedMutationRequest;
+      const bytes = yield* readEffectBinary(request, 20 * 1024 * 1024);
+      const input = yield* Schema.decodeUnknownEffect(ImageEditDocumentCreateInput)(
+        yield* Effect.try({
+          try: () => JSON.parse(new TextDecoder().decode(bytes)),
+          catch: () => new Error("Invalid editable document JSON."),
+        }),
+      );
+      const document = yield* (yield* ImageGenerationService).createDocument(input);
+      return HttpServerResponse.jsonUnsafe(document, { status: 201, headers: cors });
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          error instanceof AuthError
+            ? authErrorResponse(error)
+            : HttpServerResponse.jsonUnsafe(
+                { error: error instanceof Error ? error.message : "Invalid editable document." },
+                { status: 400 },
+              ),
+        ),
+      ),
+    ),
+  ),
+  HttpRouter.add(
+    "GET",
+    "/api/drawing/documents/*",
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const url = HttpServerRequest.toURL(request);
+      if (!url) return HttpServerResponse.text("Bad Request", { status: 400 });
+      const config = yield* ServerConfig;
+      if (!isLegacyTokenAuthorized({ config, url })) yield* requireAuthenticatedRequest;
+      const id = url.pathname.split("/").at(-1) ?? "";
+      if (!/^[0-9a-f-]{36}$/u.test(id))
+        return HttpServerResponse.text("Not Found", { status: 404 });
+      const document = yield* (yield* ImageGenerationService).getDocument(id);
+      return HttpServerResponse.jsonUnsafe(document, {
+        headers: {
+          ...localPreviewCorsHeaders({ config, request, url }),
+          "Cache-Control": "private, max-age=31536000, immutable",
+        },
+      });
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          error instanceof AuthError
+            ? authErrorResponse(error)
+            : HttpServerResponse.text("Not Found", { status: 404 }),
+        ),
+      ),
+    ),
+  ),
+
   HttpRouter.add(
     "GET",
     "/api/drawing/assets/*",

@@ -12,6 +12,7 @@ import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 
 interface ExpandedImageOverlayProps {
   readonly actions?: ReactNode;
+  readonly imageOverlay?: ReactNode;
   readonly expandedImage: ExpandedImagePreview | null;
   readonly onClose: () => void;
   readonly onNavigate: (direction: -1 | 1) => void;
@@ -20,6 +21,7 @@ interface ExpandedImageOverlayProps {
 export function ExpandedImageOverlay({
   expandedImage,
   actions,
+  imageOverlay,
   onClose,
   onNavigate,
 }: ExpandedImageOverlayProps) {
@@ -123,12 +125,15 @@ export function ExpandedImageOverlay({
         >
           <XIcon />
         </Button>
-        <img
-          src={expandedImageItem.src}
-          alt={expandedImageItem.name}
-          className={`${actions ? "max-h-[78vh]" : "max-h-[86vh]"} max-w-[92vw] select-none rounded-lg border border-[color:var(--color-border)] bg-[var(--color-background-elevated-primary-opaque)] object-contain shadow-2xl`}
-          draggable={false}
-        />
+        <div className="relative w-fit">
+          <img
+            src={expandedImageItem.src}
+            alt={expandedImageItem.name}
+            className={`${actions ? "max-h-[78vh]" : "max-h-[86vh]"} max-w-[92vw] select-none rounded-lg border border-[color:var(--color-border)] bg-[var(--color-background-elevated-primary-opaque)] object-contain shadow-2xl`}
+            draggable={false}
+          />
+          {imageOverlay}
+        </div>
         <p className="mt-2 max-w-[92vw] truncate text-center text-ui leading-snug text-muted-foreground/80">
           {expandedImageItem.name}
           {expandedImage.images.length > 1

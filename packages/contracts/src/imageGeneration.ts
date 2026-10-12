@@ -82,6 +82,82 @@ export const ImageAsset = Schema.Struct({
   createdAt: IsoDateTime,
 });
 export type ImageAsset = typeof ImageAsset.Type;
+export const ImageComment = Schema.Struct({
+  id: Id,
+  x: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  y: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  text: Schema.String.check(Schema.isMaxLength(2000)),
+});
+export type ImageComment = typeof ImageComment.Type;
+const EditPoint = Schema.Struct({ x: Schema.Finite, y: Schema.Finite });
+const EditStroke = Schema.Struct({
+  width: Schema.Finite.check(Schema.isBetween({ minimum: 1, maximum: 1000 })),
+  points: Schema.Array(EditPoint).check(Schema.isMaxLength(100000)),
+});
+const EditStyle = {
+  id: Id,
+  color: Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/)),
+  width: Schema.Finite.check(Schema.isBetween({ minimum: 1, maximum: 1000 })),
+  erase: Schema.optional(Schema.Array(EditStroke)),
+};
+export const ImageEditElement = Schema.Union([
+  Schema.Struct({
+    ...EditStyle,
+    type: Schema.Literal("path"),
+    points: Schema.Array(EditPoint).check(Schema.isMinLength(1), Schema.isMaxLength(100000)),
+  }),
+  Schema.Struct({
+    ...EditStyle,
+    type: Schema.Literal("shape"),
+    shape: Schema.Literals([
+      "line",
+      "arrow",
+      "rect",
+      "ellipse",
+      "triangle",
+      "diamond",
+      "star",
+      "heart",
+    ]),
+    start: EditPoint,
+    end: EditPoint,
+  }),
+  Schema.Struct({
+    ...EditStyle,
+    type: Schema.Literal("text"),
+    x: Schema.Finite,
+    y: Schema.Finite,
+    text: Schema.String.check(Schema.isMaxLength(10000)),
+    fontSize: Schema.Finite.check(Schema.isBetween({ minimum: 1, maximum: 1000 })),
+  }),
+]);
+export type ImageEditElement = typeof ImageEditElement.Type;
+export const ImageEditDocumentCreateInput = Schema.Struct({
+  baseAssetId: Schema.NullOr(Id),
+  compositeAssetId: Id,
+  width: Integer.check(Schema.isBetween({ minimum: 1, maximum: 99999 })),
+  height: Integer.check(Schema.isBetween({ minimum: 1, maximum: 99999 })),
+  elements: Schema.Array(ImageEditElement).check(Schema.isMaxLength(2000)),
+  comments: Schema.Array(ImageComment).check(Schema.isMaxLength(100)),
+});
+export type ImageEditDocumentCreateInput = typeof ImageEditDocumentCreateInput.Type;
+export const ImageEditDocument = Schema.Struct({
+  ...ImageEditDocumentCreateInput.fields,
+  id: Id,
+  version: Schema.Literal(1),
+  createdAt: IsoDateTime,
+});
+export type ImageEditDocument = typeof ImageEditDocument.Type;
+export const ImageInputReference = Schema.Struct({
+  id: Id,
+  assetId: Id,
+  documentId: Schema.NullOr(Id),
+  comments: Schema.optional(Schema.Array(ImageComment).check(Schema.isMaxLength(100))),
+});
+export type ImageInputReference = typeof ImageInputReference.Type;
+const InputReferences = Schema.optional(
+  Schema.Array(ImageInputReference).check(Schema.isMaxLength(16)),
+);
 export const ImageJobStatus = Schema.Literals([
   "queued",
   "running",
@@ -107,8 +183,10 @@ export const ImageJob = Schema.Struct({
   providerName: TrimmedNonEmptyString,
   providerVersion: Integer,
   model: ModelId,
-  prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(32000)),
+  prompt: Schema.String.check(Schema.isMaxLength(32000)),
   parameters: ImageGenerationParameters,
+  inputReferences: InputReferences,
+  requestPrompt: Schema.optional(Schema.String.check(Schema.isMaxLength(32000))),
   status: ImageJobStatus,
   error: Schema.NullOr(ImageGenerationError),
   createdAt: IsoDateTime,
@@ -129,14 +207,19 @@ export const ImageJobCreateInput = Schema.Struct({
   clientRequestId: Id,
   providerId: Id,
   model: ModelId,
-  prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(32000)),
+  prompt: Schema.String.check(Schema.isMaxLength(32000)),
   parameters: ImageGenerationParameters,
   inputAssetIds: Schema.Array(Id).check(Schema.isMaxLength(16)),
+  inputReferences: InputReferences,
   maskAssetId: Schema.NullOr(Id),
   sourceJobId: Schema.NullOr(Id),
 });
 export type ImageJobCreateInput = typeof ImageJobCreateInput.Type;
-export const ImageJobListInput = Schema.Struct({ cursor: Schema.optional(Schema.String) });
+export const ImageJobListInput = Schema.Struct({
+  cursor: Schema.optional(Schema.String),
+  query: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
+  statusGroup: Schema.optional(Schema.Literals(["all", "active", "completed", "issues"])),
+});
 export type ImageJobListInput = typeof ImageJobListInput.Type;
 export const ImageJobListResult = Schema.Struct({
   jobs: Schema.Array(ImageJob),
@@ -150,6 +233,7 @@ export const ImageDraft = Schema.Struct({
   model: Schema.String,
   parameters: ImageGenerationParameters,
   inputAssetIds: Schema.Array(Id).check(Schema.isMaxLength(16)),
+  inputReferences: InputReferences,
   maskAssetId: Schema.NullOr(Id),
   updatedAt: IsoDateTime,
 });

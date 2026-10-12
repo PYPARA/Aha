@@ -1254,6 +1254,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  yield* fs.copy(
+    path.join(repoRoot, "third-party-licenses"),
+    path.join(stageAppDir, "third-party-licenses"),
+  );
   yield* stageClientFavicons(stageAppDir, options.flavor);
 
   yield* timedBuildStage(

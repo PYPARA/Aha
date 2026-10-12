@@ -7,6 +7,7 @@ import sharp from "sharp";
 import { randomUUID } from "node:crypto";
 import type { ImageJobCreateInput, ImageProviderInput } from "@synara/contracts";
 import { layerMemory } from "../persistence/NodeSqliteClient";
+import editMigration from "../persistence/Migrations/136_ImageEditDocuments";
 import migration from "../persistence/Migrations/135_ImageGeneration";
 import { ImageGenerationRepositoryLive } from "../persistence/Layers/ImageGenerationRepository";
 import { ImageGenerationRepository } from "../persistence/Services/ImageGenerationRepository";
@@ -35,7 +36,14 @@ async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "aha-drawing-test-"));
   const runtime = ManagedRuntime.make(
     ImageGenerationRepositoryLive.pipe(
-      Layer.provideMerge(Layer.effectDiscard(migration).pipe(Layer.provideMerge(layerMemory()))),
+      Layer.provideMerge(
+        Layer.effectDiscard(
+          Effect.gen(function* () {
+            yield* migration;
+            yield* editMigration;
+          }),
+        ).pipe(Layer.provideMerge(layerMemory())),
+      ),
     ),
   );
   const repository = await runtime.runPromise(
@@ -203,6 +211,60 @@ describe("image provider and Images API contracts", () => {
       code: "request_failed",
       message: "Could not connect to image provider for model discovery.",
     });
+  });
+  it("searches all persisted history literally before filtering and paginating", async () => {
+    const p = await f.engine.upsertProvider(providerInput());
+    const jobs = [];
+    for (let i = 0; i < 42; i++) {
+      const job = await f.engine.createJob(
+        input(p.id, { prompt: i === 0 ? "old literal %_ mountain" : `mountain ${i}` }),
+      );
+      const status =
+        i < 32
+          ? "succeeded"
+          : i < 35
+            ? "queued"
+            : i < 37
+              ? "partial"
+              : i < 39
+                ? "failed"
+                : i === 39
+                  ? "interrupted"
+                  : "cancelled";
+      await Effect.runPromise(f.repository.saveJob({ ...job, status }));
+      jobs.push(job);
+    }
+    const literal = await Effect.runPromise(f.repository.listJobs({ query: "%_" }));
+    expect(literal.jobs.map((job) => job.id)).toEqual([jobs[0]!.id]);
+    const page = await Effect.runPromise(
+      f.repository.listJobs({ query: "MOUNTAIN", statusGroup: "completed" }),
+    );
+    expect(page.jobs).toHaveLength(30);
+    const rest = await Effect.runPromise(
+      f.repository.listJobs({
+        query: "mountain",
+        statusGroup: "completed",
+        cursor: page.nextCursor!,
+      }),
+    );
+    expect(rest.jobs).toHaveLength(2);
+    expect(rest.nextCursor).toBeNull();
+    expect(new Set([...page.jobs, ...rest.jobs].map((job) => job.id)).size).toBe(32);
+    expect(
+      (await Effect.runPromise(f.repository.listJobs({ statusGroup: "active", query: "mountain" })))
+        .jobs,
+    ).toHaveLength(3);
+    expect(
+      (await Effect.runPromise(f.repository.listJobs({ statusGroup: "issues" }))).jobs,
+    ).toHaveLength(5);
+    expect(
+      (await Effect.runPromise(f.repository.listJobs({ query: "missing" }))).jobs,
+    ).toHaveLength(0);
+    expect(
+      (await Effect.runPromise(f.repository.listJobs({ statusGroup: "all" }))).jobs.some(
+        (job) => job.status === "cancelled",
+      ),
+    ).toBe(true);
   });
   it("sends edits as multipart with references, mask and explicit parameters once", async () => {
     const fetcher = vi.fn().mockResolvedValue(f.response(2));
@@ -491,5 +553,128 @@ describe("durable image generation tasks", () => {
     await f.engine.deleteJob(a.id);
     expect(await f.engine.getAsset(other.id)).toBeTruthy();
     await expect(readFile(f.engine.assets.filePath(done.outputs[0]!.id))).rejects.toThrow();
+  });
+});
+
+describe("editable image documents", () => {
+  it("persists immutable objects, expands comments once, and retains source assets", async () => {
+    const provider = await f.engine.upsertProvider(providerInput());
+    const base = await f.engine.upload(f.png, "base.png");
+    const bytes = await sharp(f.png).tint("red").png().toBuffer();
+    const composite = await f.engine.upload(bytes, "annotated.png");
+    const document = await f.engine.createDocument({
+      baseAssetId: base.id,
+      compositeAssetId: composite.id,
+      width: 16,
+      height: 12,
+      elements: [
+        {
+          id: "object",
+          type: "shape",
+          shape: "rect",
+          start: { x: 2, y: 2 },
+          end: { x: 10, y: 10 },
+          color: "#ff0000",
+          width: 2,
+        },
+      ],
+      comments: [{ id: "comment", x: 0.52, y: 0.41, text: "Change to red" }],
+    });
+    const reference = { id: "stable-reference", assetId: composite.id, documentId: document.id };
+    const job = await f.engine.createJob(
+      input(provider.id, {
+        prompt: "",
+        inputAssetIds: [composite.id],
+        inputReferences: [reference],
+      }),
+    );
+    expect(job.prompt).toBe("");
+    expect(job.requestPrompt).toBe("[image 1] notes:\n1. (X=52%, Y=41%) Change to red");
+    expect((await f.engine.getDocument(document.id)).elements).toEqual(document.elements);
+    const again = await f.engine.createJob(
+      input(provider.id, {
+        prompt: job.prompt,
+        inputAssetIds: [composite.id],
+        inputReferences: job.inputReferences,
+      }),
+    );
+    expect(again.requestPrompt).toBe(job.requestPrompt);
+    await f.engine.upsertDraft({
+      id: "doc-draft",
+      prompt: "",
+      providerId: provider.id,
+      model: provider.defaultModel,
+      parameters: { n: 1 },
+      inputAssetIds: [composite.id],
+      inputReferences: [reference],
+      maskAssetId: null,
+      updatedAt: new Date().toISOString(),
+    });
+    await f.engine.cancelJob(job.id);
+    await f.engine.deleteJob(job.id);
+    expect((await f.engine.getDocument(document.id)).id).toBe(document.id);
+    expect((await f.engine.getAsset(base.id)).id).toBe(base.id);
+    expect(
+      (await Effect.runPromise(f.repository.getDraft("doc-draft")))?.inputReferences?.[0]
+        ?.comments?.[0]?.text,
+    ).toBe("Change to red");
+    await expect(
+      f.engine.createJob(
+        input(provider.id, { inputAssetIds: [base.id], inputReferences: [reference] }),
+      ),
+    ).rejects.toThrow("Reference metadata");
+    await expect(
+      f.engine.createJob(
+        input(provider.id, {
+          inputAssetIds: [base.id],
+          inputReferences: [{ ...reference, assetId: base.id }],
+        }),
+      ),
+    ).rejects.toThrow("does not match");
+    await expect(
+      f.engine.createDocument({ ...document, compositeAssetId: composite.id, width: 17 }),
+    ).rejects.toThrow("dimensions");
+  });
+  it("reorders comment numbers by reference order and rejects expanded prompts above the limit", async () => {
+    const provider = await f.engine.upsertProvider(providerInput());
+    const asset = await f.engine.upload(f.png, "ref.png");
+    const doc = await f.engine.createDocument({
+      baseAssetId: asset.id,
+      compositeAssetId: asset.id,
+      width: 16,
+      height: 12,
+      elements: [],
+      comments: [{ id: "c", x: 0.1, y: 0.8, text: "Remove" }],
+    });
+    const refs = [
+      { id: "a", assetId: asset.id, documentId: null },
+      { id: "b", assetId: asset.id, documentId: doc.id },
+    ];
+    const job = await f.engine.createJob(
+      input(provider.id, { inputAssetIds: [asset.id, asset.id], inputReferences: refs }),
+    );
+    expect(job.requestPrompt).toContain("[image 2] notes:");
+    const moved = await f.engine.createJob(
+      input(provider.id, {
+        inputAssetIds: [asset.id, asset.id],
+        inputReferences: [refs[1]!, refs[0]!],
+      }),
+    );
+    expect(moved.requestPrompt).toContain("[image 1] notes:");
+    await expect(
+      f.engine.createJob(
+        input(provider.id, {
+          prompt: "x".repeat(32000),
+          inputAssetIds: [asset.id, asset.id],
+          inputReferences: refs,
+        }),
+      ),
+    ).rejects.toThrow("32,000");
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    const detached = { ...doc, id: randomUUID(), createdAt: old };
+    await Effect.runPromise(f.repository.saveDocument(detached));
+    await f.engine.cleanup(false);
+    await expect(f.engine.getDocument(detached.id)).rejects.toThrow("not found");
+    expect((await f.engine.getDocument(doc.id)).id).toBe(doc.id);
   });
 });

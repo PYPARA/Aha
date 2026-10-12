@@ -1,5 +1,6 @@
 import type {
   ImageAsset,
+  ImageEditDocument,
   ImageDraft,
   ImageJob,
   ImageJobListInput,
@@ -9,6 +10,10 @@ import type {
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
 export interface ImageGenerationRepositoryShape {
+  getDocument: (id: string) => Effect.Effect<ImageEditDocument | null, Error>;
+  saveDocument: (document: ImageEditDocument) => Effect.Effect<void, Error>;
+  unusedDocuments: (before: string) => Effect.Effect<readonly ImageEditDocument[], Error>;
+  deleteDocument: (id: string) => Effect.Effect<void, Error>;
   listProviders: () => Effect.Effect<readonly ImageProvider[], Error>;
   saveProvider: (provider: ImageProvider) => Effect.Effect<void, Error>;
   deleteProvider: (id: string) => Effect.Effect<void, Error>;
