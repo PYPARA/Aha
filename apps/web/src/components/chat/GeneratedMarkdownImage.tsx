@@ -1,3 +1,6 @@
+import { ResourceChatContext } from "../resources/resourceLibrary";
+import { ResourceCollectButton, resourceContextMenu } from "../resources/ResourceCollectionDialog";
+import { useAhaTranslation } from "~/aha/AppearanceProvider";
 // FILE: GeneratedMarkdownImage.tsx
 // Purpose: Renders Codex-generated images embedded in assistant markdown with
 //          loading skeleton, hover overlay (expand/download), and inline error card.
@@ -9,7 +12,7 @@
 //        (`chat-generated-image__*`) rather than shadcn Button.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { type MouseEvent, useContext, useEffect, useRef, useState } from "react";
 
 import { DownloadIcon, Loader2Icon, Maximize2 } from "~/lib/icons";
 import { buildLocalImageUrl, localImageAbsolutePath } from "~/lib/localImageUrls";
@@ -45,6 +48,8 @@ export function GeneratedMarkdownImage(props: GeneratedMarkdownImageProps) {
 
 function GeneratedMarkdownImageContent(props: GeneratedMarkdownImageProps) {
   const { src, alt, cwd, onImageExpand } = props;
+  const tr = useAhaTranslation();
+  const resourceThreadId = useContext(ResourceChatContext);
   const queryClient = useQueryClient();
   const mounted = useRef(true);
   useEffect(() => {
@@ -148,7 +153,23 @@ function GeneratedMarkdownImageContent(props: GeneratedMarkdownImageProps) {
   // nesting expansion/download controls inside that link, including on errors.
   if (props.isLinked) {
     return (
-      <span className="chat-generated-image">
+      <span
+        className="chat-generated-image"
+        onContextMenu={(event) =>
+          void resourceContextMenu(
+            event,
+            [
+              {
+                name: downloadName || fileName || "image",
+                url: downloadUrl,
+                resolveUrl: () => resolveGrantedUrl(true),
+              },
+            ],
+            tr,
+            resourceThreadId,
+          )
+        }
+      >
         <img {...imgProps} alt={accessibleName} className="chat-generated-image__img" />
       </span>
     );
@@ -167,7 +188,24 @@ function GeneratedMarkdownImageContent(props: GeneratedMarkdownImageProps) {
   }
 
   return (
-    <span className="chat-generated-image" data-status={resolvingGrant ? "loading" : status}>
+    <span
+      className="chat-generated-image"
+      data-status={resolvingGrant ? "loading" : status}
+      onContextMenu={(e) =>
+        void resourceContextMenu(
+          e,
+          [
+            {
+              name: downloadName || fileName || "image",
+              url: downloadUrl,
+              resolveUrl: () => resolveGrantedUrl(true),
+            },
+          ],
+          tr,
+          resourceThreadId,
+        )
+      }
+    >
       <button
         type="button"
         className="chat-generated-image__frame"
@@ -199,6 +237,15 @@ function GeneratedMarkdownImageContent(props: GeneratedMarkdownImageProps) {
         <DownloadIcon className="size-3.5" aria-hidden="true" />
         <span>Download</span>
       </a>
+      <ResourceCollectButton
+        sources={[
+          {
+            name: downloadName || fileName || "image",
+            url: downloadUrl,
+            resolveUrl: () => resolveGrantedUrl(true),
+          },
+        ]}
+      />
     </span>
   );
 }

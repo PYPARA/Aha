@@ -1,3 +1,4 @@
+import { registerResourceLibrary } from "./resources/ipc";
 import { registerAhaAppearance } from "./aha/appearance-ipc";
 import type { AppearanceImages } from "./aha/appearance-images";
 import "./httpRuntime";
@@ -5007,6 +5008,7 @@ function requestGracefulAppQuit(reason: string): void {
 }
 
 function registerIpcHandlers(): void {
+  registerResourceLibrary(STATE_DIR, () => mainWindow);
   ahaSkinController = registerAhaAppearance(
     STATE_DIR,
     () => mainWindow,

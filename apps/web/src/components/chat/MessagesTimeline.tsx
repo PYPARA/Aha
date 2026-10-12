@@ -1,3 +1,5 @@
+import { ResourceCapture } from "../resources/ResourceCollectionDialog";
+import { resolveWsHttpUrl as resourceHttpUrl } from "~/lib/wsHttpUrl";
 // FILE: MessagesTimeline.tsx
 // Purpose: Renders the chat transcript rows and lets LegendList own scrolling/follow behavior.
 // Layer: Web chat presentation component
@@ -1881,7 +1883,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   {userFiles.length > 0 && (
                     <div className="mb-1 flex max-w-[280px] flex-wrap justify-end gap-1.5 self-end">
                       {userFiles.map((file) => (
-                        <FileAttachmentChip key={file.id} file={file} />
+                        <ResourceCapture
+                          key={file.id}
+                          source={{
+                            name: file.name,
+                            url: resourceHttpUrl(`/attachments/${encodeURIComponent(file.id)}`),
+                            origin: { kind: "chat", messageId: row.message.id },
+                          }}
+                        >
+                          <FileAttachmentChip file={file} />
+                        </ResourceCapture>
                       ))}
                     </div>
                   )}
@@ -1893,16 +1904,26 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                       )}
                     >
                       {userImages.map((image) => (
-                        <UserImageAttachmentThumbnail
+                        <ResourceCapture
                           key={image.id}
-                          image={image}
-                          userImages={userImages}
-                          onImageExpand={onImageExpand}
-                          onTimelineImageLoad={
-                            isTailContentRow ? scrollTailExpansionToEnd : ignoreTimelineImageLoad
-                          }
-                          resolvedTheme={resolvedTheme}
-                        />
+                          source={{
+                            name: image.name,
+                            url:
+                              image.previewUrl ??
+                              resourceHttpUrl(`/attachments/${encodeURIComponent(image.id)}`),
+                            origin: { kind: "chat", messageId: row.message.id },
+                          }}
+                        >
+                          <UserImageAttachmentThumbnail
+                            image={image}
+                            userImages={userImages}
+                            onImageExpand={onImageExpand}
+                            onTimelineImageLoad={
+                              isTailContentRow ? scrollTailExpansionToEnd : ignoreTimelineImageLoad
+                            }
+                            resolvedTheme={resolvedTheme}
+                          />
+                        </ResourceCapture>
                       ))}
                     </div>
                   )}

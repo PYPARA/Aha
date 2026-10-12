@@ -34,7 +34,8 @@ export type RailRouteItemId =
   | Exclude<SidebarNavItemId, "newThread">
   | "studio"
   | "settings"
-  | "drawing";
+  | "drawing"
+  | "resources";
 export type RailItemId = RailPanelItemId | RailRouteItemId;
 
 /**
@@ -45,6 +46,7 @@ export type RailItemId = RailPanelItemId | RailRouteItemId;
 export const RAIL_ORDERABLE_ITEM_IDS = [
   "home",
   "drawing",
+  "resources",
   "inbox",
   "spaces",
   "kanban",
@@ -70,12 +72,13 @@ export function railItemCanHide(id: RailOrderableItemId): boolean {
 export function normalizeRailItemOrder(order: readonly string[]): RailOrderableItemId[] {
   const normalized = normalizeIdOrder(order, RAIL_ORDERABLE_ITEM_IDS, isRailOrderableItemId);
   // Inbox shipped after users saved an order: it joins next to Home, as by default.
-  return placeNewIdAfter(
+  const withDrawing = placeNewIdAfter(
     placeNewIdAfter(normalized, order, "inbox", "home"),
     order,
     "drawing",
     "home",
   );
+  return placeNewIdAfter(withDrawing, order, "resources", "drawing");
 }
 
 export function normalizeHiddenRailItems(hidden: readonly string[]): RailOrderableItemId[] {
@@ -199,7 +202,12 @@ export function resolveActiveRailShortcutKey(input: {
  */
 export function railItemShowsPanel(id: RailItemId): boolean {
   return (
-    id !== "drawing" && id !== "kanban" && id !== "tasks" && id !== "pullRequests" && id !== "inbox"
+    id !== "resources" &&
+    id !== "drawing" &&
+    id !== "kanban" &&
+    id !== "tasks" &&
+    id !== "pullRequests" &&
+    id !== "inbox"
   );
 }
 
@@ -209,6 +217,7 @@ function matchesRoute(pathname: string, route: string): boolean {
 
 /** The route rail item that owns a pathname, or null for thread and chat-index routes. */
 export function railItemForPathname(pathname: string): RailRouteItemId | null {
+  if (matchesRoute(pathname, "/resources")) return "resources";
   if (matchesRoute(pathname, "/drawing")) return "drawing";
   if (matchesRoute(pathname, "/inbox")) return "inbox";
   if (matchesRoute(pathname, "/kanban")) return "kanban";

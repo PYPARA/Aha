@@ -1,9 +1,12 @@
+import { ResourceChatContext } from "../resources/resourceLibrary";
+import { ResourceCollectButton, resourceContextMenu } from "../resources/ResourceCollectionDialog";
+import { useAhaTranslation } from "~/aha/AppearanceProvider";
 // FILE: ExpandedImageOverlay.tsx
 // Purpose: Shared fullscreen image preview overlay.
 // Layer: Chat and composer UI component
 // Exports: ExpandedImageOverlay
 
-import { useLayoutEffect, useEffect, useRef, type ReactNode } from "react";
+import { useContext, useLayoutEffect, useEffect, useRef, type ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "~/lib/icons";
@@ -25,6 +28,8 @@ export function ExpandedImageOverlay({
   onClose,
   onNavigate,
 }: ExpandedImageOverlayProps) {
+  const tr = useAhaTranslation();
+  const resourceThreadId = useContext(ResourceChatContext);
   const expandedImageItem = expandedImage ? expandedImage.images[expandedImage.index] : null;
   const open = Boolean(expandedImageItem);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -128,6 +133,20 @@ export function ExpandedImageOverlay({
         <div className="relative w-fit">
           <img
             src={expandedImageItem.src}
+            onContextMenu={(e) =>
+              void resourceContextMenu(
+                e,
+                [
+                  {
+                    name: expandedImageItem.name,
+                    url: expandedImageItem.src,
+                    origin: expandedImageItem.resourceOrigin,
+                  },
+                ],
+                tr,
+                resourceThreadId,
+              )
+            }
             alt={expandedImageItem.name}
             className={`${actions ? "max-h-[78vh]" : "max-h-[86vh]"} max-w-[92vw] select-none rounded-lg border border-[color:var(--color-border)] bg-[var(--color-background-elevated-primary-opaque)] object-contain shadow-2xl`}
             draggable={false}
@@ -140,6 +159,15 @@ export function ExpandedImageOverlay({
             ? ` (${expandedImage.index + 1}/${expandedImage.images.length})`
             : ""}
         </p>
+        <ResourceCollectButton
+          sources={[
+            {
+              name: expandedImageItem.name,
+              url: expandedImageItem.src,
+              origin: expandedImageItem.resourceOrigin,
+            },
+          ]}
+        />
         {actions ? <div className="mt-3 rounded-xl bg-background p-2">{actions}</div> : null}
       </div>
       {expandedImage.images.length > 1 ? (

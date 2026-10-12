@@ -1,3 +1,5 @@
+import { collectResources } from "../resources/resourceLibrary";
+import { drawingResourceSource, resourceContextMenu } from "../resources/ResourceCollectionDialog";
 import { CentralIcon } from "~/lib/central-icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ImageJob, ImageJobListInput } from "@synara/contracts";
@@ -176,6 +178,19 @@ export function DrawingGallery({
                       <img
                         loading="lazy"
                         src={imageUrl(job.outputs[0], "thumbnail")}
+                        onContextMenu={(e) =>
+                          void resourceContextMenu(
+                            e,
+                            [
+                              drawingResourceSource(
+                                job.outputs[0]!,
+                                imageUrl(job.outputs[0]!),
+                                job,
+                              ),
+                            ],
+                            tr,
+                          )
+                        }
                         alt={job.prompt}
                         className="h-full w-full object-contain"
                       />
@@ -254,6 +269,19 @@ export function DrawingGallery({
                         />
                         <ComposerPickerMenuPopup align="end">
                           <MenuItem onClick={() => onOpen(job)}>{tr("Details")}</MenuItem>
+                          {window.desktopBridge?.resourceLibrary && job.outputs.length ? (
+                            <MenuItem
+                              onClick={() =>
+                                collectResources(
+                                  job.outputs.map((a) =>
+                                    drawingResourceSource(a, imageUrl(a), job),
+                                  ),
+                                )
+                              }
+                            >
+                              {tr("Add all results to resource center")}
+                            </MenuItem>
+                          ) : null}
                           <MenuItem onClick={() => onReuse(job)}>{tr("Reuse parameters")}</MenuItem>
                           {activeImageJob(job) ? (
                             <MenuItem onClick={() => onCancel(job)}>{tr("Cancel task")}</MenuItem>

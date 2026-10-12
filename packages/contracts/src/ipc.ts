@@ -1,3 +1,4 @@
+import type { ResourceLibraryBridge } from "./resourceLibrary";
 import type { AhaAppearanceBridge } from "./ahaAppearance";
 import { Schema } from "effect";
 import type {
@@ -961,6 +962,7 @@ export const DESKTOP_DIAGNOSTIC_ISSUE_PREFIX = "SYNARA_DIAGNOSTIC_ISSUE ";
 export type DesktopDiagnosticReportStatus = "queued" | "sent" | "unavailable";
 
 export interface DesktopBridge {
+  resourceLibrary?: ResourceLibraryBridge;
   ahaAppearance?: AhaAppearanceBridge;
   /** Present only when the desktop main process enables baked-in Beta diagnostics. */
   betaDiagnostics?: {

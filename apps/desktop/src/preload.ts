@@ -1,3 +1,4 @@
+import { RESOURCE_CHANNELS as RESOURCES } from "@synara/contracts/resourceLibrary";
 import { AHA_APPEARANCE_CHANNELS as AHA } from "@synara/contracts/ahaChannels";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
@@ -130,6 +131,19 @@ function recordBrowserActivity(activity: DesktopDiagnosticActivity): void {
 }
 
 contextBridge.exposeInMainWorld("desktopBridge", {
+  resourceLibrary: {
+    request: (input) => ipcRenderer.invoke(RESOURCES.request, input),
+    onChanged: (listener) => {
+      const handler = () => listener();
+      ipcRenderer.on(RESOURCES.changed, handler);
+      return () => ipcRenderer.removeListener(RESOURCES.changed, handler);
+    },
+    onProgress: (listener) => {
+      const handler = (_event: unknown, value: Parameters<typeof listener>[0]) => listener(value);
+      ipcRenderer.on(RESOURCES.progress, handler);
+      return () => ipcRenderer.removeListener(RESOURCES.progress, handler);
+    },
+  },
   ahaAppearance: {
     skins: {
       list: (input) => ipcRenderer.invoke(AHA.skinsList, input),

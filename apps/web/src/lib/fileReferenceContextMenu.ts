@@ -1,3 +1,4 @@
+import { collectResources } from "~/components/resources/resourceLibrary";
 // FILE: fileReferenceContextMenu.ts
 // Purpose: Right-click menu shared by file rows, file previews, and chat file
 //          links (editor explorer, changed-file lists, dock file pane).
@@ -78,6 +79,9 @@ export async function showFileReferenceContextMenu(input: {
             },
           ]
         : []),
+      ...(window.desktopBridge?.resourceLibrary && input.revealPath
+        ? [{ id: "collect-resource", label: "添加到资源中心 / Add to resource center" }]
+        : []),
       { id: "copy-path" as const, label: "Copy path" },
     ],
     input.position,
@@ -101,6 +105,12 @@ export async function showFileReferenceContextMenu(input: {
           error instanceof Error ? error.message : "An unknown error occurred opening the file.",
       });
     }
+    return;
+  }
+  if (clicked === "collect-resource" && input.revealPath) {
+    collectResources([
+      { name: input.path.split(/[\\/]/u).pop() ?? "resource", path: input.revealPath },
+    ]);
     return;
   }
   if (clicked === "copy-path") {

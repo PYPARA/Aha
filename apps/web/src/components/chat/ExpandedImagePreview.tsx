@@ -1,4 +1,6 @@
+import type { ResourceOrigin } from "@synara/contracts/resourceLibrary";
 export interface ExpandedImageItem {
+  resourceOrigin?: ResourceOrigin;
   src: string;
   name: string;
 }

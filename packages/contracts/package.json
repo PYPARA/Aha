@@ -30,6 +30,10 @@
     "./ahaChannels": {
       "types": "./src/ahaChannels.ts",
       "import": "./src/ahaChannels.ts"
+    },
+    "./resourceLibrary": {
+      "types": "./src/resourceLibrary.ts",
+      "import": "./src/resourceLibrary.ts"
     }
   },
   "scripts": {
