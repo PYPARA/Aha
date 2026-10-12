@@ -9,6 +9,7 @@ export const AHA_APPEARANCE_CHANNELS = {
   skinsRemove: "aha:skins:remove",
   skinsIcon: "aha:skins:icon",
   skinsExport: "aha:skins:export",
+  skinsSetAppIcon: "aha:skins:set-app-icon",
   skinsReapply: "aha:skins:reapply",
   skinsChanged: "aha:skins:changed",
   get: "aha:appearance:get",

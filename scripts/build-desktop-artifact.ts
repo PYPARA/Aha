@@ -489,7 +489,7 @@ function stageMacIcons(
     yield* runCommand(
       ChildProcess.make({
         ...commandOutputOptions(verbose),
-      })`sips -z 512 512 ${modernIconSource} --out ${iconPngPath}`,
+      })`sips -z 1024 1024 ${modernIconSource} --out ${iconPngPath}`,
     );
 
     // The solid ICNS is the bundle icon on every macOS release; Icon Composer glass alters the mark.

@@ -77,3 +77,34 @@ it("canceled native import does not mutate state or announce an appearance chang
   expect(await invoke(C.skinsList)).toEqual(before);
   expect(send).not.toHaveBeenCalled();
 });
+it("validates icon selection input and broadcasts the persisted selection", async () => {
+  const before = (await invoke(C.skinsList, {
+    initialPalette: BUILTIN_PALETTES["aha-elation"],
+  })) as SkinSnapshot;
+  await expect(
+    invoke(C.skinsSetAppIcon, { skinId: "../../icon.png", revision: before.revision }),
+  ).rejects.toThrow();
+  await expect(
+    invoke(C.skinsSetAppIcon, { skinId: null, revision: before.revision, path: "/tmp/x" }),
+  ).rejects.toThrow();
+  await expect(
+    invoke(
+      C.skinsSetAppIcon,
+      { skinId: null, revision: before.revision },
+      { ...event, senderFrame: { ...frame } },
+    ),
+  ).rejects.toThrow("IPC_FORBIDDEN");
+  expect(await invoke(C.skinsList)).toEqual(before);
+  const selected = (await invoke(C.skinsSetAppIcon, {
+    skinId: before.activeId,
+    revision: before.revision,
+  })) as SkinSnapshot;
+  expect(selected.appIconOverrideSkinId).toBe(before.activeId);
+  expect(selected.appearance).toEqual(before.appearance);
+  expect(send).toHaveBeenCalledWith(C.skinsChanged, selected);
+  const following = (await invoke(C.skinsSetAppIcon, {
+    skinId: null,
+    revision: selected.revision,
+  })) as SkinSnapshot;
+  expect(following.appIconOverrideSkinId).toBeNull();
+});

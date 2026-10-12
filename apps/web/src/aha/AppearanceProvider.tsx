@@ -146,7 +146,7 @@ export function AhaAppearanceProvider({ children }: { children: ReactNode }) {
         applyAhaThemeState(next);
     }
   }, [skinDraft, skins?.palette]);
-  const iconId = skinDraft?.effectiveIconId ?? skins?.effectiveIconId;
+  const iconId = skinDraft ? skinDraft.effectiveIconId : skins?.effectiveIconId;
   const [iconUrl, setIconUrl] = useState("/aha-logo.png");
   useEffect(() => {
     let live = true;

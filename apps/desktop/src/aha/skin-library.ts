@@ -8,6 +8,8 @@ import {
   SkinPackageSchema,
   SkinPaletteSchema,
   SkinApplySchema,
+  SkinAppIconSchema,
+  type SkinAppIcon,
   type SkinLibraryFile,
   type SkinDefinition,
   type SkinSnapshot,
@@ -96,6 +98,7 @@ export class SkinLibrary {
         preferences: current.preferences,
         activeId: id,
         effectiveIconId: null,
+        appIconOverrideSkinId: null,
         palette: null,
         skins: [
           {
@@ -126,8 +129,12 @@ export class SkinLibrary {
       const existing = this.state.skins.find((s) => s.id === id);
       try {
         const definition = await this.readBuiltin(id!);
+        if (id === "synara-default" && existing) {
+          definition.backgrounds = existing.original.backgrounds;
+          definition.palette = existing.original.palette;
+        }
         if (existing) {
-          if (existing.origin !== "builtin" || id === "synara-default") continue;
+          if (existing.origin !== "builtin") continue;
           if (stableJson(existing.original) === stableJson(definition)) continue;
           existing.adjusted = refreshBuiltinDefinition(
             existing.original,
@@ -148,6 +155,24 @@ export class SkinLibrary {
       } catch {
         if (existing && id !== "synara-default") refreshFailed = true;
         this.warning ??= "部分内置皮肤资源不可用 / Some built-in skin assets are unavailable.";
+      }
+    }
+    // Migrate the old unskinned/inherited artwork without changing an applied
+    // character skin or a user-edited default icon. Manual choices survive load.
+    const active = this.state.skins.find((s) => s.id === this.state.activeId)!;
+    const oldDefault = beforeBuiltins.skins.find((s) => s.id === "synara-default");
+    if (
+      !this.blocked &&
+      this.state.appIconOverrideSkinId === null &&
+      (active.adjusted.iconId === null ||
+        (active.id === "synara-default" &&
+          (this.state.effectiveIconId === null ||
+            this.state.effectiveIconId === oldDefault?.original.iconId)))
+    ) {
+      const icon = this.resolveIcon(active.id);
+      if (icon !== this.state.effectiveIconId) {
+        this.state.effectiveIconId = icon;
+        refreshed = true;
       }
     }
     if (refreshFailed || this.blocked) {
@@ -208,6 +233,7 @@ export class SkinLibrary {
       revision: this.state.revision,
       activeId: this.state.activeId,
       effectiveIconId: this.state.effectiveIconId,
+      appIconOverrideSkinId: this.state.appIconOverrideSkinId,
       palette: this.state.palette,
       skins: this.state.skins,
       warning: this.warning,
@@ -272,7 +298,44 @@ export class SkinLibrary {
     if (entry.origin === "builtin") await this.readBuiltin(id);
     const definition = structuredClone(original ? entry.original : entry.adjusted);
     await this.validate(definition);
-    return { id, definition, effectiveIconId: definition.iconId ?? this.state.effectiveIconId };
+    return { id, definition, effectiveIconId: definition.iconId ?? this.defaultIconId() };
+  }
+  private defaultIconId(): string | null {
+    return this.state.skins.find((skin) => skin.id === "synara-default")?.original.iconId ?? null;
+  }
+  private resolveIcon(skinId: string): string | null {
+    const skin = this.state.skins.find((entry) => entry.id === skinId);
+    if (!skin) throw new Error("皮肤不存在 / Skin not found.");
+    return skin.adjusted.iconId ?? this.defaultIconId();
+  }
+  private async commitIcon(next: SkinLibraryFile) {
+    await this.options.applyIcon(next.effectiveIconId, this.appearance.images);
+    try {
+      await this.write(next);
+    } catch (error) {
+      try {
+        await this.options.applyIcon(this.state.effectiveIconId, this.appearance.images);
+      } catch (rollback) {
+        throw new AggregateError(
+          [error, rollback],
+          "皮肤保存失败，图标恢复失败 / Saving and icon rollback failed.",
+          { cause: rollback },
+        );
+      }
+      throw error;
+    }
+  }
+  setAppIcon(input: SkinAppIcon): Promise<SkinSnapshot> {
+    return this.serial(async () => {
+      const parsed = SkinAppIconSchema.parse(input);
+      this.assertWritable(parsed.revision);
+      const next = structuredClone(this.state);
+      next.appIconOverrideSkinId = parsed.skinId;
+      next.effectiveIconId = this.resolveIcon(parsed.skinId ?? next.activeId);
+      next.revision++;
+      await this.commitIcon(next);
+      return this.snapshot();
+    });
   }
   private async validate(definition: SkinDefinition) {
     SkinDefinitionSchema.parse(definition);
@@ -303,26 +366,17 @@ export class SkinLibrary {
       const next = structuredClone(this.state);
       next.skins.find((s) => s.id === parsed.id)!.adjusted = parsed.definition;
       next.activeId = parsed.id;
-      next.effectiveIconId = parsed.definition.iconId ?? this.state.effectiveIconId;
+      if (parsed.id !== this.state.activeId || parsed.definition.iconId !== entry.adjusted.iconId)
+        next.appIconOverrideSkinId = null;
+      next.effectiveIconId =
+        next.appIconOverrideSkinId === null
+          ? (parsed.definition.iconId ?? this.defaultIconId())
+          : this.state.effectiveIconId;
       next.palette = parsed.definition.palette;
       next.preferences = preferences;
       next.revision++;
       next.appearanceRevision++;
-      await this.options.applyIcon(next.effectiveIconId, this.appearance.images);
-      try {
-        await this.write(next);
-      } catch (error) {
-        try {
-          await this.options.applyIcon(this.state.effectiveIconId, this.appearance.images);
-        } catch (rollback) {
-          throw new AggregateError(
-            [error, rollback],
-            "皮肤保存失败，图标恢复失败 / Saving and icon rollback failed.",
-            { cause: rollback },
-          );
-        }
-        throw error;
-      }
+      await this.commitIcon(next);
       return this.snapshot();
     });
   }
@@ -474,7 +528,11 @@ export class SkinLibrary {
       const next = structuredClone(this.state);
       next.skins = next.skins.filter((s) => s.id !== id);
       next.revision++;
-      await this.write(next);
+      if (next.appIconOverrideSkinId === id) {
+        next.appIconOverrideSkinId = null;
+        next.effectiveIconId = this.resolveIcon(next.activeId);
+        await this.commitIcon(next);
+      } else await this.write(next);
       return this.snapshot();
     });
   }
@@ -485,7 +543,12 @@ export class SkinLibrary {
     const definition: SkinDefinition = {
       backgrounds: structuredClone(this.state.preferences.backgrounds),
       palette: this.state.palette,
-      iconId: entry.adjusted.iconId === null ? null : this.state.effectiveIconId,
+      iconId:
+        entry.adjusted.iconId === null
+          ? null
+          : this.state.appIconOverrideSkinId === null
+            ? this.state.effectiveIconId
+            : entry.adjusted.iconId,
     };
     const images = await Promise.all(
       definitionIds(definition).map(async (id) => ({

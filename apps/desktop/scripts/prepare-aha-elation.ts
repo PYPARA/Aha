@@ -107,42 +107,8 @@ for (const [index, png] of pngs.entries()) {
   offset += png.length;
 }
 await writeFile(join(assets, "icon.ico"), Buffer.concat([header, ...pngs]));
-const resources = join(root, "apps/desktop/resources");
-const preserved = join(root, "assets/aha/legacy-before-elation");
-await mkdir(preserved, { recursive: true });
-for (const name of [
-  "dock-icon.png",
-  "dock-icon-dark.png",
-  "icon.png",
-  "icon.icns",
-  "icon.ico",
-  "synara.png",
-  "app-icon-macos.png",
-  "app-icon-linux.png",
-  "app-icon-windows.ico",
-]) {
-  try {
-    await copyFile(join(resources, name), join(preserved, name), 1);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-  }
-  await copyFile(
-    join(
-      assets,
-      name.endsWith(".ico") ? "icon.ico" : name.endsWith(".icns") ? "icon.icns" : "icon.png",
-    ),
-    join(resources, name),
-  );
-}
-const publicDir = join(root, "apps/web/public");
-for (const [source, target] of [
-  ["icon.png", "aha-logo.png"],
-  ["icon.ico", "favicon.ico"],
-  ["favicon-16.png", "favicon-16x16.png"],
-  ["favicon-32.png", "favicon-32x32.png"],
-  ["apple-touch.png", "apple-touch-icon.png"],
-])
-  await copyFile(join(assets, source!), join(publicDir, target!));
+// Skin preparation must never replace the application's default branding.
+await copyFile(join(assets, "icon.png"), join(runtime, "icon.png"));
 const generation = JSON.parse(await readFile(join(input, "generation.json"), "utf8"));
 for (const job of generation.requests) {
   const meta = await sharp(join(input, job.output)).metadata();

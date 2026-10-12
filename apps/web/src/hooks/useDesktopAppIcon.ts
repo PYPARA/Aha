@@ -48,7 +48,7 @@ export function useDesktopAppIcon(): void {
 
   useEffect(() => {
     const bridge = window.desktopBridge;
-    if (!bridge) return;
+    if (!bridge || bridge.ahaAppearance?.skins) return;
 
     let disposed = false;
     const synchronizer = createDesktopAppIconSynchronizer({

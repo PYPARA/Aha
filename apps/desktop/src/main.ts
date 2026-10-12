@@ -5165,6 +5165,11 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle(IPC.setAppIcon, async (_event, rawIcon: unknown) => {
     if (!isDesktopAppIcon(rawIcon)) return;
+    if (ahaSkinController) {
+      await ahaSkinController.ready;
+      await ahaSkinController.reapplyIcon();
+      return;
+    }
     // Keep the upstream IPC tokens accepted, but retired choices all apply Aha.
     await enqueueDesktopAppIconApply("default");
   });

@@ -66,6 +66,7 @@ beforeEach(async () => {
     revision: 0,
     activeId: custom,
     effectiveIconId: null,
+    appIconOverrideSkinId: null,
     palette: original.palette,
     warning: null,
     appearance: { preferences: defaultAhaAppearance(), revision: 0, warning: null },

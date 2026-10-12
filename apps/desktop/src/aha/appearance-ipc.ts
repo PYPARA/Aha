@@ -9,7 +9,12 @@ import {
 import { ResourceIdSchema } from "@synara/contracts/ahaLegacyAppearance";
 import { AhaAppearanceStore } from "./appearance-store";
 import { SkinLibrary, type SkinLibraryOptions } from "./skin-library";
-import { SkinIdSchema, SkinApplySchema, SkinPaletteSchema } from "@synara/contracts/ahaSkins";
+import {
+  SkinIdSchema,
+  SkinApplySchema,
+  SkinPaletteSchema,
+  SkinAppIconSchema,
+} from "@synara/contracts/ahaSkins";
 
 export function registerAhaAppearance(
   directory: string,
@@ -216,6 +221,11 @@ export function registerAhaAppearance(
       if (result.canceled || !result.filePath) return false;
       await skins.exportPackage(result.filePath);
       return true;
+    });
+    handle(C.skinsSetAppIcon, async (window, input) => {
+      const value = await skins.setAppIcon(SkinAppIconSchema.parse(input));
+      announce(window);
+      return value;
     });
     handle(C.skinsReapply, async (_window, input) => {
       z.undefined().parse(input);

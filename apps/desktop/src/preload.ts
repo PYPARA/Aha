@@ -141,6 +141,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       remove: (input) => ipcRenderer.invoke(AHA.skinsRemove, input),
       importIcon: () => ipcRenderer.invoke(AHA.skinsIcon),
       exportPackage: () => ipcRenderer.invoke(AHA.skinsExport),
+      setAppIcon: (input) => ipcRenderer.invoke(AHA.skinsSetAppIcon, input),
       reapplyIcon: () => ipcRenderer.invoke(AHA.skinsReapply),
       onChanged: (listener) => {
         const handler = (_event: unknown, snapshot: Parameters<typeof listener>[0]) =>

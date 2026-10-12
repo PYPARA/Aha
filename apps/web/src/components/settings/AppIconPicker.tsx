@@ -1,100 +1,117 @@
-// FILE: AppIconPicker.tsx
-// Purpose: Render the visual desktop app-icon choices used by Appearance settings.
-// Layer: Settings UI component
+// Select application artwork independently; the next skin switch follows that skin again.
+import { useEffect, useState } from "react";
 
-import { useState } from "react";
-
-import type { DesktopAppIcon } from "@synara/contracts";
-import type { SynaraDesktopFlavor } from "@synara/shared/desktopIdentity";
 import { useAhaTranslation, useAhaAppearance } from "~/aha/AppearanceProvider";
 import { Spinner } from "~/components/ui/spinner";
 import { cn } from "~/lib/utils";
 
-export function desktopAppIconsForPlatform(
-  platform: string,
-  flavor: SynaraDesktopFlavor | "unknown" = "unknown",
-): ReadonlyArray<DesktopAppIcon> {
-  void platform;
-  void flavor;
-  return ["default"];
+function IconThumbnail({ iconId }: { readonly iconId: string | null }) {
+  const [image, setImage] = useState<{ id: string; url: string } | null>(null);
+  useEffect(() => {
+    if (!iconId) return;
+    let live = true;
+    let url: string | undefined;
+    void window.desktopBridge?.ahaAppearance
+      ?.readImage(iconId)
+      .then((image) => {
+        if (!live) return;
+        url = URL.createObjectURL(new Blob([new Uint8Array(image.bytes)], { type: image.mime }));
+        setImage({ id: iconId, url });
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [iconId]);
+  return (
+    <img
+      src={image?.id === iconId ? image.url : "/aha-logo.png"}
+      alt=""
+      draggable={false}
+      className="size-12 object-contain"
+    />
+  );
 }
 
-export function AppIconPicker({
-  platform,
-  value,
-  onValueChange,
-}: {
-  readonly platform: string;
-  readonly value: DesktopAppIcon;
-  readonly onValueChange: (value: DesktopAppIcon) => void | Promise<void>;
-}) {
-  const [pendingIcon, setPendingIcon] = useState<DesktopAppIcon | null>(null);
+export function AppIconPicker() {
   const tr = useAhaTranslation();
-  const { iconUrl, skins } = useAhaAppearance();
-  const busy = pendingIcon !== null;
+  const { skins, acceptSkins } = useAhaAppearance();
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (!skins) return <Spinner aria-label={tr("Loading app icons")} className="size-4" />;
 
+  const choices = skins.skins.toSorted(
+    (a, b) => Number(b.id === "synara-default") - Number(a.id === "synara-default"),
+  );
+  const selectedId = skins.appIconOverrideSkinId ?? skins.activeId;
+  const select = async (skinId: string | null) => {
+    const api = window.desktopBridge?.ahaAppearance?.skins;
+    if (!api || pending !== null) return;
+    setPending(skinId ?? "follow");
+    setError(null);
+    try {
+      acceptSkins(await api.setAppIcon({ skinId, revision: skins.revision }));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : tr("Could not update app icon"));
+    } finally {
+      setPending(null);
+    }
+  };
   return (
-    <div
-      className="flex items-center gap-1"
-      role="group"
-      aria-label={tr("App icon")}
-      aria-busy={busy}
-    >
-      {desktopAppIconsForPlatform(platform).map((icon) => {
-        const label = skins ? tr("Current skin icon") : tr("Aha · Xuzhao · Elation");
-        // Saved upstream tokens are compatibility aliases for the single Aha artwork.
-        const selected = value === icon || value === "icon" || value === "dark" || value === "beta";
-        const applying = pendingIcon === icon;
-        return (
-          <button
-            key={icon}
-            type="button"
-            title={label}
-            aria-label={label}
-            aria-pressed={selected}
-            disabled={busy}
-            className={cn(
-              // Same selection language as ThemeModePicker: the artwork is the whole
-              // control, so no filled tile — just a stroke that appears when selected.
-              "relative grid place-items-center rounded-[14px] border-2 p-[3px] transition-colors motion-reduce:transition-none",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-              "disabled:pointer-events-none",
-              selected || applying
-                ? "border-foreground"
-                : "border-transparent hover:border-foreground/25",
-            )}
-            onClick={() => {
-              if (busy) return;
-              setPendingIcon(icon);
-              void (async () => {
-                try {
-                  if (window.desktopBridge?.ahaAppearance?.skins)
-                    await window.desktopBridge.ahaAppearance.skins.reapplyIcon();
-                  else await onValueChange(icon);
-                } catch {
-                  // Native preference synchronization owns rollback. The picker
-                  // only owns its transient loading state.
-                } finally {
-                  setPendingIcon((current) => (current === icon ? null : current));
-                }
-              })();
-            }}
-          >
-            <img
-              src={iconUrl}
-              alt=""
-              draggable={false}
-              className={cn("size-10 object-contain", applying && "opacity-40")}
-            />
-            {applying ? (
-              <Spinner
-                aria-label={tr("Updating app icon")}
-                className="absolute size-4 text-foreground motion-reduce:animate-none"
-              />
-            ) : null}
-          </button>
-        );
-      })}
+    <div className="min-w-0 space-y-2">
+      <div
+        className="flex flex-wrap gap-2"
+        role="group"
+        aria-label={tr("App icon")}
+        aria-busy={pending !== null}
+      >
+        {choices.map((skin) => {
+          const label = skin.id === "synara-default" ? tr("Default app icon") : skin.name;
+          const applying = pending === skin.id;
+          return (
+            <button
+              key={skin.id}
+              type="button"
+              title={label}
+              aria-label={label}
+              aria-pressed={selectedId === skin.id}
+              disabled={pending !== null}
+              className={cn(
+                "relative flex w-24 flex-col items-center gap-1 rounded-xl border-2 p-2 text-xs transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none",
+                selectedId === skin.id
+                  ? "border-foreground"
+                  : "border-transparent hover:border-foreground/25",
+              )}
+              onClick={() => void select(skin.id)}
+            >
+              <IconThumbnail iconId={skin.adjusted.iconId} />
+              <span className="w-full break-words text-center">{label}</span>
+              {!skin.adjusted.iconId && (
+                <span className="text-muted-foreground">{tr("Uses default icon")}</span>
+              )}
+              {applying && (
+                <Spinner aria-label={tr("Updating app icon")} className="absolute top-6 size-4" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {skins.appIconOverrideSkinId !== null && (
+        <button
+          type="button"
+          disabled={pending !== null}
+          className="rounded text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          onClick={() => void select(null)}
+        >
+          {tr("Follow current skin")}
+        </button>
+      )}
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

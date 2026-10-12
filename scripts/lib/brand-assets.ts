@@ -1,22 +1,22 @@
 import type { SynaraPackagedDesktopFlavor } from "@synara/shared/desktopIdentity";
 
 export const BRAND_ASSET_PATHS = {
-  productionMacIconPng: "assets/aha/elation/icon.png",
+  productionMacIconPng: "assets/aha/default/icon.png",
   // Icon Composer source for the macOS 26 bundle icon. Only a layered ".icon"
   // asset gets the Liquid Glass material; a flat ICNS/PNG never does.
   productionMacIconComposer: "assets/aha/Aha.icon",
-  productionMacLegacyIconPng: "assets/aha/elation/icon.png",
-  productionLinuxIconPng: "assets/aha/elation/icon.png",
-  productionWindowsIconIco: "assets/aha/elation/icon.ico",
-  productionWebFaviconIco: "assets/aha/elation/icon.ico",
-  productionWebFavicon16Png: "assets/aha/elation/favicon-16.png",
-  productionWebFavicon32Png: "assets/aha/elation/favicon-32.png",
-  productionWebAppleTouchIconPng: "assets/aha/elation/apple-touch.png",
-  developmentWindowsIconIco: "assets/aha/elation/icon.ico",
-  developmentWebFaviconIco: "assets/aha/elation/icon.ico",
-  developmentWebFavicon16Png: "assets/aha/elation/favicon-16.png",
-  developmentWebFavicon32Png: "assets/aha/elation/favicon-32.png",
-  developmentWebAppleTouchIconPng: "assets/aha/elation/apple-touch.png",
+  productionMacLegacyIconPng: "assets/aha/default/icon.png",
+  productionLinuxIconPng: "assets/aha/default/icon.png",
+  productionWindowsIconIco: "assets/aha/default/icon.ico",
+  productionWebFaviconIco: "assets/aha/default/icon.ico",
+  productionWebFavicon16Png: "assets/aha/default/favicon-16.png",
+  productionWebFavicon32Png: "assets/aha/default/favicon-32.png",
+  productionWebAppleTouchIconPng: "assets/aha/default/apple-touch.png",
+  developmentWindowsIconIco: "assets/aha/default/icon.ico",
+  developmentWebFaviconIco: "assets/aha/default/icon.ico",
+  developmentWebFavicon16Png: "assets/aha/default/favicon-16.png",
+  developmentWebFavicon32Png: "assets/aha/default/favicon-32.png",
+  developmentWebAppleTouchIconPng: "assets/aha/default/apple-touch.png",
 } as const;
 
 export const BETA_ASSET_PATHS = {
@@ -47,7 +47,7 @@ export interface DesktopIconAssetPaths {
   readonly windowsIconIco: string;
 }
 
-/** Aha flavors share the approved character artwork; upstream Beta assets remain archived. */
+/** Aha flavors share the default A artwork; character artwork belongs to skins. */
 export function desktopIconAssetPaths(flavor: DesktopBuildFlavor): DesktopIconAssetPaths {
   void flavor;
   return {
@@ -103,26 +103,8 @@ export const PUBLISH_ICON_OVERRIDES: ReadonlyArray<IconOverride> = [
   },
 ];
 
-const BETA_PUBLISH_ICON_OVERRIDES: ReadonlyArray<IconOverride> = [
-  {
-    sourceRelativePath: BETA_ASSET_PATHS.betaWebFaviconIco,
-    targetRelativePath: "dist/client/favicon.ico",
-  },
-  {
-    sourceRelativePath: BETA_ASSET_PATHS.betaWebFavicon16Png,
-    targetRelativePath: "dist/client/favicon-16x16.png",
-  },
-  {
-    sourceRelativePath: BETA_ASSET_PATHS.betaWebFavicon32Png,
-    targetRelativePath: "dist/client/favicon-32x32.png",
-  },
-  {
-    sourceRelativePath: BETA_ASSET_PATHS.betaWebAppleTouchIconPng,
-    targetRelativePath: "dist/client/apple-touch-icon.png",
-  },
-];
-
-/** Favicon overrides for a packaged build; beta ships its own vivid-blue set. */
+/** All Aha builds use the default artwork until a skin is selected. */
 export function publishIconOverrides(flavor: DesktopBuildFlavor): ReadonlyArray<IconOverride> {
-  return flavor === "beta" ? BETA_PUBLISH_ICON_OVERRIDES : PUBLISH_ICON_OVERRIDES;
+  void flavor;
+  return PUBLISH_ICON_OVERRIDES;
 }

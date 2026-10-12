@@ -215,7 +215,11 @@ export function AhaAppearancePanel() {
                         loadSkin({
                           ...validated,
                           definition: selectedEntry.original,
-                          effectiveIconId: selectedEntry.original.iconId ?? skins.effectiveIconId,
+                          effectiveIconId:
+                            selectedEntry.original.iconId ??
+                            skins.skins.find((skin) => skin.id === "synara-default")?.original
+                              .iconId ??
+                            null,
                         });
                     });
                   }}
@@ -659,7 +663,10 @@ export function AhaAppearancePanel() {
                   loadSkin({
                     ...base,
                     definition: selectedEntry.original,
-                    effectiveIconId: selectedEntry.original.iconId ?? skins.effectiveIconId,
+                    effectiveIconId:
+                      selectedEntry.original.iconId ??
+                      skins.skins.find((skin) => skin.id === "synara-default")?.original.iconId ??
+                      null,
                   });
               });
               return;

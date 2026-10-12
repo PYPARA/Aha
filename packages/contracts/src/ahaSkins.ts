@@ -64,6 +64,7 @@ export const SkinLibraryFileSchema = z.strictObject({
   preferences: AhaAppearanceSchema,
   activeId: SkinIdSchema,
   effectiveIconId: ResourceIdSchema.nullable(),
+  appIconOverrideSkinId: SkinIdSchema.nullable().default(null),
   palette: SkinPaletteSchema.nullable(),
   skins: z.array(SkinEntrySchema).min(1).max(100),
 });
@@ -72,6 +73,7 @@ export interface SkinSnapshot {
   revision: number;
   activeId: string;
   effectiveIconId: string | null;
+  appIconOverrideSkinId: string | null;
   palette: SkinPalette | null;
   skins: SkinEntry[];
   appearance: AhaAppearanceSnapshot;
@@ -82,6 +84,11 @@ export interface SkinPreview {
   definition: SkinDefinition;
   effectiveIconId: string | null;
 }
+export const SkinAppIconSchema = z.strictObject({
+  skinId: SkinIdSchema.nullable(),
+  revision: z.number().int().nonnegative(),
+});
+export type SkinAppIcon = z.infer<typeof SkinAppIconSchema>;
 export const SkinApplySchema = z.strictObject({
   id: SkinIdSchema,
   revision: z.number().int().nonnegative(),
@@ -107,6 +114,7 @@ export interface AhaSkinsBridge {
   remove(input: { id: string; revision: number }): Promise<SkinSnapshot>;
   importIcon(): Promise<{ id: string } | null>;
   exportPackage(): Promise<boolean>;
+  setAppIcon(input: SkinAppIcon): Promise<SkinSnapshot>;
   reapplyIcon(): Promise<void>;
   onChanged(listener: (snapshot: SkinSnapshot) => void): () => void;
 }

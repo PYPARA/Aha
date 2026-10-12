@@ -31,7 +31,7 @@ async function fixture(overrides: Partial<SkinLibraryOptions> = {}) {
   const options: SkinLibraryOptions = {
     builtinDirectory: (id) =>
       join(root, "apps/desktop/resources/aha", id === "aha-elation" ? "elation" : "furina"),
-    defaultIcon: () => join(root, "assets/aha/elation/icon.png"),
+    defaultIcon: () => join(root, "assets/aha/default/icon.png"),
     applyIcon,
     ...overrides,
   };
@@ -161,25 +161,24 @@ describe("Aha skin library", () => {
     expect(second.id).not.toBe(first.id);
     expect(library.snapshot().skins.find((s) => s.id === second.id)?.name).toBe("Test (2)");
   });
-  it("inherits the current effective icon for icon-less skins and persists it across restarts", async () => {
+  it("uses the default icon for icon-less skins and persists it across restarts", async () => {
     const { library, dir, appearance, options } = await fixture();
     await apply(library, await library.preview("furina-chanson"));
-    const furinaIcon = library.snapshot().effectiveIconId;
+    const defaultIcon = (await library.preview("synara-default")).effectiveIconId;
     const definition: SkinDefinition = {
       backgrounds: defaultAhaAppearance().backgrounds,
       palette: BUILTIN_PALETTES["aha-elation"]!,
       iconId: null,
     };
     const imported = await library.importPackage(await packageFile(dir, definition));
-    expect(imported.effectiveIconId).toBe(furinaIcon);
+    expect(imported.effectiveIconId).toBe(defaultIcon);
     await apply(library, imported);
     const restarted = new SkinLibrary(join(dir, "aha-skins.json"), appearance, options);
     await restarted.load();
-    expect(restarted.snapshot().effectiveIconId).toBe(furinaIcon);
+    expect(restarted.snapshot().effectiveIconId).toBe(defaultIcon);
     await apply(library, await library.preview("aha-elation"));
-    const ahaIcon = library.snapshot().effectiveIconId;
     await apply(library, await library.preview(imported.id));
-    expect(library.snapshot().effectiveIconId).toBe(ahaIcon);
+    expect(library.snapshot().effectiveIconId).toBe(defaultIcon);
   });
   it("validates revision and resources before native changes, and rolls back icons if atomic save fails", async () => {
     const { library, applyIcon, dir } = await fixture();
@@ -475,5 +474,150 @@ it.each(["missing", "save"])(
     expect(refreshed.snapshot().appearance.preferences).toEqual(before.appearance.preferences);
     expect(refreshed.snapshot().warning).toBeTruthy();
     expect(applyIcon).not.toHaveBeenCalled();
+  },
+);
+
+it("persists an independent icon across restart, preserves background edits, and follows the next skin", async () => {
+  const { library, appearance, options, dir } = await fixture();
+  await apply(library, await library.preview("furina-chanson"));
+  const before = library.snapshot();
+  const defaults = await library.preview("synara-default");
+  await library.setAppIcon({ skinId: "synara-default", revision: before.revision });
+  expect(library.snapshot()).toMatchObject({
+    activeId: before.activeId,
+    appearance: before.appearance,
+    skins: before.skins,
+    palette: before.palette,
+    appIconOverrideSkinId: "synara-default",
+    effectiveIconId: defaults.effectiveIconId,
+  });
+  const restarted = new SkinLibrary(library.file, appearance, options);
+  await restarted.load();
+  expect(restarted.snapshot()).toEqual(library.snapshot());
+  const adjusted = await restarted.preview("furina-chanson");
+  adjusted.definition.backgrounds.window.opacity = 0.32;
+  await apply(restarted, adjusted);
+  expect(restarted.snapshot().appIconOverrideSkinId).toBe("synara-default");
+  expect(restarted.snapshot().effectiveIconId).toBe(defaults.effectiveIconId);
+  const exported = join(dir, "export-with-override.json");
+  await restarted.exportPackage(exported);
+  expect(JSON.parse(await readFile(exported, "utf8")).skin.iconId).toBe(adjusted.definition.iconId);
+  await restarted.setAppIcon({ skinId: null, revision: restarted.snapshot().revision });
+  expect(restarted.snapshot().effectiveIconId).toBe(adjusted.definition.iconId);
+  await restarted.setAppIcon({ skinId: "synara-default", revision: restarted.snapshot().revision });
+  const elation = await restarted.preview("aha-elation");
+  await apply(restarted, elation);
+  expect(restarted.snapshot().appIconOverrideSkinId).toBeNull();
+  expect(restarted.snapshot().effectiveIconId).toBe(elation.definition.iconId);
+});
+
+it("explicit skin icon edits clear the override and deleting its source restores following", async () => {
+  const { library } = await fixture();
+  const customId = library.snapshot().activeId;
+  await apply(library, await library.preview("furina-chanson"));
+  await library.setAppIcon({ skinId: customId, revision: library.snapshot().revision });
+  const before = library.snapshot();
+  await library.remove(customId, before.revision);
+  expect(library.snapshot().appIconOverrideSkinId).toBeNull();
+  expect(library.snapshot().effectiveIconId).toBe(
+    (await library.preview("furina-chanson")).definition.iconId,
+  );
+  await library.setAppIcon({ skinId: "synara-default", revision: library.snapshot().revision });
+  const edited = await library.preview("furina-chanson");
+  edited.definition.iconId = (await library.preview("aha-elation")).definition.iconId;
+  await apply(library, edited);
+  expect(library.snapshot().appIconOverrideSkinId).toBeNull();
+  expect(library.snapshot().effectiveIconId).toBe(edited.definition.iconId);
+});
+
+it("rejects stale selections and missing sources; native and save failures preserve the prior choice", async () => {
+  const { library, applyIcon } = await fixture();
+  const before = library.snapshot();
+  await expect(
+    library.setAppIcon({ skinId: "aha-elation", revision: before.revision + 1 }),
+  ).rejects.toThrow("changed");
+  await expect(
+    library.setAppIcon({
+      skinId: "import-00000000-0000-0000-0000-000000000000",
+      revision: before.revision,
+    }),
+  ).rejects.toThrow("not found");
+  expect(applyIcon).not.toHaveBeenCalled();
+  applyIcon.mockRejectedValueOnce(new Error("Native icon failed"));
+  await expect(
+    library.setAppIcon({ skinId: "aha-elation", revision: before.revision }),
+  ).rejects.toThrow("Native icon failed");
+  expect(library.snapshot()).toEqual(before);
+  applyIcon.mockClear();
+  await rm(library.file);
+  await mkdir(library.file);
+  await expect(
+    library.setAppIcon({ skinId: "aha-elation", revision: before.revision }),
+  ).rejects.toThrow();
+  expect(library.snapshot()).toEqual(before);
+  expect(applyIcon.mock.calls.at(-1)?.[0]).toBe(before.effectiveIconId);
+});
+
+it("serializes manual selection with skin changes and rejects the stale queued change", async () => {
+  const { library, applyIcon } = await fixture();
+  const revision = library.snapshot().revision;
+  let release!: () => void;
+  applyIcon.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  const selection = library.setAppIcon({ skinId: "aha-elation", revision });
+  await vi.waitFor(() => expect(applyIcon).toHaveBeenCalledTimes(1));
+  const skin = await library.preview("furina-chanson");
+  const pending = apply(library, skin);
+  const rejected = expect(pending).rejects.toThrow("changed");
+  release();
+  await selection;
+  await rejected;
+  expect(library.snapshot().appIconOverrideSkinId).toBe("aha-elation");
+  await apply(library, skin);
+  expect(library.snapshot().appIconOverrideSkinId).toBeNull();
+});
+
+it.each(["default", "customized", "iconless", "character"])(
+  "migrates legacy %s artwork without losing user appearance",
+  async (kind) => {
+    const root = resolve(import.meta.dirname, "../../../..");
+    const { library, appearance, options } = await fixture({
+      defaultIcon: () => join(root, "assets/aha/elation/icon.png"),
+    });
+    const chosen = await library.preview(
+      kind === "character"
+        ? "furina-chanson"
+        : kind === "iconless"
+          ? library.snapshot().activeId
+          : "synara-default",
+    );
+    if (kind === "customized")
+      chosen.definition.iconId = (await library.preview("furina-chanson")).definition.iconId;
+    chosen.definition.palette!.dark.surface = "#234567";
+    await apply(library, chosen);
+    const before = library.snapshot();
+    const raw = JSON.parse(await readFile(library.file, "utf8"));
+    delete raw.appIconOverrideSkinId;
+    await writeFile(library.file, JSON.stringify(raw));
+    const upgraded = new SkinLibrary(library.file, appearance, {
+      ...options,
+      defaultIcon: () => join(root, "assets/aha/default/icon.png"),
+    });
+    await upgraded.load();
+    const after = upgraded.snapshot();
+    expect(after.appIconOverrideSkinId).toBeNull();
+    expect(after.appearance).toEqual(before.appearance);
+    expect(after.palette).toEqual(before.palette);
+    expect(after.activeId).toBe(before.activeId);
+    if (kind === "default" || kind === "iconless") {
+      expect(after.effectiveIconId).toBe(
+        after.skins.find((s) => s.id === "synara-default")!.original.iconId,
+      );
+      expect(after.effectiveIconId).not.toBe(before.effectiveIconId);
+    } else expect(after.effectiveIconId).toBe(before.effectiveIconId);
   },
 );
