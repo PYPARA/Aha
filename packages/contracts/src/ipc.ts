@@ -1,3 +1,4 @@
+import type { SpriteCommand, SpriteState } from "./spriteAnimation";
 import type { AhaAppearanceBridge } from "./ahaAppearance";
 import { Schema } from "effect";
 import type {
@@ -1496,6 +1497,7 @@ export interface NativeApi {
     onEvent: (callback: (event: TodoStreamEvent) => void) => () => void;
   };
   imageGeneration: {
+    spriteCommand: (input: SpriteCommand) => Promise<SpriteState>;
     listProviders: () => Promise<ReadonlyArray<ImageProvider>>;
     upsertProvider: (input: ImageProviderInput) => Promise<ImageProvider>;
     deleteProvider: (input: { id: string }) => Promise<void>;

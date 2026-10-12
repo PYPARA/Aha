@@ -565,6 +565,7 @@ function ComposerModelLoadingControl(props: { widthClassName: string }) {
 }
 
 interface ChatViewProps {
+  beforeSend?: () => Promise<void>;
   threadId: ThreadId;
   hideHeader?: boolean;
   paneScopeId?: string;
@@ -598,6 +599,7 @@ interface ChatViewProps {
 // back-and-forth (user request, Synara's clarifying questions) inline like Codex.
 
 export default function ChatView({
+  beforeSend,
   threadId,
   hideHeader: hideHeaderProp,
   paneScopeId: paneScopeIdProp,
@@ -4686,6 +4688,19 @@ export default function ChatView({
     async (...args: Parameters<typeof submitComposerTurn>) => {
       // Keep the choice captured for this send: later picker changes belong to the
       // next message. Automatic queue drains must not acknowledge a new draft choice.
+      // Cancel native form submission before an asynchronous host preflight.
+      args[0]?.preventDefault();
+      if (beforeSend) {
+        try {
+          await beforeSend();
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: error instanceof Error ? error.message : "Could not sync workbench context.",
+          });
+          return false;
+        }
+      }
       const switchKeyForSend = claudeSwitchKey;
       const accepted = await submitComposerTurn(...args);
       if (accepted && switchKeyForSend !== null && args[2] === undefined) {
@@ -4693,7 +4708,7 @@ export default function ChatView({
       }
       return accepted;
     },
-    [claudeSwitchKey, submitComposerTurn],
+    [beforeSend, claudeSwitchKey, submitComposerTurn],
   );
   const showClaudeModelSwitchNote =
     claudeSwitchKey !== null &&
@@ -5958,7 +5973,10 @@ export default function ChatView({
       <form
         data-aha-region="composer"
         ref={composerFormRef}
-        onSubmit={onSend}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onSend(event);
+        }}
         className="relative z-10 w-full overflow-visible"
         data-chat-composer-form="true"
         data-chat-pane-scope={paneScopeId}

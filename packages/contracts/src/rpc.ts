@@ -1,3 +1,4 @@
+import { SpriteCommand, SpriteState } from "./spriteAnimation";
 import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -2140,7 +2141,14 @@ const WsCoreFeatureRpcGroup = RpcGroup.make(
 
 // Keep drawing types below the declaration serializer limit while retaining
 // the same feature group and wire protocol for existing callers.
+export const WsSpriteCommandRpc = Rpc.make(WS_METHODS.spriteCommand, {
+  payload: SpriteCommand,
+  success: SpriteState,
+  error: WsRpcError,
+});
+
 const WsImageGenerationRpcGroup = RpcGroup.make(
+  WsSpriteCommandRpc,
   WsImageProviderListRpc,
   WsImageProviderUpsertRpc,
   WsImageProviderDeleteRpc,

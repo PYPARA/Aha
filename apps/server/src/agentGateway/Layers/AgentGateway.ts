@@ -1,3 +1,5 @@
+import { ImageGenerationService } from "../../imageGeneration/Services/ImageGenerationService";
+import { makeSpriteTools } from "../spriteTools";
 import { ProjectionThreadMessageRepository } from "../../persistence/Services/ProjectionThreadMessages.ts";
 /**
  * AgentGatewayLive - Synara app-control MCP tool surface.
@@ -172,6 +174,7 @@ function readThreadGoalArg(args: Record<string, unknown>): string {
 }
 
 export const makeAgentGateway = Effect.gen(function* () {
+  const spriteImages = yield* Effect.serviceOption(ImageGenerationService);
   const credentials = yield* AgentGatewayCredentials;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -1588,6 +1591,7 @@ export const makeAgentGateway = Effect.gen(function* () {
   });
 
   const tools: ReadonlyArray<ToolEntry> = [
+    ...(Option.isSome(spriteImages) ? makeSpriteTools(spriteImages.value) : []),
     ...readTools,
     ...diagnosticTools,
     createThreads,

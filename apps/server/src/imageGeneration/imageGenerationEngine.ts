@@ -41,6 +41,8 @@ export const isImageJobActive = (status: ImageJob["status"]) =>
   ["queued", "running", "saving"].includes(status);
 const secretName = (id: string) => `image-provider-${id}-key`;
 export class ImageGenerationEngine {
+  /** Assets retained by persistent sprite generation records. */
+  readonly spriteAssetIds = new Set<string>();
   readonly assets: ImageAssetStore;
   private tail: Promise<unknown> = Promise.resolve();
   private active = new Map<
@@ -604,7 +606,8 @@ export class ImageGenerationEngine {
         [...job.inputs, ...job.outputs, ...(job.mask ? [job.mask] : [])].map((a) => a.id),
       );
       for (const asset of await Effect.runPromise(this.repository.unusedAssets(now())))
-        if (candidates.has(asset.id)) await this.assets.remove(asset.id);
+        if (candidates.has(asset.id) && !this.spriteAssetIds.has(asset.id))
+          await this.assets.remove(asset.id);
     });
   }
   async upsertDraft(draft: ImageDraft) {
@@ -625,7 +628,7 @@ export class ImageGenerationEngine {
       for (const doc of await Effect.runPromise(this.repository.unusedDocuments(before)))
         await Effect.runPromise(this.repository.deleteDocument(doc.id));
       for (const asset of await Effect.runPromise(this.repository.unusedAssets(before)))
-        await this.assets.remove(asset.id);
+        if (!this.spriteAssetIds.has(asset.id)) await this.assets.remove(asset.id);
     });
   }
   async shutdown() {

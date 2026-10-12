@@ -678,3 +678,100 @@ describe("editable image documents", () => {
     expect((await f.engine.getDocument(doc.id)).id).toBe(doc.id);
   });
 });
+
+// The sprite orchestration uses the actual Drawing engine/repository and a mock
+// upstream, so reference uploads, idempotency and job recovery cross the real boundary.
+describe("sprite workbench generation through Drawing", () => {
+  it("generates a reference and action, restores records, and keeps retries explicit", async () => {
+    const { SpriteEngine } = await import("../spriteAnimation/spriteEngine");
+    const provider = await f.engine.upsertProvider(providerInput());
+    const sprites = new SpriteEngine(path.join(f.root, "sprites"), f.engine, async () => {});
+    await sprites.initialize();
+    const context = {
+      projectId: "sprite-project",
+      threadId: "sprite-thread",
+      name: "Fox",
+      providerId: provider.id,
+      model: "gpt-image-test",
+      referenceAssetId: null,
+      action: "idle",
+      frameCount: 2,
+      fps: 12,
+      width: 16,
+      height: 16,
+      background: "chroma" as const,
+      chromaKey: "#00ff00",
+    };
+    await sprites.command({ operation: "sync", projectId: context.projectId, context });
+    const bytes = await sharp(
+      Buffer.from(
+        '<svg width="32" height="16"><rect width="32" height="16" fill="#00ff00"/><rect x="5" y="8" width="4" height="6" fill="red"/><rect x="22" y="5" width="4" height="6" fill="red"/></svg>',
+      ),
+    )
+      .png()
+      .toBuffer();
+    const upstream = vi.fn(
+      async () => new Response(JSON.stringify({ data: [{ b64_json: bytes.toString("base64") }] })),
+    );
+    vi.stubGlobal("fetch", upstream);
+    const create = {
+      operation: "generate" as const,
+      projectId: context.projectId,
+      input: { requestId: "character-one", kind: "character" as const, prompt: "Fox" },
+    };
+    const first = await sprites.command(create);
+    const jobId = first.runs[0]!.jobId!;
+    expect((await sprites.command(create)).runs).toHaveLength(1);
+    await f.engine.tick();
+    await waitFor(jobId, "succeeded");
+    await sprites.tick();
+    const done = await sprites.command({ operation: "get", projectId: context.projectId });
+    expect(done.runs[0]!.frames).toHaveLength(1);
+    await sprites.command({
+      operation: "sync",
+      projectId: context.projectId,
+      context: { ...context, referenceAssetId: done.runs[0]!.frames[0]!.id },
+    });
+    const animation = await sprites.command({
+      operation: "generate",
+      projectId: context.projectId,
+      input: { requestId: "idle-one", kind: "animation", prompt: "Idle breathing" },
+    });
+    const animationJob = animation.runs[1]!.jobId!;
+    expect((await f.engine.getJob(animationJob)).inputs).toHaveLength(2);
+    await f.engine.tick();
+    await waitFor(animationJob, "succeeded");
+    await sprites.tick();
+    const restored = new SpriteEngine(path.join(f.root, "sprites"), f.engine, async () => {});
+    await restored.initialize();
+    const recovered = await restored.forThread("sprite-thread");
+    expect(recovered?.runs[1]!.frames).toHaveLength(2);
+    expect(recovered?.runs[1]!.status).toBe("ready");
+    await f.engine.deleteJob(animationJob);
+    expect((await f.engine.getAsset(recovered!.runs[1]!.source!.id)).id).toBe(
+      recovered!.runs[1]!.source!.id,
+    );
+    expect((await f.engine.getAsset(recovered!.runs[1]!.frames[0]!.id)).id).toBe(
+      recovered!.runs[1]!.frames[0]!.id,
+    );
+    const calls = upstream.mock.calls.length;
+    await restored.tick();
+    expect(upstream.mock.calls).toHaveLength(calls);
+    const retry = await restored.command({
+      operation: "retry",
+      projectId: context.projectId,
+      runId: recovered!.runs[1]!.id,
+      input: { requestId: "retry-idle", kind: "animation", prompt: "More motion" },
+    });
+    expect(retry.runs).toHaveLength(3);
+    expect(retry.runs[1]!.frames).toHaveLength(2);
+    await restored.command({
+      operation: "cancel",
+      projectId: context.projectId,
+      runId: retry.runs[2]!.id,
+    });
+    expect(
+      (await restored.command({ operation: "get", projectId: context.projectId })).runs[2]!.status,
+    ).toBe("cancelled");
+  });
+});

@@ -6664,6 +6664,7 @@ export default function Sidebar() {
   // Home and Spaces switch the panel; route items navigate (prewarm included). The store's
   // active item keeps one item selected.
   const isOnThreadsSection =
+    !pathname.startsWith("/sprite-animation") &&
     !pathname.startsWith("/drawing") &&
     !isOnSettings &&
     !isOnGroups &&
@@ -6711,11 +6712,13 @@ export default function Sidebar() {
   const railItemLabel = (id: RailOrderableItemId): string =>
     id === "home" || id === "spaces"
       ? RAIL_PANEL_ITEM_LABELS[id]
-      : id === "drawing"
-        ? "Drawing"
-        : id === "studio"
-          ? "Hubs"
-          : sidebarNavDescriptors[id].label;
+      : id === "spriteAnimation"
+        ? "Sprite animation"
+        : id === "drawing"
+          ? "Drawing"
+          : id === "studio"
+            ? "Hubs"
+            : sidebarNavDescriptors[id].label;
   const railItemFor = (id: RailOrderableItemId): AppRailItem => {
     const base = { id, glyphs: railItemGlyphs(id), label: railItemLabel(id) };
     if (id === "home" || id === "spaces") {
@@ -6734,6 +6737,16 @@ export default function Sidebar() {
         },
       };
     }
+    if (id === "spriteAnimation")
+      return {
+        ...base,
+        badge: null,
+        active: railActiveItem === "spriteAnimation",
+        onSelect: () => {
+          selectRailRouteItem("spriteAnimation");
+          void navigate({ to: "/sprite-animation" });
+        },
+      };
     if (id === "drawing")
       return {
         ...base,
@@ -6774,7 +6787,7 @@ export default function Sidebar() {
   });
   const railItems: AppRailItem[] = railVisibleItemIds.map(railItemFor);
   const searchPaletteNavigationActions: SidebarSearchAction[] = (
-    ["drawing", "inbox", "kanban", "studio", "automations"] as const
+    ["drawing", "spriteAnimation", "inbox", "kanban", "studio", "automations"] as const
   )
     .filter((id) => isRailItemAvailable(id, railAvailability))
     .map((id) => {

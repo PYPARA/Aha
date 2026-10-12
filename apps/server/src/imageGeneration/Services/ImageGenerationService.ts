@@ -1,3 +1,5 @@
+import { SpriteEngine } from "../../spriteAnimation/spriteEngine";
+import type { SpriteCommand, SpriteState } from "@synara/contracts";
 import { Effect, Layer, PubSub, ServiceMap, Stream } from "effect";
 import path from "node:path";
 import type {
@@ -21,6 +23,8 @@ import { ServerSecretStore } from "../../auth/Services/ServerSecretStore";
 import { ImageGenerationRepository } from "../../persistence/Services/ImageGenerationRepository";
 import { ImageGenerationEngine } from "../imageGenerationEngine";
 export interface ImageGenerationServiceShape {
+  spriteCommand: (input: SpriteCommand) => Effect.Effect<SpriteState, Error>;
+  spriteForThread: (threadId: string) => Effect.Effect<SpriteState | null, Error>;
   createDocument: (input: ImageEditDocumentCreateInput) => Effect.Effect<ImageEditDocument, Error>;
   getDocument: (id: string) => Effect.Effect<ImageEditDocument, Error>;
   listProviders: () => Effect.Effect<readonly ImageProvider[], Error>;
@@ -68,9 +72,16 @@ export const ImageGenerationServiceLive = Layer.effect(
       path.join(config.stateDir, "drawing"),
       (event) => Effect.runPromise(PubSub.publish(events, event)).then(() => {}),
     );
+    const sprites = new SpriteEngine(path.join(config.stateDir, "sprites"), engine, (event) =>
+      Effect.runPromise(PubSub.publish(events, event)).then(() => {}),
+    );
+    yield* promise(() => sprites.initialize());
     yield* promise(() => engine.initialize());
     const timer = setInterval(() => {
-      void engine.tick().catch(() => {});
+      void engine
+        .tick()
+        .then(() => sprites.tick())
+        .catch(() => {});
     }, 500);
     timer.unref();
     const cleanup = setInterval(
@@ -88,6 +99,8 @@ export const ImageGenerationServiceLive = Layer.effect(
       }),
     );
     const service: ImageGenerationServiceShape = {
+      spriteCommand: (input) => promise(() => sprites.command(input)),
+      spriteForThread: (id) => promise(() => sprites.forThread(id)),
       createDocument: (i) => promise(() => engine.createDocument(i)),
       getDocument: (id) => promise(() => engine.getDocument(id)),
       listProviders: () => promise(() => engine.listProviders()),

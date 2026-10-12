@@ -239,6 +239,7 @@ export const ImageDraft = Schema.Struct({
 });
 export type ImageDraft = typeof ImageDraft.Type;
 export const ImageJobEvent = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("sprite-changed"), projectId: Id }),
   Schema.Struct({ type: Schema.Literal("changed"), jobId: Id }),
   Schema.Struct({ type: Schema.Literal("deleted"), jobId: Id }),
   Schema.Struct({ type: Schema.Literal("providers-changed") }),

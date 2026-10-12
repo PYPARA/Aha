@@ -3075,6 +3075,8 @@ const makeWsRpcHandlersLayer = () =>
                 ),
               )
             : Stream.fail(tasksUnavailableError()),
+        [WS_METHODS.spriteCommand]: (input) =>
+          rpcEffect(imageGenerationService.spriteCommand(input), "Sprite request failed"),
         [WS_METHODS.imageProviderList]: () =>
           rpcEffect(imageGenerationService.listProviders(), "Failed to list image providers"),
         [WS_METHODS.imageProviderUpsert]: (input) =>

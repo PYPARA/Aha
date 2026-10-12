@@ -1,3 +1,4 @@
+import { SpriteCommand } from "./spriteAnimation";
 import { Schema, Struct } from "effect";
 import {
   LoadProjectImportHistoryInput,
@@ -392,6 +393,7 @@ export const WS_METHODS = {
   imageDraftUpsert: "imageDraft.upsert",
   imageDraftDelete: "imageDraft.delete",
   imageJobList: "imageJob.list",
+  spriteCommand: "sprite.command",
   imageJobCreate: "imageJob.create",
   imageJobCancel: "imageJob.cancel",
   subscribeImageJobs: "imageJob.subscribe",
@@ -680,6 +682,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.imageProviderTest, ImageTestInput),
   tagRequestBody(WS_METHODS.imageJobGet, ImageIdInput),
   tagRequestBody(WS_METHODS.imageJobDelete, ImageIdInput),
+  tagRequestBody(WS_METHODS.spriteCommand, SpriteCommand),
   tagRequestBody(WS_METHODS.imageDraftGet, ImageIdInput),
   tagRequestBody(WS_METHODS.imageDraftUpsert, ImageDraft),
   tagRequestBody(WS_METHODS.imageDraftDelete, ImageIdInput),

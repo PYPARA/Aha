@@ -239,9 +239,14 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(serverSettingsLayer),
     Layer.provideMerge(providerHealthLayer),
   );
+  const imageGenerationLayer = ImageGenerationServiceLive.pipe(
+    Layer.provideMerge(ImageGenerationRepositoryLive),
+    Layer.provideMerge(ServerSecretStoreLive),
+  );
   const agentGatewayLayer = AgentGatewayLive.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
+        imageGenerationLayer,
         ProjectionThreadMessageRepositoryLive,
         OrchestrationCommandReceiptRepositoryLive,
         // The same instance the todo.* RPCs use, so a to-do an agent adds reaches open windows.
@@ -299,10 +304,7 @@ export function makeServerRuntimeServicesLayer(
     automationSchedulerLayer,
     automationRunReactorLayer,
     todoServiceLayer,
-    ImageGenerationServiceLive.pipe(
-      Layer.provideMerge(ImageGenerationRepositoryLive),
-      Layer.provideMerge(ServerSecretStoreLive),
-    ),
+    imageGenerationLayer,
     ProjectAgentRepositoryLive,
     projectAgentServiceLayer,
     projectAgentReactorLayer,

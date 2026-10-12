@@ -34,7 +34,8 @@ export type RailRouteItemId =
   | Exclude<SidebarNavItemId, "newThread">
   | "studio"
   | "settings"
-  | "drawing";
+  | "drawing"
+  | "spriteAnimation";
 export type RailItemId = RailPanelItemId | RailRouteItemId;
 
 /**
@@ -45,6 +46,7 @@ export type RailItemId = RailPanelItemId | RailRouteItemId;
 export const RAIL_ORDERABLE_ITEM_IDS = [
   "home",
   "drawing",
+  "spriteAnimation",
   "inbox",
   "spaces",
   "kanban",
@@ -71,10 +73,10 @@ export function normalizeRailItemOrder(order: readonly string[]): RailOrderableI
   const normalized = normalizeIdOrder(order, RAIL_ORDERABLE_ITEM_IDS, isRailOrderableItemId);
   // Inbox shipped after users saved an order: it joins next to Home, as by default.
   return placeNewIdAfter(
-    placeNewIdAfter(normalized, order, "inbox", "home"),
+    placeNewIdAfter(placeNewIdAfter(normalized, order, "inbox", "home"), order, "drawing", "home"),
     order,
+    "spriteAnimation",
     "drawing",
-    "home",
   );
 }
 
@@ -199,7 +201,12 @@ export function resolveActiveRailShortcutKey(input: {
  */
 export function railItemShowsPanel(id: RailItemId): boolean {
   return (
-    id !== "drawing" && id !== "kanban" && id !== "tasks" && id !== "pullRequests" && id !== "inbox"
+    id !== "spriteAnimation" &&
+    id !== "drawing" &&
+    id !== "kanban" &&
+    id !== "tasks" &&
+    id !== "pullRequests" &&
+    id !== "inbox"
   );
 }
 
@@ -209,6 +216,7 @@ function matchesRoute(pathname: string, route: string): boolean {
 
 /** The route rail item that owns a pathname, or null for thread and chat-index routes. */
 export function railItemForPathname(pathname: string): RailRouteItemId | null {
+  if (matchesRoute(pathname, "/sprite-animation")) return "spriteAnimation";
   if (matchesRoute(pathname, "/drawing")) return "drawing";
   if (matchesRoute(pathname, "/inbox")) return "inbox";
   if (matchesRoute(pathname, "/kanban")) return "kanban";

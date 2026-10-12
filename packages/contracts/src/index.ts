@@ -53,3 +53,5 @@ export * from "./rpc";
 export * from "./claudeCache";
 export * from "./todo";
 export * from "./imageGeneration";
+
+export * from "./spriteAnimation";
