@@ -1,3 +1,4 @@
+import { attachNativeContextMenu } from "./nativeContextMenuBridge";
 import { ahaUserDirectories } from "@synara/shared/ahaUserDirectories";
 import { registerResourceLibrary } from "./resources/ipc";
 import { registerAhaAppearance } from "./aha/appearance-ipc";
@@ -5683,41 +5684,7 @@ function createWindow(): BrowserWindow {
     }
   });
 
-  window.webContents.on("context-menu", (event, params) => {
-    event.preventDefault();
-
-    const menuTemplate: MenuItemConstructorOptions[] = [];
-
-    if (params.misspelledWord) {
-      for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
-        menuTemplate.push({
-          label: suggestion,
-          click: () => window.webContents.replaceMisspelling(suggestion),
-        });
-      }
-      if (params.dictionarySuggestions.length === 0) {
-        menuTemplate.push({ label: "No suggestions", enabled: false });
-      }
-      menuTemplate.push({ type: "separator" });
-    }
-
-    if (params.mediaType === "image") {
-      menuTemplate.push({
-        label: "Copy Image",
-        click: () => window.webContents.copyImageAt(params.x, params.y),
-      });
-      menuTemplate.push({ type: "separator" });
-    }
-
-    menuTemplate.push(
-      { role: "cut", enabled: params.editFlags.canCut },
-      { role: "copy", enabled: params.editFlags.canCopy },
-      { role: "paste", enabled: params.editFlags.canPaste },
-      { role: "selectAll", enabled: params.editFlags.canSelectAll },
-    );
-
-    Menu.buildFromTemplate(menuTemplate).popup({ window });
-  });
+  attachNativeContextMenu(window, process.env.VITE_DEV_SERVER_URL || desktopIdentity.entryUrl);
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     const externalUrl = getSafeExternalUrl(url);

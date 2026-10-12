@@ -157,7 +157,7 @@ function GeneratedMarkdownImageContent(props: GeneratedMarkdownImageProps) {
     return (
       <span
         className="chat-generated-image"
-        onContextMenu={(event) =>
+        onContextMenuCapture={(event) =>
           void resourceContextMenu(
             event,
             [
@@ -193,7 +193,7 @@ function GeneratedMarkdownImageContent(props: GeneratedMarkdownImageProps) {
     <span
       className="chat-generated-image"
       data-status={resolvingGrant ? "loading" : status}
-      onContextMenu={(e) =>
+      onContextMenuCapture={(e) =>
         void resourceContextMenu(
           e,
           [

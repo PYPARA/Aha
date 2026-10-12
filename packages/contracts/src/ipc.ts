@@ -999,6 +999,14 @@ export interface DesktopBridge {
     items: readonly DesktopContextMenuItem<T>[],
     position?: { x: number; y: number },
   ) => Promise<T | null>;
+  /** Adds one renderer-owned action to the original native menu. No resource bytes cross this bridge. */
+  contextMenuExtension?: {
+    onQuery: (
+      listener: (request: { requestId: string; x: number; y: number }) => void,
+    ) => () => void;
+    respond: (requestId: string, label: string | null) => void;
+    onResult: (listener: (result: { requestId: string; selected: boolean }) => void) => () => void;
+  };
   openExternal: (url: string) => Promise<boolean>;
   showInFolder: (path: string) => Promise<void>;
   shell?: {

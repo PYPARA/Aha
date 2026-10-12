@@ -1,3 +1,7 @@
+import {
+  installResourceContextMenuExtension,
+  registerResourceMenuAction,
+} from "~/lib/resourceContextMenuExtension";
 import { useContext, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
@@ -58,28 +62,29 @@ export function ResourceCapture({
   return (
     <span
       className="inline-flex max-w-full flex-col items-start"
-      onContextMenu={(e) => void resourceContextMenu(e, [source], tr, threadId)}
+      onContextMenuCapture={(e) => void resourceContextMenu(e, [source], tr, threadId)}
     >
       {children}
       <ResourceCollectButton sources={[source]} />
     </span>
   );
 }
-export async function resourceContextMenu(
+export function resourceContextMenu(
   event: MouseEvent,
   sources: ResourceSource[],
   tr: (text: string) => string,
   threadId?: string,
 ) {
   if (typeof window === "undefined" || !window.desktopBridge?.resourceLibrary) return;
-  event.preventDefault();
-  event.stopPropagation();
   const enriched = withChatOrigin(sources, event.currentTarget, threadId);
-  const picked = await window.desktopBridge.showContextMenu(
-    [{ id: "collect-resource", label: tr("Add to resource center") }],
+  registerResourceMenuAction(
+    event.currentTarget,
     { x: event.clientX, y: event.clientY },
+    {
+      label: tr("Add to resource center"),
+      run: () => collectResources(enriched),
+    },
   );
-  if (picked === "collect-resource") collectResources(enriched);
 }
 function withChatOrigin(
   sources: ResourceSource[],
@@ -117,6 +122,10 @@ export function drawingResourceSource(
 }
 const inputClass = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm";
 export function ResourceCollectionDialog() {
+  useEffect(() => {
+    if (window.desktopBridge?.resourceLibrary)
+      return installResourceContextMenuExtension(window.desktopBridge);
+  }, []);
   const tr = useAhaTranslation();
   const sources = useResourceCollection((s) => s.sources);
   const isOpen = !!sources;

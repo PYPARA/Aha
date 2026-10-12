@@ -178,7 +178,7 @@ export function DrawingGallery({
                       <img
                         loading="lazy"
                         src={imageUrl(job.outputs[0], "thumbnail")}
-                        onContextMenu={(e) =>
+                        onContextMenuCapture={(e) =>
                           void resourceContextMenu(
                             e,
                             [

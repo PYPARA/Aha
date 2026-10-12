@@ -110,7 +110,7 @@ export function DrawingJobDialog({
               {asset ? (
                 <img
                   src={imageUrl(asset)}
-                  onContextMenu={(e) =>
+                  onContextMenuCapture={(e) =>
                     void resourceContextMenu(
                       e,
                       [drawingResourceSource(asset, imageUrl(asset), job)],

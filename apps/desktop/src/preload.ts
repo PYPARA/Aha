@@ -198,6 +198,26 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   getAppIcon: () => ipcRenderer.invoke(IPC.getAppIcon),
   setAppIcon: (icon) => ipcRenderer.invoke(IPC.setAppIcon, icon),
   showContextMenu: (items, position) => ipcRenderer.invoke(IPC.contextMenu, items, position),
+  contextMenuExtension: {
+    onQuery: (listener) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        request: { requestId: string; x: number; y: number },
+      ) => listener(request);
+      ipcRenderer.on(IPC.contextMenuExtensionQuery, handler);
+      return () => ipcRenderer.removeListener(IPC.contextMenuExtensionQuery, handler);
+    },
+    respond: (requestId, label) =>
+      ipcRenderer.send(IPC.contextMenuExtensionResponse, { requestId, label }),
+    onResult: (listener) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        result: { requestId: string; selected: boolean },
+      ) => listener(result);
+      ipcRenderer.on(IPC.contextMenuExtensionResult, handler);
+      return () => ipcRenderer.removeListener(IPC.contextMenuExtensionResult, handler);
+    },
+  },
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url),
   safariAccess: {
     getInfo: () => ipcRenderer.invoke(IPC.safariAccess.getInfo),

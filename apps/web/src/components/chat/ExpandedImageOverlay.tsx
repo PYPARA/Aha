@@ -133,7 +133,7 @@ export function ExpandedImageOverlay({
         <div className="relative w-fit">
           <img
             src={expandedImageItem.src}
-            onContextMenu={(e) =>
+            onContextMenuCapture={(e) =>
               void resourceContextMenu(
                 e,
                 [

@@ -201,8 +201,26 @@ describe("resource center interactions", () => {
       .not.toBeInTheDocument();
   });
   it("opens the right-click collection action with the actual sidechat and message origin", async () => {
+    let query:
+      | Parameters<NonNullable<DesktopBridge["contextMenuExtension"]>["onQuery"]>[0]
+      | undefined;
+    let result:
+      | Parameters<NonNullable<DesktopBridge["contextMenuExtension"]>["onResult"]>[0]
+      | undefined;
+    window.desktopBridge!.contextMenuExtension = {
+      onQuery: (listener) => {
+        query = listener;
+        return () => {};
+      },
+      respond: vi.fn(),
+      onResult: (listener) => {
+        result = listener;
+        return () => {};
+      },
+    };
     await mount(
       <ResourceChatContext.Provider value="sidechat-42">
+        <ResourceCollectionDialog />
         <div data-chat-find-document-id="message-7">
           <ResourceCapture source={{ name: "hero.png", path: "/tmp/hero.png" }}>
             <span>Chat image</span>
@@ -211,6 +229,12 @@ describe("resource center interactions", () => {
       </ResourceChatContext.Provider>,
     );
     await page.getByText("Chat image", { exact: true }).click({ button: "right" });
+    const capture = document.querySelector('[data-chat-find-document-id="message-7"] span')!;
+    capture.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }),
+    );
+    query?.({ requestId: "native-menu", x: 20, y: 30 });
+    result?.({ requestId: "native-menu", selected: true });
     await vi.waitFor(() =>
       expect(useResourceCollection.getState().sources?.[0]?.origin).toMatchObject({
         kind: "chat",
@@ -218,6 +242,6 @@ describe("resource center interactions", () => {
         messageId: "message-7",
       }),
     );
-    expect(window.desktopBridge!.showContextMenu).toHaveBeenCalled();
+    expect(window.desktopBridge!.showContextMenu).not.toHaveBeenCalled();
   });
 });
