@@ -63,13 +63,17 @@ const Command = z.discriminatedUnion("op", [
     origin: origin.optional(),
   }),
 ]);
-export function registerResourceLibrary(directory: string, getWindow: () => BrowserWindow | null) {
+export function registerResourceLibrary(
+  directory: string,
+  getWindow: () => BrowserWindow | null,
+  defaultRoot?: string,
+) {
   const library = new ResourceLibrary(
     path.join(directory, "resource-library.json"),
     () => getWindow()?.webContents.send(C.changed),
     (name, completed) => getWindow()?.webContents.send(C.progress, { name, completed }),
   );
-  const ready = library.load();
+  const ready = library.load(defaultRoot);
   ipcMain.removeHandler(C.request);
   ipcMain.handle(C.request, async (event, raw: unknown) => {
     const window = getWindow();

@@ -227,4 +227,46 @@ describe("resource library filesystem lifecycle", () => {
       "frame-002.png",
     ]);
   });
+  it("creates a default Resource library only when no configuration exists", async () => {
+    const defaultRoot = path.join(directory, "Documents/Aha/Resource");
+    const lib = new ResourceLibrary(path.join(directory, "default-config.json"));
+    libraries.push(lib);
+    await lib.load(defaultRoot);
+    expect(lib.root).toBe(defaultRoot);
+    expect(lib.libraryId).toBeTruthy();
+    const custom = path.join(directory, "custom");
+    await fs.mkdir(custom);
+    await lib.open(custom);
+    lib.close();
+    const reopened = new ResourceLibrary(lib.configFile);
+    libraries.push(reopened);
+    await reopened.load(defaultRoot);
+    expect(reopened.root).toBe(custom);
+  });
+  it("never replaces an unavailable chosen resource library with the default", async () => {
+    const lib = await make();
+    const original = lib.root!;
+    lib.close();
+    await fs.rename(original, original + "-offline");
+    const defaultRoot = path.join(directory, "Documents/Aha/Resource");
+    const reopened = new ResourceLibrary(lib.configFile);
+    libraries.push(reopened);
+    await reopened.load(defaultRoot);
+    expect(reopened.root).toBe(original);
+    expect(reopened.error).toBeTruthy();
+    await expect(fs.stat(defaultRoot)).rejects.toThrow();
+  });
+  it("reports default-root creation failures and supports selecting a different root", async () => {
+    const parentFile = path.join(directory, "blocked");
+    await fs.writeFile(parentFile, "file");
+    const lib = new ResourceLibrary(path.join(directory, "blocked-config.json"));
+    libraries.push(lib);
+    await lib.load(path.join(parentFile, "Resource"));
+    expect(lib.error).toBeTruthy();
+    const custom = path.join(directory, "recovered");
+    await fs.mkdir(custom);
+    await lib.open(custom);
+    expect(lib.root).toBe(custom);
+    expect(lib.error).toBeNull();
+  });
 });

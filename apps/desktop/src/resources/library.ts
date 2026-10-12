@@ -111,14 +111,25 @@ export class ResourceLibrary {
     this.tail = result.catch(() => {});
     return result;
   }
-  async load() {
+  async load(defaultRoot?: string) {
     let configured: string;
     try {
       configured = z
         .object({ root: z.string() })
         .parse(JSON.parse(await fs.readFile(this.configFile, "utf8"))).root;
     } catch (e) {
-      if (!missing(e)) this.error = message(e);
+      if (!missing(e)) {
+        this.error = message(e);
+        return;
+      }
+      if (!defaultRoot) return;
+      try {
+        await fs.mkdir(defaultRoot, { recursive: true });
+        await this.open(defaultRoot);
+      } catch (failure) {
+        this.root = defaultRoot;
+        this.error = message(failure);
+      }
       return;
     }
     this.root = configured;

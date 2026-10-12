@@ -1,3 +1,4 @@
+import { useWorkspaceMigrationPaths } from "~/lib/workspaceMigrationPaths";
 import { ResourceCapture } from "./resources/ResourceCollectionDialog";
 // FILE: ChatMarkdown.tsx
 // Purpose: Renders assistant and plan markdown with syntax highlighting and local file links.
@@ -1565,6 +1566,7 @@ function ChatMarkdown({
   onOpenThread,
   parseHtml: parseHtmlProp,
 }: ChatMarkdownProps) {
+  useWorkspaceMigrationPaths();
   // Defaults applied with ?? in the body, not in the destructuring: default
   // values in parameter destructuring make React Compiler 1.0.0 bail on the
   // whole component (BuildHIR AssignmentPattern), losing its auto-memoization.

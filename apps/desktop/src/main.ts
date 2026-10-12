@@ -1,3 +1,4 @@
+import { ahaUserDirectories } from "@synara/shared/ahaUserDirectories";
 import { registerResourceLibrary } from "./resources/ipc";
 import { registerAhaAppearance } from "./aha/appearance-ipc";
 import type { AppearanceImages } from "./aha/appearance-images";
@@ -4137,6 +4138,7 @@ function backendEnv(): NodeJS.ProcessEnv {
     SYNARA_PORT: String(backendPort),
     SYNARA_HOME: BASE_DIR,
     AHA_HOME: BASE_DIR,
+    AHA_DOCUMENTS_DIR: app.getPath("documents"),
     SYNARA_AUTH_TOKEN: backendAuthToken,
     SYNARA_DESKTOP_SHUTDOWN_TOKEN: DESKTOP_BACKEND_SHUTDOWN_TOKEN,
   };
@@ -5008,7 +5010,11 @@ function requestGracefulAppQuit(reason: string): void {
 }
 
 function registerIpcHandlers(): void {
-  registerResourceLibrary(STATE_DIR, () => mainWindow);
+  registerResourceLibrary(
+    STATE_DIR,
+    () => mainWindow,
+    ahaUserDirectories(OS.homedir(), app.getPath("documents")).resource,
+  );
   ahaSkinController = registerAhaAppearance(
     STATE_DIR,
     () => mainWindow,

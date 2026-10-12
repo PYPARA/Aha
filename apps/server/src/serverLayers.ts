@@ -1,3 +1,4 @@
+import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
 import { ProjectionThreadMessageRepositoryLive } from "./persistence/Layers/ProjectionThreadMessages";
 import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/OrchestrationCommandReceipts";
 import { QueuedTurnPromotionRepositoryLive } from "./persistence/Layers/QueuedTurnPromotions";
@@ -292,6 +293,7 @@ export function makeServerRuntimeServicesLayer(
   );
 
   return Layer.mergeAll(
+    ProviderSessionRuntimeRepositoryLive,
     agentGatewayCredentialsLayer,
     agentGatewayLayer,
     BrowserAutomationHostLive,
