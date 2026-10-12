@@ -26,6 +26,7 @@ export const withProjectRelocationEvents = Effect.fn("withProjectRelocationEvent
     readonly event: ProjectUpdatedEvent;
     readonly previousProject: OrchestrationProject;
     readonly readModel: OrchestrationReadModel;
+    readonly managedMigration?: boolean;
   }) {
     const { event, previousProject, readModel } = input;
     const nextRoot = event.payload.workspaceRoot;
@@ -34,14 +35,19 @@ export const withProjectRelocationEvents = Effect.fn("withProjectRelocationEvent
       workspaceRootsEqual(previousProject.workspaceRoot, nextRoot, {
         platform: process.platform,
       }) ||
-      (previousProject.kind ?? "project") !== "project" ||
-      (event.payload.kind ?? previousProject.kind ?? "project") !== "project"
+      (!input.managedMigration &&
+        ((previousProject.kind ?? "project") !== "project" ||
+          (event.payload.kind ?? previousProject.kind ?? "project") !== "project"))
     )
       return event;
 
     const events: Array<Omit<OrchestrationEvent, "sequence">> = [event];
     for (const thread of readModel.threads) {
-      if (thread.projectId !== previousProject.id || thread.deletedAt !== null) continue;
+      if (
+        thread.projectId !== previousProject.id ||
+        (!input.managedMigration && thread.deletedAt !== null)
+      )
+        continue;
       if (threadHasInFlightTurn(thread) || threadHasCheckpointRevertInProgress(thread)) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: "project.meta.update",

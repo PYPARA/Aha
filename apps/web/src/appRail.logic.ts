@@ -35,7 +35,8 @@ export type RailRouteItemId =
   | "studio"
   | "settings"
   | "drawing"
-  | "spriteAnimation";
+  | "spriteAnimation"
+  | "resources";
 export type RailItemId = RailPanelItemId | RailRouteItemId;
 
 /**
@@ -47,6 +48,7 @@ export const RAIL_ORDERABLE_ITEM_IDS = [
   "home",
   "drawing",
   "spriteAnimation",
+  "resources",
   "inbox",
   "spaces",
   "kanban",
@@ -71,13 +73,15 @@ export function railItemCanHide(id: RailOrderableItemId): boolean {
 
 export function normalizeRailItemOrder(order: readonly string[]): RailOrderableItemId[] {
   const normalized = normalizeIdOrder(order, RAIL_ORDERABLE_ITEM_IDS, isRailOrderableItemId);
-  // Inbox shipped after users saved an order: it joins next to Home, as by default.
-  return placeNewIdAfter(
-    placeNewIdAfter(placeNewIdAfter(normalized, order, "inbox", "home"), order, "drawing", "home"),
+  // Insert new destinations without moving the user's existing destinations.
+  const withDrawing = placeNewIdAfter(
+    placeNewIdAfter(normalized, order, "inbox", "home"),
     order,
-    "spriteAnimation",
     "drawing",
+    "home",
   );
+  const withResources = placeNewIdAfter(withDrawing, order, "resources", "drawing");
+  return placeNewIdAfter(withResources, order, "spriteAnimation", "drawing");
 }
 
 export function normalizeHiddenRailItems(hidden: readonly string[]): RailOrderableItemId[] {
@@ -202,6 +206,7 @@ export function resolveActiveRailShortcutKey(input: {
 export function railItemShowsPanel(id: RailItemId): boolean {
   return (
     id !== "spriteAnimation" &&
+    id !== "resources" &&
     id !== "drawing" &&
     id !== "kanban" &&
     id !== "tasks" &&
@@ -217,6 +222,7 @@ function matchesRoute(pathname: string, route: string): boolean {
 /** The route rail item that owns a pathname, or null for thread and chat-index routes. */
 export function railItemForPathname(pathname: string): RailRouteItemId | null {
   if (matchesRoute(pathname, "/sprite-animation")) return "spriteAnimation";
+  if (matchesRoute(pathname, "/resources")) return "resources";
   if (matchesRoute(pathname, "/drawing")) return "drawing";
   if (matchesRoute(pathname, "/inbox")) return "inbox";
   if (matchesRoute(pathname, "/kanban")) return "kanban";

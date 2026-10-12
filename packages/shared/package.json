@@ -443,6 +443,10 @@
     "./keybindingRules": {
       "types": "./src/keybindingRules.ts",
       "import": "./src/keybindingRules.ts"
+    },
+    "./ahaUserDirectories": {
+      "types": "./src/ahaUserDirectories.ts",
+      "import": "./src/ahaUserDirectories.ts"
     }
   },
   "scripts": {

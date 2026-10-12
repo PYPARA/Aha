@@ -1,3 +1,4 @@
+import { ahaUserDirectories } from "@synara/shared/ahaUserDirectories";
 /**
  * ServerConfig - Runtime configuration services.
  *
@@ -10,8 +11,6 @@ import { Effect, FileSystem, Layer, Path, ServiceMap } from "effect";
 import { existsSync } from "node:fs";
 import OS from "node:os";
 import path from "node:path";
-import pathPosix from "node:path/posix";
-import pathWin32 from "node:path/win32";
 
 import {
   ensurePrivateDirectorySync,
@@ -179,24 +178,21 @@ export function resolveDefaultChatWorkspaceRoot(input: {
 }): string {
   const homeDir = input.homeDir.trim();
   const platform = input.platform ?? process.platform;
-  const pathApi = platform === "win32" ? pathWin32 : pathPosix;
-  return pathApi.join(homeDir, "Documents", "Synara");
+  return ahaUserDirectories(homeDir, process.env.AHA_DOCUMENTS_DIR, platform).chats;
 }
 
 export function resolveDefaultStudioWorkspaceRoot(input: {
   readonly homeDir: string;
   readonly platform?: NodeJS.Platform;
 }): string {
-  const pathApi = (input.platform ?? process.platform) === "win32" ? pathWin32 : pathPosix;
-  return pathApi.join(resolveDefaultChatWorkspaceRoot(input), "Studio");
+  return ahaUserDirectories(input.homeDir, process.env.AHA_DOCUMENTS_DIR, input.platform).studio;
 }
 
 export function resolveDefaultGroupsWorkspaceRoot(input: {
   readonly homeDir: string;
   readonly platform?: NodeJS.Platform;
 }): string {
-  const pathApi = (input.platform ?? process.platform) === "win32" ? pathWin32 : pathPosix;
-  return pathApi.join(resolveDefaultChatWorkspaceRoot(input), "Groups");
+  return ahaUserDirectories(input.homeDir, process.env.AHA_DOCUMENTS_DIR, input.platform).groups;
 }
 
 export interface ResolvedWorkspaceRoots {

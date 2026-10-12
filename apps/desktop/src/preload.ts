@@ -1,3 +1,4 @@
+import { RESOURCE_CHANNELS as RESOURCES } from "@synara/contracts/resourceLibrary";
 import { AHA_APPEARANCE_CHANNELS as AHA } from "@synara/contracts/ahaChannels";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
@@ -130,6 +131,19 @@ function recordBrowserActivity(activity: DesktopDiagnosticActivity): void {
 }
 
 contextBridge.exposeInMainWorld("desktopBridge", {
+  resourceLibrary: {
+    request: (input) => ipcRenderer.invoke(RESOURCES.request, input),
+    onChanged: (listener) => {
+      const handler = () => listener();
+      ipcRenderer.on(RESOURCES.changed, handler);
+      return () => ipcRenderer.removeListener(RESOURCES.changed, handler);
+    },
+    onProgress: (listener) => {
+      const handler = (_event: unknown, value: Parameters<typeof listener>[0]) => listener(value);
+      ipcRenderer.on(RESOURCES.progress, handler);
+      return () => ipcRenderer.removeListener(RESOURCES.progress, handler);
+    },
+  },
   ahaAppearance: {
     skins: {
       list: (input) => ipcRenderer.invoke(AHA.skinsList, input),
@@ -184,6 +198,26 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   getAppIcon: () => ipcRenderer.invoke(IPC.getAppIcon),
   setAppIcon: (icon) => ipcRenderer.invoke(IPC.setAppIcon, icon),
   showContextMenu: (items, position) => ipcRenderer.invoke(IPC.contextMenu, items, position),
+  contextMenuExtension: {
+    onQuery: (listener) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        request: { requestId: string; x: number; y: number },
+      ) => listener(request);
+      ipcRenderer.on(IPC.contextMenuExtensionQuery, handler);
+      return () => ipcRenderer.removeListener(IPC.contextMenuExtensionQuery, handler);
+    },
+    respond: (requestId, label) =>
+      ipcRenderer.send(IPC.contextMenuExtensionResponse, { requestId, label }),
+    onResult: (listener) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        result: { requestId: string; selected: boolean },
+      ) => listener(result);
+      ipcRenderer.on(IPC.contextMenuExtensionResult, handler);
+      return () => ipcRenderer.removeListener(IPC.contextMenuExtensionResult, handler);
+    },
+  },
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url),
   safariAccess: {
     getInfo: () => ipcRenderer.invoke(IPC.safariAccess.getInfo),

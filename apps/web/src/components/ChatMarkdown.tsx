@@ -1,3 +1,5 @@
+import { useWorkspaceMigrationPaths } from "~/lib/workspaceMigrationPaths";
+import { ResourceCapture } from "./resources/ResourceCollectionDialog";
 // FILE: ChatMarkdown.tsx
 // Purpose: Renders assistant and plan markdown with syntax highlighting and local file links.
 // Layer: Web chat presentation component
@@ -1436,7 +1438,11 @@ const MARKDOWN_COMPONENTS: Components = {
       );
     }
     if (!onImageExpand || !restoredSrc) {
-      return <img {...props} src={restoredSrc} alt={alt} loading="lazy" />;
+      return (
+        <ResourceCapture source={{ name: alt || "image", url: restoredSrc }}>
+          <img {...props} src={restoredSrc} alt={alt} loading="lazy" />
+        </ResourceCapture>
+      );
     }
     const expandImage = (event: SyntheticEvent<HTMLImageElement>) => {
       event.preventDefault();
@@ -1446,19 +1452,21 @@ const MARKDOWN_COMPONENTS: Components = {
       );
     };
     return (
-      <img
-        {...props}
-        src={restoredSrc}
-        alt={alt}
-        loading="lazy"
-        role="button"
-        tabIndex={0}
-        data-expandable-image=""
-        onClick={expandImage}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") expandImage(event);
-        }}
-      />
+      <ResourceCapture source={{ name: alt || "image", url: restoredSrc }}>
+        <img
+          {...props}
+          src={restoredSrc}
+          alt={alt}
+          loading="lazy"
+          role="button"
+          tabIndex={0}
+          data-expandable-image=""
+          onClick={expandImage}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") expandImage(event);
+          }}
+        />
+      </ResourceCapture>
     );
   },
   li: function MarkdownListItem({ node, children, ...props }) {
@@ -1558,6 +1566,7 @@ function ChatMarkdown({
   onOpenThread,
   parseHtml: parseHtmlProp,
 }: ChatMarkdownProps) {
+  useWorkspaceMigrationPaths();
   // Defaults applied with ?? in the body, not in the destructuring: default
   // values in parameter destructuring make React Compiler 1.0.0 bail on the
   // whole component (BuildHIR AssignmentPattern), losing its auto-memoization.

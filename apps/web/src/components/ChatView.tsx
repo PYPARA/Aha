@@ -1,3 +1,4 @@
+import { ResourceChatContext, useResourceAttachments } from "./resources/resourceLibrary";
 import { useAhaTranslation } from "../aha/AppearanceProvider";
 import { AhaBackgroundLayer } from "../aha/BackgroundLayer";
 import { type LegendListRef } from "@legendapp/list/react";
@@ -4107,6 +4108,12 @@ export default function ChatView({
     [addComposerFiles, addComposerImages],
   );
 
+  useResourceAttachments(
+    activeThreadId ?? undefined,
+    addComposerAttachments,
+    !isSidechatExpired && pendingUserInputs.length === 0,
+  );
+
   const removeComposerFile = (fileId: string) => {
     discardPromptHistoryNavigationForComposerMutation();
     removeComposerDraftFile(threadId, fileId);
@@ -7147,8 +7154,10 @@ export default function ChatView({
     </div>
   );
   return (
-    <ChatLinkActionsContext.Provider value={chatLinkActions}>
-      {chatView}
-    </ChatLinkActionsContext.Provider>
+    <ResourceChatContext.Provider value={threadId}>
+      <ChatLinkActionsContext.Provider value={chatLinkActions}>
+        {chatView}
+      </ChatLinkActionsContext.Provider>
+    </ResourceChatContext.Provider>
   );
 }

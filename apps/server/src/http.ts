@@ -1,3 +1,4 @@
+import { workspaceMigrationFor } from "./workspaceMigration/coordinator";
 import { ImageEditDocumentCreateInput } from "@synara/contracts";
 import { readEventLoopStatus } from "./eventLoopMonitor";
 import { ImageGenerationService } from "./imageGeneration/Services/ImageGenerationService";
@@ -247,11 +248,79 @@ export function makeEffectHttpRouteLayer(
     editorIconEffectRouteLayer,
     localImageEffectRouteLayer,
     drawingAssetEffectRouteLayer,
+    workspaceMigrationRouteLayer,
     binaryUploadEffectRouteLayer,
     attachmentsEffectRouteLayer,
     staticAndDevEffectRouteLayer,
   );
 }
+
+export const workspaceMigrationRouteLayer = Layer.mergeAll(
+  HttpRouter.add(
+    "GET",
+    "/api/storage/migration",
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const url = HttpServerRequest.toURL(request);
+      if (!url) return HttpServerResponse.text("Bad Request", { status: 400 });
+      const config = yield* ServerConfig;
+      if (!isLegacyTokenAuthorized({ config, url })) yield* requireAuthenticatedRequest;
+      const migration = workspaceMigrationFor(config.stateDir);
+      if (!migration) return HttpServerResponse.text("Migration is initializing", { status: 503 });
+      const mappings = yield* Effect.promise(() => migration.mappings().catch(() => []));
+      return HttpServerResponse.jsonUnsafe(
+        { ...migration.status(), mappings },
+        {
+          headers: {
+            ...localPreviewCorsHeaders({ config, request, url }),
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          error instanceof AuthError
+            ? authErrorResponse(error)
+            : HttpServerResponse.text("Storage request failed", { status: 500 }),
+        ),
+      ),
+    ),
+  ),
+  HttpRouter.add(
+    "*",
+    "/api/storage/migration/retry",
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const url = HttpServerRequest.toURL(request);
+      if (!url) return HttpServerResponse.text("Bad Request", { status: 400 });
+      const config = yield* ServerConfig;
+      const cors = trustedMutationCorsHeaders({ config, request, url });
+      if (cors === null)
+        return HttpServerResponse.text("Trusted request origin required", { status: 403 });
+      if (request.method === "OPTIONS")
+        return HttpServerResponse.empty({ status: 204, headers: cors });
+      if (request.method !== "POST")
+        return HttpServerResponse.text("Method Not Allowed", { status: 405, headers: cors });
+      if (!isLegacyTokenAuthorized({ config, url })) yield* requireAuthenticatedMutationRequest;
+      const migration = workspaceMigrationFor(config.stateDir);
+      if (!migration) return HttpServerResponse.text("Migration is initializing", { status: 503 });
+      void migration.run();
+      return HttpServerResponse.jsonUnsafe(migration.status(), {
+        status: 202,
+        headers: localPreviewCorsHeaders({ config, request, url }),
+      });
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          error instanceof AuthError
+            ? authErrorResponse(error)
+            : HttpServerResponse.text("Storage request failed", { status: 500 }),
+        ),
+      ),
+    ),
+  ),
+);
 
 export const drawingAssetEffectRouteLayer = Layer.mergeAll(
   HttpRouter.add(
@@ -1108,9 +1177,31 @@ export const localImageEffectRouteLayer = HttpRouter.add(
       ...liveCodexHomePaths,
     ];
 
+    let migratedImagePath = url.searchParams.get("path");
+    const previewCwd = url.searchParams.get("cwd");
+    const migration = workspaceMigrationFor(config.stateDir);
+    if (migration && migratedImagePath && previewCwd) {
+      const mappings = yield* Effect.promise(() => migration.mappings().catch(() => []));
+      for (const mapping of mappings) {
+        const sourceRelative = nodePath.relative(mapping.source, migratedImagePath);
+        const cwdRelative = nodePath.relative(mapping.target, previewCwd);
+        const contained = (relative: string) =>
+          relative !== ".." &&
+          !relative.startsWith(".." + nodePath.sep) &&
+          !nodePath.isAbsolute(relative);
+        if (
+          nodePath.isAbsolute(migratedImagePath) &&
+          contained(sourceRelative) &&
+          contained(cwdRelative)
+        ) {
+          migratedImagePath = nodePath.join(mapping.target, sourceRelative);
+          break;
+        }
+      }
+    }
     const previewFile = yield* Effect.promise(() =>
       resolveAllowedLocalPreviewFile({
-        requestedPath: url.searchParams.get("path"),
+        requestedPath: migratedImagePath,
         cwd: url.searchParams.get("cwd"),
         codexHomePaths,
         scratchWorkspacesRoot: resolveScratchWorkspacesRoot(),

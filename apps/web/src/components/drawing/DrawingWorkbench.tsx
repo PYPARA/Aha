@@ -1,3 +1,4 @@
+import { useResourceAttachments } from "../resources/resourceLibrary";
 import { normalizeDrawingParameters, updateDrawingParameters } from "./drawingParameters";
 import { RouteInsetSurface } from "../RouteInsetSurface";
 import { ChatSurfaceHeader } from "../chat/ChatSurfaceHeader";
@@ -125,6 +126,7 @@ export default function DrawingWorkbench() {
     [details, setDetails] = useState<ImageJob | null>(null);
   const [preview, setPreview] = useState<{
       assets: readonly ImageAsset[];
+      job?: ImageJob;
       index: number;
       references?: readonly ImageInputReference[] | undefined;
     } | null>(null),
@@ -290,6 +292,7 @@ export default function DrawingWorkbench() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setUploading(false));
   };
+  useResourceAttachments("drawing", addFiles, hydrated);
   const reuse = (job: ImageJob) => {
     setPrompt(job.prompt);
     setProviderId(job.providerId);
@@ -812,14 +815,34 @@ export default function DrawingWorkbench() {
             onDelete={(job) => void remove(job)}
             onPreview={(asset) => {
               setDetails(null);
-              setPreview({ assets: [asset], index: 0, references: details.inputReferences });
+              setPreview({
+                assets: [asset],
+                index: 0,
+                references: details.inputReferences,
+                job: details,
+              });
             }}
           />
         ) : null}
         {preview ? (
           <ExpandedImageOverlay
             expandedImage={{
-              images: preview.assets.map((a) => ({ src: imageUrl(a), name: a.name })),
+              images: preview.assets.map((a) => ({
+                src: imageUrl(a),
+                name: a.name,
+                resourceOrigin: {
+                  kind: "drawing" as const,
+                  ...(preview.job
+                    ? {
+                        jobId: preview.job.id,
+                        batchId: preview.job.id,
+                        prompt: preview.job.prompt,
+                        model: preview.job.model,
+                        parameters: { ...preview.job.parameters },
+                      }
+                    : {}),
+                },
+              })),
               index: preview.index,
             }}
             onClose={() => setPreview(null)}

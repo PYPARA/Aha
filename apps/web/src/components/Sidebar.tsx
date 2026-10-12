@@ -6665,6 +6665,7 @@ export default function Sidebar() {
   // active item keeps one item selected.
   const isOnThreadsSection =
     !pathname.startsWith("/sprite-animation") &&
+    !pathname.startsWith("/resources") &&
     !pathname.startsWith("/drawing") &&
     !isOnSettings &&
     !isOnGroups &&
@@ -6714,11 +6715,13 @@ export default function Sidebar() {
       ? RAIL_PANEL_ITEM_LABELS[id]
       : id === "spriteAnimation"
         ? "Sprite animation"
-        : id === "drawing"
-          ? "Drawing"
-          : id === "studio"
-            ? "Hubs"
-            : sidebarNavDescriptors[id].label;
+        : id === "resources"
+          ? "Resource center"
+          : id === "drawing"
+            ? "Drawing"
+            : id === "studio"
+              ? "Hubs"
+              : sidebarNavDescriptors[id].label;
   const railItemFor = (id: RailOrderableItemId): AppRailItem => {
     const base = { id, glyphs: railItemGlyphs(id), label: railItemLabel(id) };
     if (id === "home" || id === "spaces") {
@@ -6745,6 +6748,16 @@ export default function Sidebar() {
         onSelect: () => {
           selectRailRouteItem("spriteAnimation");
           void navigate({ to: "/sprite-animation" });
+        },
+      };
+    if (id === "resources")
+      return {
+        ...base,
+        badge: null,
+        active: railActiveItem === "resources",
+        onSelect: () => {
+          selectRailRouteItem("resources");
+          void navigate({ to: "/resources" });
         },
       };
     if (id === "drawing")
@@ -6787,7 +6800,7 @@ export default function Sidebar() {
   });
   const railItems: AppRailItem[] = railVisibleItemIds.map(railItemFor);
   const searchPaletteNavigationActions: SidebarSearchAction[] = (
-    ["drawing", "spriteAnimation", "inbox", "kanban", "studio", "automations"] as const
+    ["drawing", "spriteAnimation", "resources", "inbox", "kanban", "studio", "automations"] as const
   )
     .filter((id) => isRailItemAvailable(id, railAvailability))
     .map((id) => {

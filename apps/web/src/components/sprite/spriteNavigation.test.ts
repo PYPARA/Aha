@@ -17,7 +17,14 @@ it("adds the sprite rail item after Drawing without moving existing user items",
     "automations",
     "studio",
   ]);
-  expect(order.slice(0, 5)).toEqual(["spaces", "home", "drawing", "spriteAnimation", "tasks"]);
+  expect(order.slice(0, 6)).toEqual([
+    "spaces",
+    "home",
+    "drawing",
+    "spriteAnimation",
+    "resources",
+    "tasks",
+  ]);
   expect(railItemForPathname("/sprite-animation")).toBe("spriteAnimation");
   expect(railItemShowsPanel("spriteAnimation")).toBe(false);
   expect(

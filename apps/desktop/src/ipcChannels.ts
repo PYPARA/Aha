@@ -11,6 +11,9 @@ export const DESKTOP_IPC_CHANNELS = {
   getAppIcon: "desktop:get-app-icon",
   setAppIcon: "desktop:set-app-icon",
   contextMenu: "desktop:context-menu",
+  contextMenuExtensionQuery: "desktop:context-menu-extension-query",
+  contextMenuExtensionResponse: "desktop:context-menu-extension-response",
+  contextMenuExtensionResult: "desktop:context-menu-extension-result",
   openExternal: "desktop:open-external",
   safariAccess: {
     getInfo: "desktop:safari-access-info",

@@ -13,6 +13,7 @@ import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as ChatSpriteAnimationRouteImport } from './routes/_chat.sprite-animation'
 import { Route as ChatSettingsRouteImport } from './routes/_chat.settings'
+import { Route as ChatResourcesRouteImport } from './routes/_chat.resources'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatPluginsRouteImport } from './routes/_chat.plugins'
 import { Route as ChatInboxRouteImport } from './routes/_chat.inbox'
@@ -46,6 +47,11 @@ const ChatSpriteAnimationRoute = ChatSpriteAnimationRouteImport.update({
 const ChatSettingsRoute = ChatSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatResourcesRoute = ChatResourcesRouteImport.update({
+  id: '/resources',
+  path: '/resources',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
@@ -133,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof ChatInboxRoute
   '/plugins': typeof ChatPluginsRoute
   '/pull-requests': typeof ChatPullRequestsRouteWithChildren
+  '/resources': typeof ChatResourcesRoute
   '/settings': typeof ChatSettingsRoute
   '/sprite-animation': typeof ChatSpriteAnimationRoute
   '/automations/$automationId': typeof ChatAutomationsAutomationIdRoute
@@ -150,6 +157,7 @@ export interface FileRoutesByTo {
   '/drawing': typeof ChatDrawingRoute
   '/inbox': typeof ChatInboxRoute
   '/plugins': typeof ChatPluginsRoute
+  '/resources': typeof ChatResourcesRoute
   '/settings': typeof ChatSettingsRoute
   '/sprite-animation': typeof ChatSpriteAnimationRoute
   '/': typeof ChatIndexRoute
@@ -172,6 +180,7 @@ export interface FileRoutesById {
   '/_chat/inbox': typeof ChatInboxRoute
   '/_chat/plugins': typeof ChatPluginsRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRouteWithChildren
+  '/_chat/resources': typeof ChatResourcesRoute
   '/_chat/settings': typeof ChatSettingsRoute
   '/_chat/sprite-animation': typeof ChatSpriteAnimationRoute
   '/_chat/': typeof ChatIndexRoute
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/plugins'
     | '/pull-requests'
+    | '/resources'
     | '/settings'
     | '/sprite-animation'
     | '/automations/$automationId'
@@ -212,6 +222,7 @@ export interface FileRouteTypes {
     | '/drawing'
     | '/inbox'
     | '/plugins'
+    | '/resources'
     | '/settings'
     | '/sprite-animation'
     | '/'
@@ -233,6 +244,7 @@ export interface FileRouteTypes {
     | '/_chat/inbox'
     | '/_chat/plugins'
     | '/_chat/pull-requests'
+    | '/_chat/resources'
     | '/_chat/settings'
     | '/_chat/sprite-animation'
     | '/_chat/'
@@ -279,6 +291,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof ChatSettingsRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/resources': {
+      id: '/_chat/resources'
+      path: '/resources'
+      fullPath: '/resources'
+      preLoaderRoute: typeof ChatResourcesRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/pull-requests': {
@@ -421,6 +440,7 @@ interface ChatRouteChildren {
   ChatInboxRoute: typeof ChatInboxRoute
   ChatPluginsRoute: typeof ChatPluginsRoute
   ChatPullRequestsRoute: typeof ChatPullRequestsRouteWithChildren
+  ChatResourcesRoute: typeof ChatResourcesRoute
   ChatSettingsRoute: typeof ChatSettingsRoute
   ChatSpriteAnimationRoute: typeof ChatSpriteAnimationRoute
   ChatIndexRoute: typeof ChatIndexRoute
@@ -439,6 +459,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatInboxRoute: ChatInboxRoute,
   ChatPluginsRoute: ChatPluginsRoute,
   ChatPullRequestsRoute: ChatPullRequestsRouteWithChildren,
+  ChatResourcesRoute: ChatResourcesRoute,
   ChatSettingsRoute: ChatSettingsRoute,
   ChatSpriteAnimationRoute: ChatSpriteAnimationRoute,
   ChatIndexRoute: ChatIndexRoute,

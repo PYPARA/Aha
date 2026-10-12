@@ -26,6 +26,8 @@ import type {
 import type { ManagedAttachmentPrincipal } from "../../managedAttachmentPrincipal.ts";
 
 export interface OrchestrationDispatchContext {
+  /** Internal startup maintenance only; never decoded from client commands. */
+  readonly managedWorkspaceMigration?: { readonly source: string; readonly target: string };
   readonly attachmentPrincipal?: ManagedAttachmentPrincipal;
   /** Resolve an uncertain turn start, durably rejecting it if it has not committed. Never execute it. */
   readonly settleOnly?: boolean;

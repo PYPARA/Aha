@@ -1,3 +1,5 @@
+import { StorageMigrationSync } from "~/components/settings/StorageSettingsPanel";
+import { ResourceCollectionDialog } from "~/components/resources/ResourceCollectionDialog";
 import type { ResolvedKeybindingsConfig } from "@synara/contracts";
 import { AhaBackgroundLayer } from "../aha/BackgroundLayer";
 import { CHAT_SURFACE_HEADER_HEIGHT_PX } from "@synara/shared/desktopChrome";
@@ -645,6 +647,8 @@ function ChatRouteLayout() {
       data-sidebar-layout="rail"
     >
       <AhaBackgroundLayer />
+      <ResourceCollectionDialog />
+      <StorageMigrationSync />
       <ThreadRetentionMaintenanceToast />
       <ChatRouteGlobalShortcuts />
       <AppRailSlotProvider value={railSlot}>

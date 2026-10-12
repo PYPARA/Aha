@@ -1,3 +1,8 @@
+import {
+  ResourceCollectButton,
+  drawingResourceSource,
+  resourceContextMenu,
+} from "../resources/ResourceCollectionDialog";
 import { drawingParameterLabel } from "./drawingParameters";
 import { CentralIcon } from "~/lib/central-icons";
 import { useEffect, useState } from "react";
@@ -105,6 +110,13 @@ export function DrawingJobDialog({
               {asset ? (
                 <img
                   src={imageUrl(asset)}
+                  onContextMenuCapture={(e) =>
+                    void resourceContextMenu(
+                      e,
+                      [drawingResourceSource(asset, imageUrl(asset), job)],
+                      tr,
+                    )
+                  }
                   alt={job.prompt}
                   className="max-h-[45dvh] w-full object-contain md:max-h-full md:h-full"
                 />
@@ -137,6 +149,11 @@ export function DrawingJobDialog({
                 </>
               ) : null}
             </div>
+            {asset ? (
+              <ResourceCollectButton
+                sources={[drawingResourceSource(asset, imageUrl(asset), job)]}
+              />
+            ) : null}
             {asset ? (
               <p className="pt-2 text-center text-ui-xs text-muted-foreground">
                 {asset.width} × {asset.height} · {index + 1}/{job.outputs.length}

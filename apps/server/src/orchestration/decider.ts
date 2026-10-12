@@ -602,11 +602,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
   command,
   readModel,
   workspacePaths,
+  managedWorkspaceMigration,
 }: {
   readonly command: OrchestrationCommand;
   readonly readModel: OrchestrationReadModel;
   /** Reserved container roots; when provided, space assignment rejects legacy chat containers. */
   readonly workspacePaths?: SpaceAssignmentWorkspacePaths | undefined;
+  readonly managedWorkspaceMigration?:
+    | { readonly source: string; readonly target: string }
+    | undefined;
 }): Effect.fn.Return<
   Omit<OrchestrationEvent, "sequence"> | ReadonlyArray<Omit<OrchestrationEvent, "sequence">>,
   OrchestrationCommandInvariantError
@@ -943,6 +947,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      if (
+        managedWorkspaceMigration &&
+        (existingProject.workspaceRoot !== managedWorkspaceMigration.source ||
+          command.workspaceRoot !== managedWorkspaceMigration.target ||
+          !["chat", "studio", "group"].includes(existingProject.kind ?? "project"))
+      )
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Managed migration source or destination no longer matches the project.",
+        });
       const nextProjectKind = command.kind ?? existingProject.kind ?? "project";
       const requestedSpaceId =
         command.spaceId !== undefined
@@ -983,7 +997,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         !workspaceRootsEqual(command.workspaceRoot, existingProject.workspaceRoot, {
           platform: process.platform,
         }) &&
-        isLegacyHomeChatContainer
+        isLegacyHomeChatContainer &&
+        !managedWorkspaceMigration
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -1093,6 +1108,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         event,
         previousProject: existingProject,
         readModel,
+        managedMigration: managedWorkspaceMigration !== undefined,
       });
     }
 

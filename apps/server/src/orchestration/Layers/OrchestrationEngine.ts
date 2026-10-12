@@ -1,3 +1,4 @@
+import { relocateRuntimePaths } from "../../workspaceMigration/runtimePaths";
 import type {
   ChatAttachment,
   OrchestrationEvent,
@@ -105,6 +106,7 @@ type OrchestrationEnginePhase = "running" | "quiescing" | "draining" | "stopped"
 interface CommandEnvelope {
   command: OrchestrationCommand;
   settleOnly: boolean;
+  managedWorkspaceMigration: { readonly source: string; readonly target: string } | undefined;
   attachmentPrincipal: ManagedAttachmentPrincipal;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   executionState: Ref.Ref<CommandExecutionState>;
@@ -1188,6 +1190,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             command,
             readModel: deciderReadModel,
             workspacePaths: deciderWorkspacePaths,
+            managedWorkspaceMigration: envelope.managedWorkspaceMigration,
           });
           const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
           const transactionalCommitEffect: Effect.Effect<
@@ -1278,6 +1281,31 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               committedEvents.push(savedEvent);
             }
 
+            if (envelope.managedWorkspaceMigration && command.type === "project.meta.update") {
+              const migration = envelope.managedWorkspaceMigration;
+              for (const thread of deciderReadModel.threads.filter(
+                (t) => t.projectId === command.projectId,
+              )) {
+                const runtimes = yield* sql<{
+                  threadId: string;
+                  payload: string | null;
+                  cursor: string | null;
+                }>`SELECT thread_id AS "threadId", runtime_payload_json AS payload, resume_cursor_json AS cursor FROM provider_session_runtime WHERE thread_id = ${thread.id}`;
+                for (const row of runtimes) {
+                  const payload = relocateRuntimePaths(
+                    row.payload,
+                    migration.source,
+                    migration.target,
+                  );
+                  const cursor = relocateRuntimePaths(
+                    row.cursor,
+                    migration.source,
+                    migration.target,
+                  );
+                  yield* sql`UPDATE provider_session_runtime SET runtime_payload_json = ${payload}, resume_cursor_json = ${cursor} WHERE thread_id = ${row.threadId}`;
+                }
+              }
+            }
             const lastSavedEvent = committedEvents.at(-1) ?? null;
             if (lastSavedEvent === null) {
               return yield* new OrchestrationCommandInvariantError({
@@ -1751,6 +1779,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       const envelope: CommandEnvelope = {
         command,
         settleOnly: context?.settleOnly === true,
+        managedWorkspaceMigration: context?.managedWorkspaceMigration,
         attachmentPrincipal: context?.attachmentPrincipal ?? LOCAL_LOOPBACK_ATTACHMENT_PRINCIPAL,
         result,
         executionState,

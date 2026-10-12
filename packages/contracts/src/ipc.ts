@@ -1,4 +1,5 @@
 import type { SpriteCommand, SpriteState } from "./spriteAnimation";
+import type { ResourceLibraryBridge } from "./resourceLibrary";
 import type { AhaAppearanceBridge } from "./ahaAppearance";
 import { Schema } from "effect";
 import type {
@@ -962,6 +963,7 @@ export const DESKTOP_DIAGNOSTIC_ISSUE_PREFIX = "SYNARA_DIAGNOSTIC_ISSUE ";
 export type DesktopDiagnosticReportStatus = "queued" | "sent" | "unavailable";
 
 export interface DesktopBridge {
+  resourceLibrary?: ResourceLibraryBridge;
   ahaAppearance?: AhaAppearanceBridge;
   /** Present only when the desktop main process enables baked-in Beta diagnostics. */
   betaDiagnostics?: {
@@ -998,6 +1000,14 @@ export interface DesktopBridge {
     items: readonly DesktopContextMenuItem<T>[],
     position?: { x: number; y: number },
   ) => Promise<T | null>;
+  /** Adds one renderer-owned action to the original native menu. No resource bytes cross this bridge. */
+  contextMenuExtension?: {
+    onQuery: (
+      listener: (request: { requestId: string; x: number; y: number }) => void,
+    ) => () => void;
+    respond: (requestId: string, label: string | null) => void;
+    onResult: (listener: (result: { requestId: string; selected: boolean }) => void) => () => void;
+  };
   openExternal: (url: string) => Promise<boolean>;
   showInFolder: (path: string) => Promise<void>;
   shell?: {

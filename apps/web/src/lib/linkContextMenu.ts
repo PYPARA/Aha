@@ -7,6 +7,7 @@
 // Exports: ChatLinkActionsContext, parseGitHubItemUrl, resolveGitHubItemLinkOpener,
 //          resolveGitHubItemClickOpener, showLinkContextMenu
 
+import { takeResourceMenuAction } from "./resourceContextMenuExtension";
 import { isValidGitHubRepositoryNameWithOwner } from "@synara/shared/githubRepository";
 import { createContext } from "react";
 
@@ -82,6 +83,7 @@ export async function showLinkContextMenu(input: {
     return;
   }
   const { url, actions } = input;
+  const resourceAction = takeResourceMenuAction(input.position);
   const openGitHubItem = resolveGitHubItemLinkOpener(url, actions);
   const clicked = await api.contextMenu.show(
     [
@@ -96,9 +98,16 @@ export async function showLinkContextMenu(input: {
       ...(actions ? [{ id: "open-in-browser" as const, label: "Open in browser" }] : []),
       { id: "open-external" as const, label: "Open in external browser" },
       { id: "copy-link" as const, label: "Copy link", separatorBefore: true },
+      ...(resourceAction
+        ? [{ id: "collect-resource", label: resourceAction.label, separatorBefore: true }]
+        : []),
     ],
     input.position,
   );
+  if (clicked === "collect-resource") {
+    resourceAction?.run();
+    return;
+  }
   if (clicked === "open-github-item") {
     openGitHubItem?.(url);
     return;
