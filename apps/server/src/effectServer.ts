@@ -1,5 +1,3 @@
-import { ProviderSessionRuntimeRepository } from "./persistence/Services/ProviderSessionRuntime";
-import { installWorkspaceMigration } from "./workspaceMigration/runtime";
 import { ProjectionPendingInteractionRepositoryLive } from "./persistence/Layers/ProjectionPendingInteractions";
 import http from "node:http";
 
@@ -87,7 +85,6 @@ export interface ServerShape {
     | ProviderSessionReaper
     | ProviderRuntimeReconciler
     | ProviderService
-    | ProviderSessionRuntimeRepository
     | ServerRuntimeStartup
     | ServerSettingsService
     | ThreadDeletionReactor
@@ -263,16 +260,14 @@ export const createEffectServer = Effect.fn(function* (
       subscriptionsScope,
     }),
   );
-  // Reconcile orphaned turns before copying, then finish migration before any scheduler restores work.
-  yield* reconcileRestartStuckTurns.pipe(
-    Effect.provide(ProjectionPendingInteractionRepositoryLive),
-  );
-  const workspaceMigration = yield* installWorkspaceMigration;
-  yield* Effect.promise(() => workspaceMigration.run());
   yield* startServerRuntimePipeline({
     orchestrationReactor,
-    // Already reconciled before managed workspace migration above.
-    reconcileRestartStuckTurns: Effect.void,
+    // Heal turns orphaned by the previous process exit (their in-memory runtimes
+    // died, so they can never complete on their own) before clients can observe
+    // the stale "Working" state.
+    reconcileRestartStuckTurns: reconcileRestartStuckTurns.pipe(
+      Effect.provide(ProjectionPendingInteractionRepositoryLive),
+    ),
     reactors: [
       automationScheduler,
       automationRunReactor,

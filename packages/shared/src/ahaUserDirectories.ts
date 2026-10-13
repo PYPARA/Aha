@@ -14,6 +14,5 @@ export function ahaUserDirectories(
     chats: p.join(root, "Chats"),
     studio: p.join(root, "Studio"),
     groups: p.join(root, "Groups"),
-    legacyRoot: p.join(documents, "Synara"),
   };
 }

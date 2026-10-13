@@ -3,10 +3,7 @@
 // Layer: Web orchestration helper
 
 import { type ProjectId } from "@synara/contracts";
-import {
-  legacyChatWorkspaceRoot,
-  matchesLegacyHomeChatWorkspaceRoot,
-} from "@synara/shared/projectContainers";
+import { matchesLegacyHomeChatWorkspaceRoot } from "@synara/shared/projectContainers";
 import { isWorkspaceRootWithin, workspaceRootsEqual } from "@synara/shared/threadWorkspace";
 import type { Project } from "../types";
 import { readNativeApi } from "../nativeApi";
@@ -329,9 +326,6 @@ export function isHomeChatContainerProject(
   }
   return (
     isManagedChatWorkspaceProject(project, paths) ||
-    (project.kind === "chat" &&
-      isWorkspaceRootWithin(project.cwd, legacyChatWorkspaceRoot(paths) ?? "") &&
-      !workspaceRootsEqual(project.cwd, legacyChatWorkspaceRoot(paths) ?? "")) ||
     isLegacyHomeChatContainerProject(project, paths)
   );
 }

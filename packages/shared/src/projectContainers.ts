@@ -13,14 +13,6 @@ import {
   type NormalizeWorkspaceRootForComparisonOptions,
 } from "./threadWorkspace";
 
-export function legacyChatWorkspaceRoot(paths: ProjectContainerWorkspacePaths): string | null {
-  const configured = paths.chatWorkspaceRoot?.replaceAll("\\", "/").replace(/\/+$/u, "");
-  if (configured?.endsWith("/Aha/Chats"))
-    return configured.slice(0, -"/Aha/Chats".length) + "/Synara";
-  return paths.homeDir
-    ? paths.homeDir.replaceAll("\\", "/").replace(/\/+$/u, "") + "/Documents/Synara"
-    : null;
-}
 export interface ProjectContainerWorkspacePaths {
   readonly homeDir: string | null | undefined;
   readonly chatWorkspaceRoot?: string | null | undefined;
@@ -49,8 +41,7 @@ export function matchesLegacyHomeChatWorkspaceRoot(
   }
   return (
     workspaceRootsEqual(workspaceRoot, chatWorkspaceRoot, options) ||
-    workspaceRootsEqual(workspaceRoot, homeDir, options) ||
-    workspaceRootsEqual(workspaceRoot, legacyChatWorkspaceRoot(paths) ?? chatWorkspaceRoot, options)
+    workspaceRootsEqual(workspaceRoot, homeDir, options)
   );
 }
 

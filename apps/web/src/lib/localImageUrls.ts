@@ -1,4 +1,3 @@
-import { migratedWorkspacePath } from "./workspaceMigrationPaths";
 // FILE: localImageUrls.ts
 // Purpose: Builds authenticated local-image URLs for markdown image previews and downloads.
 // Layer: Web utility
@@ -52,8 +51,8 @@ export function isLocalImageMarkdownSrc(src: string | undefined): src is string 
 }
 
 // Grants must name the same decoded file as the preview HTTP request.
-export function localImageAbsolutePath(src: string, cwd?: string): string | null {
-  const normalized = migratedWorkspacePath(normalizeMarkdownImagePath(src), cwd);
+export function localImageAbsolutePath(src: string): string | null {
+  const normalized = normalizeMarkdownImagePath(src);
   return isLocalImageMarkdownSrc(src) && isLocalAbsolutePath(normalized) ? normalized : null;
 }
 
@@ -68,9 +67,7 @@ export function buildLocalImageUrl(input: {
   /** Changes the preview URL so an explicit reload bypasses browser caching. */
   readonly cacheKey?: string | number | undefined;
 }): string {
-  const params = new URLSearchParams({
-    path: migratedWorkspacePath(normalizeMarkdownImagePath(input.src), input.cwd),
-  });
+  const params = new URLSearchParams({ path: normalizeMarkdownImagePath(input.src) });
   if (input.cwd) {
     params.set("cwd", input.cwd);
   }

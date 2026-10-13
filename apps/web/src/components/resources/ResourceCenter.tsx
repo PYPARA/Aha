@@ -1,4 +1,3 @@
-import { cn } from "~/lib/utils";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -67,7 +66,7 @@ function Preview({ entry, large = false }: { entry: ResourceEntry; large?: boole
     <FileIcon className="size-9 text-muted-foreground" />
   );
 }
-export default function ResourceCenter({ headerClassName }: { headerClassName?: string } = {}) {
+export default function ResourceCenter() {
   const tr = useAhaTranslation();
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -260,22 +259,17 @@ export default function ResourceCenter({ headerClassName }: { headerClassName?: 
     return <div className="p-8">{tr("Resource center is available in the desktop app.")}</div>;
   return (
     <div
-      className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       data-testid="resource-center"
     >
-      <header
-        className={cn(
-          "drag-region flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-4",
-          headerClassName,
-        )}
-      >
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
         <div>
           <h1 className="text-sm font-semibold">{tr("Resource center")}</h1>
           <p className="text-xs text-muted-foreground">
             {tr("Collect, organize and reuse your creative files.")}
           </p>
         </div>
-        <div className="flex gap-2 [-webkit-app-region:no-drag]">
+        <div className="flex flex-wrap gap-2">
           <Button variant="ghost" disabled={busy} onClick={() => void execute({ op: "refresh" })}>
             {tr("Refresh")}
           </Button>
@@ -291,26 +285,30 @@ export default function ResourceCenter({ headerClassName }: { headerClassName?: 
       {error || library.error || library.data?.error || page.error ? (
         <div
           role="alert"
-          className="whitespace-pre-wrap border-b border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive"
+          className="shrink-0 whitespace-pre-wrap border-b border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive"
         >
           {tr(error ?? library.data?.error ?? library.error?.message ?? page.error?.message ?? "")}
         </div>
       ) : null}
       {!library.data?.root ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-          <FolderIcon className="size-12 text-muted-foreground" />
+        <div className="flex min-h-0 flex-1 flex-col items-center gap-4 overflow-auto p-8 text-center">
+          <FolderIcon className="mt-auto size-12 shrink-0 text-muted-foreground" />
           <h2 className="text-lg font-medium">{tr("A home for your creative resources")}</h2>
           <p className="max-w-lg text-sm text-muted-foreground">
             {tr(
               "Choose one folder for your library. Projects become real folders, and your files remain available in Finder.",
             )}
           </p>
-          <Button disabled={busy} onClick={() => void execute({ op: "chooseRoot" })}>
+          <Button
+            className="mb-auto"
+            disabled={busy}
+            onClick={() => void execute({ op: "chooseRoot" })}
+          >
             {tr("Choose resource folder")}
           </Button>
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 overflow-auto">
           <aside className="w-52 shrink-0 overflow-y-auto border-r border-border p-3">
             <Button
               className="mb-3 w-full justify-start"

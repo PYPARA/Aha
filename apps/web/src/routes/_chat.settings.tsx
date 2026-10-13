@@ -1,4 +1,3 @@
-import { StorageSettingsPanel } from "~/components/settings/StorageSettingsPanel";
 import { ImageProvidersSettingsPanel } from "~/components/settings/ImageProvidersSettingsPanel";
 import { useAhaAppearance, useAhaTranslation } from "../aha/AppearanceProvider";
 import { AhaAppearancePanel } from "../aha/AppearancePanel";
@@ -674,7 +673,6 @@ function SettingsRouteView() {
   const renderGeneralPanel = () => (
     <div className="space-y-6">
       <SafariAccessSetupButton />
-      <StorageSettingsPanel />
 
       <SettingsSection title={tr("Core defaults")}>
         <SettingsRow

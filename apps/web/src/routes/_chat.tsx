@@ -1,4 +1,3 @@
-import { StorageMigrationSync } from "~/components/settings/StorageSettingsPanel";
 import { ResourceCollectionDialog } from "~/components/resources/ResourceCollectionDialog";
 import type { ResolvedKeybindingsConfig } from "@synara/contracts";
 import { AhaBackgroundLayer } from "../aha/BackgroundLayer";
@@ -648,7 +647,6 @@ function ChatRouteLayout() {
     >
       <AhaBackgroundLayer />
       <ResourceCollectionDialog />
-      <StorageMigrationSync />
       <ThreadRetentionMaintenanceToast />
       <ChatRouteGlobalShortcuts />
       <AppRailSlotProvider value={railSlot}>

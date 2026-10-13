@@ -17060,60 +17060,6 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
-  it("atomically commits managed workspace and native runtime paths and survives projection replay", async () => {
-    const harness = await createHarness();
-    const projectId = ProjectId.makeUnsafe("project-1"),
-      threadId = ThreadId.makeUnsafe("thread-1");
-    const original = "/tmp/provider-project",
-      target = "/tmp/aha-managed-project";
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "project.meta.update",
-        commandId: CommandId.makeUnsafe("mark-managed-chat"),
-        projectId,
-        kind: "chat",
-      }),
-    );
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.meta.update",
-        commandId: CommandId.makeUnsafe("managed-working-dir"),
-        threadId,
-        workingDirectory: original + "/nested",
-      }),
-    );
-    const payload = JSON.stringify({ cwd: original, opaque: "keep" });
-    const cursor = JSON.stringify({ threadId: "native-session-id" });
-    await Effect.runPromise(
-      harness.sql`INSERT INTO provider_session_runtime (thread_id, provider_name, provider_instance_id, adapter_key, runtime_mode, status, lifecycle_generation, last_seen_at, resume_cursor_json, runtime_payload_json) VALUES (${threadId}, 'codex', 'codex', 'codex', 'full-access', 'stopped', 'test-generation', ${new Date().toISOString()}, ${cursor}, ${payload})`,
-    );
-    await Effect.runPromise(
-      harness.engine.dispatch(
-        {
-          type: "project.meta.update",
-          commandId: CommandId.makeUnsafe("managed-cutover"),
-          projectId,
-          workspaceRoot: target,
-        },
-        { managedWorkspaceMigration: { source: original, target } },
-      ),
-    );
-    const rows = await Effect.runPromise(
-      harness.sql<{
-        cursor: string;
-        payload: string;
-      }>`SELECT resume_cursor_json AS cursor, runtime_payload_json AS payload FROM provider_session_runtime WHERE thread_id = ${threadId}`,
-    );
-    expect(JSON.parse(rows[0]!.cursor)).toEqual({ threadId: "native-session-id" });
-    expect(JSON.parse(rows[0]!.payload)).toEqual({ cwd: target, opaque: "keep" });
-    await Effect.runPromise(harness.engine.repairState());
-    const replayed = await Effect.runPromise(harness.engine.getReadModel());
-    expect(replayed.projects.find((p) => p.id === projectId)?.workspaceRoot).toBe(target);
-    expect(replayed.threads.find((t) => t.id === threadId)?.workingDirectory).toBe(
-      target + "/nested",
-    );
-  });
-
   it.each([false, true])(
     "preserves the native cursor when relocating a project (background tasks: %s)",
     async (backgroundTasks) => {

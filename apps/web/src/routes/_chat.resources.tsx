@@ -1,30 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
 import ResourceCenter from "~/components/resources/ResourceCenter";
 import { RouteInsetSurface } from "~/components/RouteInsetSurface";
-import { CHAT_SURFACE_HEADER_HEIGHT_CLASS } from "~/components/chat/chatHeaderControls";
-import {
-  useDesktopTopBarTrafficLightGutterClassName,
-  useDesktopTopBarWindowControlsGutterClassName,
-} from "~/hooks/useDesktopTopBarGutter";
+import { RouteSurface, RouteSurfaceHeader } from "~/components/RouteSurface";
 import { useRailShellStore } from "~/railShellStore";
-import { cn } from "~/lib/utils";
 export const Route = createFileRoute("/_chat/resources")({
   beforeLoad: () => useRailShellStore.getState().selectRouteItem("resources"),
   component: ResourceRoute,
 });
 function ResourceRoute() {
-  const trafficLightGutter = useDesktopTopBarTrafficLightGutterClassName();
-  const windowControlsGutter = useDesktopTopBarWindowControlsGutterClassName();
   return (
     <RouteInsetSurface>
-      <ResourceCenter
-        headerClassName={cn(
-          CHAT_SURFACE_HEADER_HEIGHT_CLASS,
-          "py-0",
-          trafficLightGutter,
-          windowControlsGutter,
-        )}
-      />
+      <RouteSurface>
+        <RouteSurfaceHeader className="shrink-0" />
+        <div className="app-content-surface flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--app-rail-block-radii,0px)]">
+          <ResourceCenter />
+        </div>
+      </RouteSurface>
     </RouteInsetSurface>
   );
 }

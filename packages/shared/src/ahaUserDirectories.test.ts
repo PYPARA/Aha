@@ -8,7 +8,6 @@ describe("Aha user directories", () => {
       studio: "/Volumes/Files/Documents/Aha/Studio",
       groups: "/Volumes/Files/Documents/Aha/Groups",
       resource: "/Volumes/Files/Documents/Aha/Resource",
-      legacyRoot: "/Volumes/Files/Documents/Synara",
     });
   });
   it("falls back to a platform-correct Documents path for standalone servers", () => {

@@ -1,4 +1,3 @@
-import { useWorkspaceMigrationPaths } from "~/lib/workspaceMigrationPaths";
 import { ResourceChatContext } from "../resources/resourceLibrary";
 import { ResourceCollectButton, resourceContextMenu } from "../resources/ResourceCollectionDialog";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
@@ -48,7 +47,6 @@ export function GeneratedMarkdownImage(props: GeneratedMarkdownImageProps) {
 }
 
 function GeneratedMarkdownImageContent(props: GeneratedMarkdownImageProps) {
-  useWorkspaceMigrationPaths();
   const { src, alt, cwd, onImageExpand } = props;
   const tr = useAhaTranslation();
   const resourceThreadId = useContext(ResourceChatContext);
@@ -60,7 +58,7 @@ function GeneratedMarkdownImageContent(props: GeneratedMarkdownImageProps) {
       mounted.current = false;
     };
   }, []);
-  const absolutePath = localImageAbsolutePath(src, cwd);
+  const absolutePath = localImageAbsolutePath(src);
   const [needsGrant, setNeedsGrant] = useState(false);
   const [previewGrant, setPreviewGrant] = useState<string>();
   const grantOptions = projectLocalPreviewGrantQueryOptions({

@@ -1,4 +1,3 @@
-import { migratedWorkspacePath } from "./lib/workspaceMigrationPaths";
 import {
   isLocalAbsolutePath,
   isWorkspaceRelativePathSafe,
@@ -280,10 +279,7 @@ export function resolveMarkdownFileLinkTarget(
     ? parseFileUrlHref(rawHref)
     : null;
   const source = fileUrlTarget ?? stripSearchAndHash(rawHref);
-  const decodedPath = migratedWorkspacePath(
-    fileUrlTarget ? source.path.trim() : safeDecode(source.path.trim()),
-    cwd,
-  );
+  const decodedPath = fileUrlTarget ? source.path.trim() : safeDecode(source.path.trim());
   const decodedHash = safeDecode(source.hash.trim());
 
   if (decodedPath.length === 0) return null;

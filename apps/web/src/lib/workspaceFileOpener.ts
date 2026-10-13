@@ -1,4 +1,3 @@
-import { migratedWorkspacePath } from "./workspaceMigrationPaths";
 // FILE: workspaceFileOpener.ts
 // Purpose: Context + helpers that let file references rendered deep in the
 //          chat tree (markdown links, mention chips, work-log rows) open in an
@@ -80,10 +79,7 @@ export function resolveWorkspaceDirectoryOpenTarget(
   if (!workspaceRoot) {
     return null;
   }
-  const withoutPosition = migratedWorkspacePath(
-    rawPath.trim().replace(FILE_POSITION_SUFFIX_PATTERN, ""),
-    workspaceRoot,
-  );
+  const withoutPosition = rawPath.trim().replace(FILE_POSITION_SUFFIX_PATTERN, "");
   if (withoutPosition.length === 0) {
     return null;
   }
@@ -117,10 +113,7 @@ export function resolveWorkspaceFileOpenTarget(
   rawPath: string,
   workspaceRoot: string | null,
 ): string | null {
-  const withoutPosition = migratedWorkspacePath(
-    rawPath.trim().replace(FILE_POSITION_SUFFIX_PATTERN, ""),
-    workspaceRoot,
-  );
+  const withoutPosition = rawPath.trim().replace(FILE_POSITION_SUFFIX_PATTERN, "");
   if (withoutPosition.length === 0) {
     return null;
   }
@@ -163,10 +156,7 @@ export function resolveDockFileOpenTarget(
   rawPath: string,
   workspaceRoot: string | null,
 ): string | null {
-  const withoutPosition = migratedWorkspacePath(
-    rawPath.trim().replace(FILE_POSITION_SUFFIX_PATTERN, ""),
-    workspaceRoot,
-  );
+  const withoutPosition = rawPath.trim().replace(FILE_POSITION_SUFFIX_PATTERN, "");
   if (withoutPosition.length === 0) {
     return null;
   }

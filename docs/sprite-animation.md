@@ -21,6 +21,53 @@ conversation bindings or server asset handles. Imported references can be
 uploaded again using **Use as reference**. Keep a package backup before clearing
 browser data. The app shows storage failures instead of claiming a successful save.
 
+## Storage locations and lifecycle
+
+The workbench currently splits editable projects and generation data across two
+stores. It does not automatically save either into the Resource center.
+
+| Data                                                                       | Location                                                                                          |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Editable project, imported/adopted image Blobs, actions and frame settings | Current browser profile and origin's IndexedDB database `aha-sprites-v1`, object store `projects` |
+| Generation context, candidate records and conversation bindings            | `<stateDir>/sprites/<projectId>.json` and `thread-<threadId>.txt`                                 |
+| Uploaded references, generated images, processed frames and thumbnails     | `<stateDir>/drawing/assets/<sha256>.original`, `.edit` and `.thumbnail`                           |
+| Drawing jobs and asset metadata                                            | `<stateDir>/state.sqlite`                                                                         |
+| Generation responses awaiting local saving/recovery                        | `<stateDir>/drawing/pending/<jobId>.json`; removed when saving completes normally                 |
+| Exported project packages and animation ZIPs                               | The destination used by the download flow                                                         |
+
+`stateDir` is `userdata` beneath the application's data root for normal operation,
+or `dev` when using the development web server. The standard production default
+root is `~/.aha-next`; release flavor, `AHA_HOME` and launch configuration can
+override it. These are path rules, not a report of the current running instance's
+directory. IndexedDB belongs to the browser/Electron profile, not this server
+directory; backing up the server directory alone does not back up editable
+projects. Clearing site data or changing browser profiles/origins can make those
+projects unavailable. If connected to a remote server, server paths are on that
+server while IndexedDB remains in the client profile.
+
+**Delete currently removes only the local IndexedDB project.** It does not remove
+server generation records, conversation bindings or their assets. The drawing
+service cleans up otherwise unused assets older than 24 hours, but persistent
+sprite records protect their references, sources and processed frames from that
+cleanup. Deleting a local project therefore does not reclaim all associated
+server storage. Adopting generated images also stores image Blobs in IndexedDB,
+so client and server copies can both occupy space.
+
+Use **Save package** before clearing browser data or moving profiles. An
+`.aha-sprite.zip` transfers the editable project, included images and provenance,
+but not the full server generation history, live conversation, credentials or
+server asset handles. An atlas/PNG-sequence export is an output artifact rather
+than a complete editable-project backup. Downloads are not automatically added
+to the Resource center.
+
+Sharing the drawing asset store provides useful content deduplication and
+generation recovery. The remaining limitations are the browser-only source of
+truth for editable projects and the incomplete deletion lifecycle. A future
+storage change should persist editable projects in the application data directory,
+use IndexedDB as a cache, support explicit collection into the Resource center,
+and reclaim assets using live references across projects and drawing jobs. This
+is a recommendation; no migration or automatic cleanup change is implemented.
+
 ## Export format (version 1)
 
 Both exports are ZIP archives with `animation.json`. Each action has its own

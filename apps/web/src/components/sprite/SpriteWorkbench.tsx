@@ -493,7 +493,7 @@ export default function SpriteWorkbench() {
   if (!loaded) return <div className="p-6">{tr("Loading…")}</div>;
   return (
     <div
-      className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       data-testid="sprite-workbench"
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes("Files")) e.preventDefault();
@@ -504,7 +504,7 @@ export default function SpriteWorkbench() {
         safe(() => importImages(Array.from(e.dataTransfer.files)));
       }}
     >
-      <header className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-3">
         <h1 className="mr-2 text-sm font-semibold">{tr("Sprite animation")}</h1>
         <input
           className={`${inputClass} w-36`}
@@ -573,7 +573,7 @@ export default function SpriteWorkbench() {
         >
           {tr("Delete")}
         </Button>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <DrawingModelPicker
             providers={providers.data ?? []}
             providerId={project.providerId}
@@ -591,7 +591,7 @@ export default function SpriteWorkbench() {
       {error && (
         <div
           role="alert"
-          className="flex items-center gap-3 border-b bg-destructive/10 px-4 py-2 text-sm text-destructive"
+          className="flex shrink-0 items-center gap-3 border-b bg-destructive/10 px-4 py-2 text-sm text-destructive"
         >
           <span className="flex-1">{tr(error)}</span>
           <button onClick={() => setError("")} aria-label={tr("Dismiss")}>
