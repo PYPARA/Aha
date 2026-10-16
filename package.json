@@ -4,8 +4,11 @@
   "license": "MIT",
   "workspaces": {
     "packages": [
-      "apps/*",
-      "packages/*",
+      "apps/desktop",
+      "apps/server",
+      "apps/web",
+      "packages/contracts",
+      "packages/shared",
       "scripts"
     ],
     "catalog": {
@@ -27,15 +30,12 @@
     "dev": "node scripts/dev-runner.ts dev",
     "dev:server": "node scripts/dev-runner.ts dev:server",
     "dev:web": "node scripts/dev-runner.ts dev:web",
-    "dev:marketing": "turbo run dev --filter=@synara/marketing",
     "dev:desktop": "node scripts/dev-runner.ts dev:desktop",
     "electron": "bun run start:desktop",
     "electron:dev": "node scripts/dev-runner.ts dev:desktop --home-dir ./.aha-dev --port 4773",
     "start": "turbo run start --filter=@synara/cli",
     "start:desktop": "turbo run start --filter=@synara/desktop",
-    "start:marketing": "turbo run preview --filter=@synara/marketing",
     "build": "turbo run build",
-    "build:marketing": "turbo run build --filter=@synara/marketing",
     "build:desktop": "turbo run build --filter=@synara/desktop --filter=@synara/cli",
     "postinstall": "node scripts/patch-workspace-typescript.ts && effect-tsgo patch --typescript --typescript-package @typescript/native",
     "typecheck": "effect-tsgo patch --typescript --typescript-package @typescript/native && turbo run typecheck",
@@ -60,7 +60,6 @@
     "@effect/tsgo": "0.41.0",
     "@types/node": "catalog:",
     "@typescript/native": "npm:typescript@7.0.2",
-    "@vitest/coverage-v8": "4.1.10",
     "oxfmt": "0.40.0",
     "oxlint": "1.56.0",
     "turbo": "^2.9.14",

@@ -20,9 +20,6 @@ release/
 /.synara/
 /.synara-*/
 .idea/
-apps/web/.playwright
-apps/web/playwright-report
-apps/web/test-results
 .playwright-cli/
 output/playwright/
 apps/web/src/components/__screenshots__
@@ -60,8 +57,3 @@ __screenshots__/
 /output/
 /.playwright-mcp/
 /.playwright-cli/
-/apps/marketing/.source/
-/apps/marketing/.next/
-/apps/marketing/.open-next/
-/apps/marketing/playwright-report/
-/apps/marketing/test-results/

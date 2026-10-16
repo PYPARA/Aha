@@ -41,6 +41,8 @@ function centralIconPrunePlugin(): Plugin {
       order: "pre",
       sequential: true,
       async handler() {
+        // Browser fixtures need MSW in development; it is not an application asset.
+        await fs.rm(path.join(resolvedOutDir, "mockServiceWorker.js"), { force: true });
         await pruneProductionIcons(path.join(resolvedRoot, "public"), resolvedOutDir, [
           path.join(resolvedRoot, "src"),
           path.resolve(resolvedRoot, "../../packages/contracts/src"),
