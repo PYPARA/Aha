@@ -6,6 +6,7 @@ import {
   deriveLiteralCommand,
   deriveReadableCommandDisplay,
   deriveReadableToolTitle,
+  deriveSpriteToolTitle,
   deriveSynaraMcpToolTitle,
   extractWebFetchUrl,
   isSynaraBrowserToolCall,
@@ -448,4 +449,22 @@ describe("resolveCommandVisualKind", () => {
     expect(resolveCommandVisualKind("env -u GH_TOKEN gh pr status")).toBe("github");
     expect(resolveCommandVisualKind("hub pull-request -m test")).toBe("github");
   });
+});
+
+it("names sprite operations from Codex and other provider argument payloads", () => {
+  expect(
+    deriveSpriteToolTitle({
+      toolName: "mcp__synara__sprite_animation",
+      payload: { data: { item: { arguments: '{"operation":"generate","kind":"animation"}' } } },
+    }),
+  ).toBe("Prepare sprite animation plan");
+  expect(
+    deriveSpriteToolTitle({
+      toolName: "sprite_animation",
+      payload: { input: { operation: "get" } },
+    }),
+  ).toBe("Read sprite context");
+  expect(
+    deriveSpriteToolTitle({ toolName: "read", payload: { input: { operation: "get" } } }),
+  ).toBeNull();
 });

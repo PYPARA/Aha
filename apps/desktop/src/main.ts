@@ -1,3 +1,4 @@
+import { registerSpriteLibrary } from "./sprites/ipc";
 import { attachNativeContextMenu } from "./nativeContextMenuBridge";
 import { ahaUserDirectories } from "@synara/shared/ahaUserDirectories";
 import { registerResourceLibrary } from "./resources/ipc";
@@ -5011,6 +5012,10 @@ function requestGracefulAppQuit(reason: string): void {
 }
 
 function registerIpcHandlers(): void {
+  registerSpriteLibrary(
+    ahaUserDirectories(OS.homedir(), app.getPath("documents")).sprite,
+    () => mainWindow,
+  );
   registerResourceLibrary(
     STATE_DIR,
     () => mainWindow,

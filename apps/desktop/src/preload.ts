@@ -1,3 +1,4 @@
+import { SPRITE_LIBRARY_CHANNEL } from "@synara/contracts/spriteLibrary";
 import { RESOURCE_CHANNELS as RESOURCES } from "@synara/contracts/resourceLibrary";
 import { AHA_APPEARANCE_CHANNELS as AHA } from "@synara/contracts/ahaChannels";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
@@ -131,6 +132,7 @@ function recordBrowserActivity(activity: DesktopDiagnosticActivity): void {
 }
 
 contextBridge.exposeInMainWorld("desktopBridge", {
+  spriteLibrary: { request: (input) => ipcRenderer.invoke(SPRITE_LIBRARY_CHANNEL, input) },
   resourceLibrary: {
     request: (input) => ipcRenderer.invoke(RESOURCES.request, input),
     onChanged: (listener) => {

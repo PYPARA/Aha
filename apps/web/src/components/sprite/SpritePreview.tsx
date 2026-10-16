@@ -62,7 +62,7 @@ export function SpritePreview({
     ctx.globalAlpha = 1;
   }, [bitmaps, frame, previous, grid, project.width, project.height]);
   return (
-    <div className="relative flex min-h-48 flex-1 items-center justify-center overflow-auto rounded-lg border bg-muted/20 p-5">
+    <div className="relative flex min-h-48 shrink-0 items-center justify-center overflow-auto rounded-lg border bg-muted/20 p-5">
       <canvas
         ref={canvasRef}
         width={project.width}
@@ -97,7 +97,15 @@ export function SpritePreview({
     </div>
   );
 }
-export function SpriteThumbnail({ blob, label }: { blob: Blob; label: string }) {
+export function SpriteThumbnail({
+  blob,
+  label,
+  compact = false,
+}: {
+  blob: Blob;
+  label: string;
+  compact?: boolean;
+}) {
   const [url, setUrl] = useState("");
   useEffect(() => {
     const next = URL.createObjectURL(blob);
@@ -108,7 +116,7 @@ export function SpriteThumbnail({ blob, label }: { blob: Blob; label: string }) 
     <img
       src={url || undefined}
       alt={label}
-      className="size-12 object-contain [image-rendering:pixelated]"
+      className={`${compact ? "size-8" : "size-12"} shrink-0 object-contain [image-rendering:pixelated]`}
     />
   );
 }

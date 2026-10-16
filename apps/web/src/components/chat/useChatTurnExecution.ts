@@ -120,6 +120,7 @@ type ChatTurnExecutionInput = Pick<
   | "beginLocalDispatch"
   | "isLocalDraftThread"
   | "threadNotes"
+  | "beforeTurnDispatch"
   | "runProjectScript"
   | "persistThreadSettingsForNextTurn"
   | "rememberCustomBinaryPathForDispatch"
@@ -165,6 +166,7 @@ export function useChatTurnExecution({
   beginLocalDispatch,
   isLocalDraftThread,
   threadNotes,
+  beforeTurnDispatch,
   runProjectScript,
   persistThreadSettingsForNextTurn,
   rememberCustomBinaryPathForDispatch,
@@ -281,6 +283,7 @@ export function useChatTurnExecution({
         }
         return false;
       }
+      let surfaceInitializationFailed = false;
       let createdServerThreadForLocalDraft = false;
       let createdWorktreeForSendPath: string | null = null;
       let switchedToLocalCheckout = false;
@@ -659,6 +662,14 @@ export function useChatTurnExecution({
               "Choose how to resume the held message before sending another message.",
             );
           }
+          // Embedded surfaces initialize their context only after promotion and
+          // before dispatch. Failure uses the normal draft/attachment restore path.
+          try {
+            await beforeTurnDispatch?.(threadIdForSend);
+          } catch (error) {
+            surfaceInitializationFailed = true;
+            throw error;
+          }
           await api.orchestration
             .dispatchCommand({
               type: "thread.turn.start",
@@ -787,7 +798,12 @@ export function useChatTurnExecution({
               () => undefined,
             );
         }
-        if (createdServerThreadForLocalDraft && !turnStartSucceeded && !baseBranchForWorktree) {
+        if (
+          createdServerThreadForLocalDraft &&
+          !turnStartSucceeded &&
+          !baseBranchForWorktree &&
+          !surfaceInitializationFailed
+        ) {
           // This rollback cleans up a retryable draft promotion; do not tombstone the draft id.
           await api.orchestration
             .dispatchCommand({
@@ -964,6 +980,7 @@ export function useChatTurnExecution({
       return turnStartSucceeded;
     },
     [
+      beforeTurnDispatch,
       isServerThread,
       setStoreThreadWorkspace,
       clearLocalDispatchWorktreeSetup,

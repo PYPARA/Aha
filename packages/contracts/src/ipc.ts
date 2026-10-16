@@ -1,4 +1,5 @@
-import type { SpriteCommand, SpriteState } from "./spriteAnimation";
+import type { SpriteLibraryBridge } from "./spriteLibrary";
+import type { SpriteCommand, SpriteState, SpritePlanConfirmInput } from "./spriteAnimation";
 import type { ResourceLibraryBridge } from "./resourceLibrary";
 import type { AhaAppearanceBridge } from "./ahaAppearance";
 import { Schema } from "effect";
@@ -964,6 +965,7 @@ export type DesktopDiagnosticReportStatus = "queued" | "sent" | "unavailable";
 
 export interface DesktopBridge {
   resourceLibrary?: ResourceLibraryBridge;
+  spriteLibrary?: SpriteLibraryBridge;
   ahaAppearance?: AhaAppearanceBridge;
   /** Present only when the desktop main process enables baked-in Beta diagnostics. */
   betaDiagnostics?: {
@@ -1507,6 +1509,8 @@ export interface NativeApi {
     onEvent: (callback: (event: TodoStreamEvent) => void) => () => void;
   };
   imageGeneration: {
+    spriteForThread: (input: { threadId: string }) => Promise<SpriteState | null>;
+    spriteConfirm: (input: SpritePlanConfirmInput) => Promise<SpriteState>;
     spriteCommand: (input: SpriteCommand) => Promise<SpriteState>;
     listProviders: () => Promise<ReadonlyArray<ImageProvider>>;
     upsertProvider: (input: ImageProviderInput) => Promise<ImageProvider>;

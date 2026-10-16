@@ -939,16 +939,20 @@ export function deriveTerminalAssistantMessageIds(
   return terminalAssistantMessageIds;
 }
 
-// Server-posted coordinator notices and provider handoff boundaries keep their own
-// row: they are not turn work, so they never merge into or fold with a turn.
+// Notices, handoff boundaries and interactive sprite plans keep their own row
+// rather than merging into assistant work or a settled turn disclosure.
 export function isStandaloneWorkEntry(
   entry: Pick<
     WorkLogEntry,
-    "synaraWorkerNotice" | "providerHandoff" | "turnFailure" | "subagentRun"
+    "synaraWorkerNotice" | "providerHandoff" | "turnFailure" | "subagentRun" | "spritePlan"
   >,
 ): boolean {
   return Boolean(
-    entry.synaraWorkerNotice || entry.providerHandoff || entry.turnFailure || entry.subagentRun,
+    entry.synaraWorkerNotice ||
+    entry.providerHandoff ||
+    entry.turnFailure ||
+    entry.subagentRun ||
+    entry.spritePlan,
   );
 }
 
@@ -1233,6 +1237,55 @@ export function deriveMessagesTimelineRows(input: {
     });
   }
 
+  // A generation plan is the response's next action. Present it after the
+  // assistant's explanation, while retaining its own row and saved identity.
+  // Work backwards so multiple plans in one response retain their order.
+  for (let index = nextRows.length - 1; index >= 0; index -= 1) {
+    const row = nextRows[index]!;
+    if (row.kind !== "work" || !row.groupedEntries.every((entry) => entry.spritePlan)) continue;
+    let lastAssistantIndex = index;
+    for (let scan = index + 1; scan < nextRows.length; scan += 1) {
+      const candidate = nextRows[scan]!;
+      if (
+        isBackgroundTaskCompletionRow(candidate) ||
+        (candidate.kind === "message" && candidate.message.role === "user")
+      )
+        break;
+      if (
+        (candidate.kind === "message" && candidate.message.role === "assistant") ||
+        candidate.kind === "message-segment"
+      )
+        lastAssistantIndex = scan;
+    }
+    if (lastAssistantIndex > index) {
+      nextRows.splice(index, 1);
+      nextRows.splice(lastAssistantIndex, 0, row);
+    }
+  }
+
+  // Compact adjacent abandoned plans only; user messages remain hard boundaries.
+  for (let i = nextRows.length - 1; i > 0; i--) {
+    const row = nextRows[i]!,
+      previous = nextRows[i - 1]!;
+    if (
+      row.kind !== "work" ||
+      previous.kind !== "work" ||
+      !row.groupedEntries.every((e) => e.spritePlan?.historical) ||
+      !previous.groupedEntries.every((e) => e.spritePlan?.historical)
+    )
+      continue;
+    const entries = [...previous.groupedEntries, ...row.groupedEntries];
+    const first = entries[0]!;
+    const pointers = entries.flatMap(
+      (e) => e.spritePlan?.history ?? (e.spritePlan ? [e.spritePlan] : []),
+    );
+    nextRows[i - 1] = {
+      ...previous,
+      groupedEntries: [{ ...first, spritePlan: { ...first.spritePlan!, history: pointers } }],
+    };
+    nextRows.splice(i, 1);
+  }
+
   if (input.conversationOnly !== true && input.turnTimingByTurnId) {
     markInterruptedTurnsWithoutHeader(nextRows, input.turnTimingByTurnId);
   }
@@ -1488,9 +1541,8 @@ function collapseSettledTurns(
         break;
       }
       if (prev.kind === "work") {
-        // Coordinator monitor rows are server-posted system pills, not turn
-        // work — folding them into a collapsed turn would hide them on
-        // conversation-only surfaces.
+        // Standalone notices and interactive artifacts stay visible after the
+        // turn ends, while the surrounding narration and tool work still fold.
         if (prev.groupedEntries.some(isStandaloneWorkEntry)) continue;
         foldIndices.push(scan);
         continue;
@@ -1895,6 +1947,9 @@ function workLogEntryContentEqual(a: WorkLogEntry, b: WorkLogEntry): boolean {
     a.itemType === b.itemType &&
     a.requestKind === b.requestKind &&
     a.activityKind === b.activityKind &&
+    a.spritePlan?.planId === b.spritePlan?.planId &&
+    a.spritePlan?.historical === b.spritePlan?.historical &&
+    JSON.stringify(a.spritePlan?.history) === JSON.stringify(b.spritePlan?.history) &&
     a.toolName === b.toolName &&
     a.toolCallId === b.toolCallId &&
     a.toolStatus === b.toolStatus &&

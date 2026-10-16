@@ -1438,6 +1438,10 @@ function installDeterministicSendNativeApi(options?: {
           if (options?.rejectTurnStart && command.type === "thread.turn.start") {
             throw new Error("Turn start failed for test.");
           }
+          if (options?.projectThreadCommands && command.type === "project.create") {
+            recordProjectCreateCommand(command);
+            useStore.getState().syncServerReadModel(fixture.snapshot);
+          }
           if (options?.projectThreadCommands && command.type === "thread.create") {
             const snapshot = addThreadToSnapshot(fixture.snapshot, command.threadId);
             fixture.snapshot = {
@@ -15107,6 +15111,305 @@ describe("ChatView transcript geometry (full app)", () => {
       expect(transitionFrames).toBe(0);
     } finally {
       await mounted.cleanup();
+    }
+  });
+  it("sprite project library reuses the normal composer and retries first-message initialization", async () => {
+    const { SpriteProjectDataSchema } = await import("@synara/contracts/spriteLibrarySchema");
+    type Data = import("@synara/contracts/spriteLibrary").SpriteProjectData;
+    const projects = new Map<string, Data>();
+    const imageFiles = new Map<string, Uint8Array>();
+    let failAssociation = false;
+    const previousBridge = window.desktopBridge;
+    const spriteBridge: import("@synara/contracts/spriteLibrary").SpriteLibraryBridge = {
+      request: async <T,>(
+        command: import("@synara/contracts/spriteLibrary").SpriteLibraryCommand,
+      ): Promise<T> => {
+        let result: unknown;
+        switch (command.op) {
+          case "list":
+            result = {
+              root: "/Documents/Aha/Sprite",
+              projects: [...projects.values()].map((p) => ({
+                id: p.id,
+                name: p.name,
+                updatedAt: p.updatedAt,
+                actionCount: p.actions.length,
+                deleting: false,
+              })),
+            };
+            break;
+          case "save":
+            if (failAssociation && command.project.threadIds.length === 3) {
+              failAssociation = false;
+              throw new Error("Project association save failed");
+            }
+            for (const image of command.images)
+              imageFiles.set(`${command.project.id}/${image.file}`, image.bytes);
+            if (command.thumbnail)
+              imageFiles.set(`${command.project.id}/thumbnail.png`, command.thumbnail);
+            projects.set(command.project.id, SpriteProjectDataSchema.parse(command.project));
+            break;
+          case "get":
+            result = projects.get(command.id);
+            break;
+          case "readImage":
+            result = imageFiles.get(`${command.id}/${command.file}`);
+            if (!result) throw new Error("No image");
+            break;
+          case "rename": {
+            const p = projects.get(command.id)!;
+            projects.set(command.id, { ...p, name: command.name });
+            break;
+          }
+          case "finishDelete":
+            projects.delete(command.id);
+            break;
+        }
+        return result as T;
+      },
+    };
+
+    const mounted = await mountChatView({
+      viewport: { name: "sprite", width: 1440, height: 960 },
+      configureFixture: (next) => {
+        next.welcome = {
+          ...next.welcome,
+          homeDir: "/Users/tester",
+          chatWorkspaceRoot: "/Users/tester/Documents/Synara",
+        };
+      },
+      snapshot: withHomeChatProject(
+        createSnapshotForTargetUser({
+          targetMessageId: MessageId.makeUnsafe("sprite-seed"),
+          targetText: "hello",
+        }),
+      ),
+    });
+    Object.defineProperty(window, "desktopBridge", {
+      configurable: true,
+      value: { ...previousBridge, spriteLibrary: spriteBridge, setTheme: async () => {} },
+    });
+    const restoreSendApi = installDeterministicSendNativeApi({ projectThreadCommands: true });
+    const baseApi = readNativeApi()!;
+    let failInitialization = false;
+    const syncEvents: string[] = [];
+    Object.defineProperty(window, "nativeApi", {
+      configurable: true,
+      value: {
+        ...baseApi,
+        orchestration: {
+          ...baseApi.orchestration,
+          getShellSnapshot: async () => createShellSnapshotFromReadModel(fixture.snapshot),
+          getThreadDetailSnapshot: async ({ threadId }: { threadId: ThreadId }) => {
+            if (failInitialization) {
+              failInitialization = false;
+              throw new Error("Sprite initialization failed for test.");
+            }
+            const thread = fixture.snapshot.threads.find((t) => t.id === threadId);
+            return thread ? { snapshotSequence: fixture.snapshot.snapshotSequence, thread } : null;
+          },
+        },
+        imageGeneration: {
+          ...baseApi.imageGeneration,
+          listProviders: async () => [],
+          onEvent: () => () => {},
+          spriteCommand: async (command: import("@synara/contracts").SpriteCommand) => {
+            if (
+              command.operation === "sync" &&
+              command.context?.threadId &&
+              fixture.snapshot.threads.some((t) => t.id === command.context?.threadId)
+            ) {
+              syncEvents.push(command.context.threadId);
+            }
+            return { context: command.context ?? null, runs: [] };
+          },
+        },
+      },
+    });
+    try {
+      await mounted.router.navigate({ to: "/sprite-animation", search: {} });
+      await expect.element(page.getByTestId("sprite-library")).toBeVisible();
+      expect(projects.size).toBe(0);
+      await expect
+        .element(
+          page.getByText("No sprite projects yet. Create a project or import a project package."),
+        )
+        .toBeVisible();
+      await page.getByRole("button", { name: "New sprite project", exact: true }).click();
+      await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Fox knight");
+      await page.getByRole("button", { name: "Create", exact: true }).click();
+      await expect.element(page.getByTestId("sprite-workbench")).toBeVisible();
+      await page.getByRole("button", { name: "New conversation", exact: true }).first().click();
+      await waitForComposerEditor();
+      const sprite = [...projects.values()][0]!;
+      await vi.waitFor(() => expect(projects.get(sprite.id)?.activeThreadId).toBeTruthy());
+      const threadId = ThreadId.makeUnsafe(projects.get(sprite.id)!.activeThreadId!);
+      await expect
+        .element(page.getByRole("button", { name: "Change model and reasoning", exact: true }))
+        .toBeVisible();
+      useComposerDraftStore.getState().setModelSelection(threadId, {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        instanceId: "codex",
+      });
+      await page.getByTestId("composer-editor").fill("Create a fox knight");
+      const canvas = document.createElement("canvas");
+      canvas.width = 16;
+      canvas.height = 16;
+      canvas.getContext("2d")!.fillRect(2, 2, 10, 10);
+      const imageBlob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((blob) => resolve(blob!), "image/png"),
+      );
+      await userEvent.upload(
+        document.querySelector<HTMLInputElement>(
+          'input[accept="image/png,image/jpeg,image/webp"]',
+        )!,
+        new File([imageBlob], "fox.png", { type: "image/png" }),
+      );
+      await page.getByRole("button", { name: "Add to conversation: fox.png", exact: true }).click();
+      await vi.waitFor(() =>
+        expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.images).toHaveLength(1),
+      );
+      expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.prompt).toBe(
+        "Create a fox knight",
+      );
+      await page.getByRole("button", { name: "New conversation", exact: true }).click();
+      await vi
+        .waitFor(() => expect(projects.get(sprite.id)?.threadIds).toHaveLength(2), {
+          timeout: 8000,
+        })
+        .catch((error) => {
+          console.log("SPRITE_NEW_CHAT_FAILURE", {
+            projects: [...projects.values()].map((p) => ({
+              threads: p.threadIds,
+              active: p.activeThreadId,
+            })),
+            alerts: [...document.querySelectorAll('[role="alert"]')].map((el) => el.textContent),
+            drafts: Object.keys(useComposerDraftStore.getState().draftThreadsByThreadId),
+          });
+          throw error;
+        });
+      const secondId = ThreadId.makeUnsafe(projects.get(sprite.id)!.activeThreadId!);
+      await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("Independent second draft");
+      expect(
+        useComposerDraftStore.getState().draftsByThreadId[secondId]?.images ?? [],
+      ).toHaveLength(0);
+      await page.getByRole("combobox", { name: "Sprite conversations", exact: true }).click();
+      await page.getByTestId(`sprite-chat-option-${threadId}`).click();
+      await waitForComposerEditor();
+      await expect
+        .element(page.getByTestId("composer-editor"))
+        .toHaveTextContent("Create a fox knight");
+      expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.images).toHaveLength(1);
+
+      failInitialization = true;
+      const commands = (type: string) =>
+        wsRequests
+          .map(readDispatchedCommand)
+          .filter((c) => c?.type === type && c.threadId === threadId);
+      const send = await waitForSendButton();
+      await vi.waitFor(() => expect(send.disabled).toBe(false));
+      send.click();
+      await vi.waitFor(() => expect(commands("thread.create")).toHaveLength(1));
+      await vi.waitFor(() => expect(failInitialization).toBe(false));
+      await vi.waitFor(() =>
+        expect(document.querySelector('[data-testid="composer-editor"]')?.textContent).toContain(
+          "Create a fox knight",
+        ),
+      );
+      expect(commands("thread.turn.start")).toHaveLength(0);
+      expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.images).toHaveLength(1);
+      const retrySend = await waitForSendButton();
+      await vi.waitFor(() => expect(retrySend.disabled).toBe(false));
+      retrySend.click();
+      await vi.waitFor(() => expect(commands("thread.turn.start")).toHaveLength(1));
+      expect(commands("thread.create")).toHaveLength(1);
+      expect(commands("thread.create")[0]?.modelSelection).toMatchObject({
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        instanceId: "codex",
+      });
+      expect(syncEvents).toContain(threadId);
+      expect(fixture.snapshot.threads.find((t) => t.id === threadId)?.notes ?? "").not.toContain(
+        "sprite_animation",
+      );
+      await page.getByRole("combobox", { name: "Sprite conversations", exact: true }).click();
+      await page.getByTestId(`sprite-chat-option-${secondId}`).click();
+      await waitForComposerEditor();
+      await expect
+        .element(page.getByTestId("composer-editor"))
+        .toHaveTextContent("Independent second draft");
+      failAssociation = true;
+      await page.getByRole("button", { name: "New conversation", exact: true }).click();
+      await expect
+        .element(page.getByRole("alert"))
+        .toHaveTextContent("Project association save failed");
+      const draftsAfterFailure = Object.keys(
+        useComposerDraftStore.getState().draftThreadsByThreadId,
+      );
+      expect(projects.get(sprite.id)?.threadIds).toHaveLength(2);
+      await page.getByRole("button", { name: "New conversation", exact: true }).click();
+      await vi.waitFor(() => expect(projects.get(sprite.id)?.threadIds).toHaveLength(3), {
+        timeout: 8000,
+      });
+      expect(Object.keys(useComposerDraftStore.getState().draftThreadsByThreadId)).toEqual(
+        draftsAfterFailure,
+      );
+      await page.getByRole("combobox", { name: "Sprite conversations", exact: true }).click();
+      await page.getByTestId(`sprite-chat-option-${secondId}`).click();
+      await page.getByRole("button", { name: "Back to projects", exact: true }).click();
+      await expect
+        .element(page.getByRole("button", { name: "Open project: Fox knight", exact: true }))
+        .toBeVisible();
+      await page.getByRole("button", { name: "Rename", exact: true }).click();
+      await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Knight idle");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+      await page
+        .getByRole("textbox", { name: "Search sprite projects", exact: true })
+        .fill("missing");
+      await expect
+        .element(page.getByRole("button", { name: "Open project: Knight idle", exact: true }))
+        .not.toBeInTheDocument();
+      await page
+        .getByRole("textbox", { name: "Search sprite projects", exact: true })
+        .fill("Knight");
+      emitWsTransportState("open");
+      await waitForLayout();
+      await page.screenshot({
+        path: "../../../../output/playwright/sprite-library.png",
+        element: page.getByTestId("sprite-library"),
+      });
+      await page.getByRole("button", { name: "Open project: Knight idle", exact: true }).click();
+      await expect.element(page.getByTestId("sprite-workbench")).toBeVisible();
+      expect(mounted.router.state.location.search).toMatchObject({ projectId: sprite.id });
+      expect(projects.get(sprite.id)?.activeThreadId).toBe(secondId);
+      await waitForComposerEditor();
+      emitWsTransportState("open");
+      await waitForLayout();
+      await page.screenshot({
+        path: "../../../../output/playwright/sprite-workbench.png",
+        element: page.getByTestId("sprite-workbench"),
+      });
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      try {
+        await page.getByRole("button", { name: "Delete", exact: true }).click();
+        await expect.element(page.getByTestId("sprite-library")).toBeVisible();
+        expect(projects.size).toBe(0);
+        expect(fixture.snapshot.threads.some((t) => t.id === threadId)).toBe(true);
+        await expect
+          .element(
+            page.getByText("No sprite projects yet. Create a project or import a project package."),
+          )
+          .toBeVisible();
+      } finally {
+        confirm.mockRestore();
+      }
+    } finally {
+      restoreSendApi();
+      await mounted.cleanup();
+      Object.defineProperty(window, "desktopBridge", { configurable: true, value: previousBridge });
     }
   });
 });

@@ -55,3 +55,6 @@ export * from "./todo";
 export * from "./imageGeneration";
 
 export * from "./spriteAnimation";
+export * from "./spritePlan";
+
+export * from "./spriteProcessing";

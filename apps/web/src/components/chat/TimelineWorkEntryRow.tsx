@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "~/aha/AppearanceProvider";
 // FILE: TimelineWorkEntryRow.tsx
 // Purpose: Renders transcript work/tool rows and their inline details.
 // Layer: Web chat presentation component
@@ -60,6 +61,7 @@ import {
   isPlainRuntimeNoticeWorkEntry,
   isReasoningUpdateWorkEntry,
 } from "./agentActivity.logic";
+import { SpritePlanCard } from "../sprite/SpritePlanCard";
 import { AutomationCreatedCard } from "./AutomationCreatedCard";
 import { BackgroundTaskRow } from "./BackgroundTaskRow";
 import { INLINE_COMMAND_CHIP_CLASS_NAME } from "./chatTypography";
@@ -86,6 +88,7 @@ import {
   deriveFriendlyCommandTarget,
   deriveLiteralCommand,
   deriveSynaraMcpToolTitle,
+  deriveSpriteToolTitle,
   extractWebFetchUrl,
   isGenericToolTitle,
   isSynaraBrowserToolCall,
@@ -391,6 +394,7 @@ function isSynaraToolCall(workEntry: TimelineWorkEntry): boolean {
 // compact density so every tool-call line shares one height regardless of whether
 // it carries a disclosure chevron.
 export function prefersCompactWorkEntryRow(workEntry: TimelineWorkEntry): boolean {
+  if (workEntry.spritePlan) return false;
   if (isCodexActivityStatusWorkEntry(workEntry) || workEntry.monitorNotification) {
     return true;
   }
@@ -676,7 +680,19 @@ export const TimelineWorkEntryRow = memo(function TimelineWorkEntryRow(props: {
             : isMcpToolRow
               ? "mcp"
               : undefined;
-  const displayParts = workEntryDisplayParts(workEntry);
+  const tr = useAhaTranslation();
+  const originalDisplayParts = workEntryDisplayParts(workEntry);
+  const translatedHeading = deriveSpriteToolTitle({ toolName: workEntry.toolName })
+    ? tr(originalDisplayParts.heading)
+    : originalDisplayParts.heading;
+  const displayParts =
+    translatedHeading === originalDisplayParts.heading
+      ? originalDisplayParts
+      : {
+          ...originalDisplayParts,
+          heading: translatedHeading,
+          displayText: combineWorkEntryDisplayText(translatedHeading, originalDisplayParts.preview),
+        };
   const { heading, preview, displayText } = displayParts;
   const showInlineAgentTaskPreview =
     workEntry.itemType === "collab_agent_tool_call" &&
@@ -772,6 +788,7 @@ export const TimelineWorkEntryRow = memo(function TimelineWorkEntryRow(props: {
 
   // A created-automation row renders as its own card instead of a tool-call line.
   // Kept after the hooks above so the early return never changes hook order.
+  if (workEntry.spritePlan) return <SpritePlanCard {...workEntry.spritePlan} />;
   const automation = workEntry.automation;
   if (automation) {
     return (

@@ -8,6 +8,7 @@ describe("Aha user directories", () => {
       studio: "/Volumes/Files/Documents/Aha/Studio",
       groups: "/Volumes/Files/Documents/Aha/Groups",
       resource: "/Volumes/Files/Documents/Aha/Resource",
+      sprite: "/Volumes/Files/Documents/Aha/Sprite",
     });
   });
   it("falls back to a platform-correct Documents path for standalone servers", () => {

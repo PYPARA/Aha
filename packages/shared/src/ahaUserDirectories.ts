@@ -11,6 +11,7 @@ export function ahaUserDirectories(
   return {
     root,
     resource: p.join(root, "Resource"),
+    sprite: p.join(root, "Sprite"),
     chats: p.join(root, "Chats"),
     studio: p.join(root, "Studio"),
     groups: p.join(root, "Groups"),

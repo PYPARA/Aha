@@ -6747,7 +6747,7 @@ export default function Sidebar() {
         active: railActiveItem === "spriteAnimation",
         onSelect: () => {
           selectRailRouteItem("spriteAnimation");
-          void navigate({ to: "/sprite-animation" });
+          void navigate({ to: "/sprite-animation", search: {} });
         },
       };
     if (id === "resources")

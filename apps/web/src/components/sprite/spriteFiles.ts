@@ -96,11 +96,14 @@ export async function exportSpriteProject(project: SpriteProject) {
       height: source.height,
       file,
       mimeType: source.blob.type,
+      usage: source.usage,
+      origin: source.origin,
+      assetId: source.assetId,
     });
   }
-  const { threadId: _thread, sources: _sources, ...portable } = project;
+  const { threadIds: _threads, activeThreadId: _active, sources: _sources, ...portable } = project;
   files["project.json"] = strToU8(
-    JSON.stringify({ ...portable, sources, threadId: null }, null, 2),
+    JSON.stringify({ ...portable, sources, threadIds: [], activeThreadId: null }, null, 2),
   );
   return pack(files);
 }
@@ -157,7 +160,19 @@ export async function importSpriteProject(file: File): Promise<SpriteProject> {
     );
     if (decoded.width !== source.width || decoded.height !== source.height)
       throw new Error("Source dimensions do not match.");
-    sources.push({ ...decoded, id: source.id });
+    sources.push({
+      ...decoded,
+      id: source.id,
+      usage: source.usage === "generated-frame" ? "generated-frame" : "material",
+      ...(source.assetId && /^[\w-]{1,128}$/.test(source.assetId)
+        ? { assetId: source.assetId }
+        : {}),
+      ...(source.origin &&
+      typeof source.origin.runId === "string" &&
+      typeof source.origin.candidateId === "string"
+        ? { origin: source.origin }
+        : {}),
+    });
   }
   const actionIds = new Set<string>();
   for (const action of data.actions) {
@@ -208,15 +223,19 @@ export async function importSpriteProject(file: File): Promise<SpriteProject> {
     selectedActionId: actionIds.has(data.selectedActionId)
       ? data.selectedActionId
       : data.actions[0].id,
-    referenceSourceId: sources.some((s) => s.id === data.referenceSourceId)
-      ? data.referenceSourceId
-      : null,
+    referenceSourceId: null,
     background: data.background === "transparent" ? "transparent" : "chroma",
     chromaKey:
       typeof data.chromaKey === "string" && /^#[0-9a-f]{6}$/i.test(data.chromaKey)
         ? data.chromaKey
         : "#00ff00",
     generationFrameCount: positive(data.generationFrameCount, 32) ? data.generationFrameCount : 8,
+    adoptedCandidateIds: Array.isArray(data.adoptedCandidateIds)
+      ? data.adoptedCandidateIds.filter(
+          (id: unknown) =>
+            typeof id === "string" && /^[\w-]{1,128}(?::[\w-]{1,128}){0,2}$/.test(id),
+        )
+      : [],
     provenance: Array.isArray(data.provenance)
       ? data.provenance
           .filter(
@@ -226,14 +245,29 @@ export async function importSpriteProject(file: File): Promise<SpriteProject> {
                 (v) => typeof v === "string",
               ),
           )
-          .slice(0, 256)
+          .slice(0, 1024)
       : [],
   };
 }
+export type SpriteExportMode = "combined" | "sequence" | "atlas";
+
+function createAtlas(columns: number, rows: number, project: SpriteProject, gap: number) {
+  const width = columns * project.width + (columns - 1) * gap;
+  const height = rows * project.height + (rows - 1) * gap;
+  if (width > 16384 || height > 16384 || width * height > 64_000_000)
+    throw new Error(
+      "Atlas exceeds the output limit. Adjust columns, reduce canvas size, or choose another export format.",
+    );
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
 export async function exportSpriteAssets(
   project: SpriteProject,
   actionIds: string[],
-  mode: "sequence" | "atlas",
+  mode: SpriteExportMode,
   columns: number,
   gap: number,
   signal?: AbortSignal,
@@ -248,6 +282,21 @@ export async function exportSpriteAssets(
     gap > 128
   )
     throw new Error("Invalid atlas columns or spacing.");
+  signal?.throwIfAborted();
+  const actions = project.actions.filter((a) => actionIds.includes(a.id));
+  if (!actions.length) throw new Error("No frames to export.");
+  for (const action of actions)
+    if (!action.frames.length) throw new Error(`Action ${action.name} has no frames.`);
+  const combined =
+    mode === "combined"
+      ? createAtlas(
+          Math.min(columns, Math.max(...actions.map((a) => a.frames.length))),
+          actions.reduce((rows, a) => rows + Math.ceil(a.frames.length / columns), 0),
+          project,
+          gap,
+        )
+      : null;
+  let firstRow = 0;
   const files: Record<string, Uint8Array> = {};
   const metadata: {
     version: number;
@@ -262,33 +311,25 @@ export async function exportSpriteAssets(
     pivot: { x: project.width / 2, y: project.height },
     actions: [],
   };
-  for (const [actionIndex, action] of project.actions
-    .filter((a) => actionIds.includes(a.id))
-    .entries()) {
-    if (!action.frames.length) throw new Error(`Action ${action.name} has no frames.`);
+  for (const [actionIndex, action] of actions.entries()) {
     const prefix = `${String(actionIndex + 1).padStart(2, "0")}-${safeFilename(action.name)}`;
     const cols = Math.min(columns, action.frames.length),
       rows = Math.ceil(action.frames.length / cols);
-    const atlas = document.createElement("canvas");
-    if (mode === "atlas") {
-      atlas.width = cols * project.width + (cols - 1) * gap;
-      atlas.height = rows * project.height + (rows - 1) * gap;
-      if (atlas.width > 16384 || atlas.height > 16384 || atlas.width * atlas.height > 64_000_000)
-        throw new Error("Atlas exceeds the output limit; use a sequence or smaller canvas.");
-    }
+    const atlas = combined ?? (mode === "atlas" ? createAtlas(cols, rows, project, gap) : null);
     const frames = [];
     for (const [index, frame] of action.frames.entries()) {
       signal?.throwIfAborted();
       progress?.(`${action.name} ${index + 1}/${action.frames.length}`);
       const canvas = await renderSpriteFrame(project, frame);
+      signal?.throwIfAborted();
       if (mode === "sequence") {
         const file = `${prefix}/${String(index + 1).padStart(4, "0")}.png`;
         files[file] = new Uint8Array(await (await png(canvas)).arrayBuffer());
         frames.push({ file, durationMs: 1000 / action.fps });
       } else {
         const x = (index % cols) * (project.width + gap),
-          y = Math.floor(index / cols) * (project.height + gap);
-        atlas.getContext("2d")!.drawImage(canvas, x, y);
+          y = (firstRow + Math.floor(index / cols)) * (project.height + gap);
+        atlas!.getContext("2d")!.drawImage(canvas, x, y);
         frames.push({
           x,
           y,
@@ -299,18 +340,23 @@ export async function exportSpriteAssets(
       }
     }
     if (mode === "atlas")
-      files[`${prefix}.png`] = new Uint8Array(await (await png(atlas)).arrayBuffer());
+      files[`${prefix}.png`] = new Uint8Array(await (await png(atlas!)).arrayBuffer());
     metadata.actions.push({
       name: action.name,
       fps: action.fps,
       loop: action.loop,
-      ...(mode === "atlas" ? { image: `${prefix}.png` } : {}),
+      ...(mode === "sequence" ? {} : { image: combined ? "atlas.png" : `${prefix}.png` }),
       frames,
     });
+    if (combined) firstRow += rows;
   }
+  signal?.throwIfAborted();
+  if (combined) files["atlas.png"] = new Uint8Array(await (await png(combined)).arrayBuffer());
   files["animation.json"] = strToU8(JSON.stringify(metadata, null, 2));
   signal?.throwIfAborted();
-  return pack(files);
+  const archive = await pack(files);
+  signal?.throwIfAborted();
+  return archive;
 }
 
 /** Pick a key away from the reference's visible palette; users can override it. */
@@ -338,6 +384,64 @@ export async function suggestChromaKey(blob: Blob) {
         return { hex: color.hex, score };
       })
       .toSorted((a, b) => a.score - b.score)[0]!.hex;
+  } finally {
+    image.close();
+  }
+}
+
+/** Alpha testing excludes transparent cells without interpreting their RGB pixels. */
+export async function visibleSpriteFrameIds(
+  source: SpriteSource,
+  frames: SpriteFrame[],
+): Promise<Set<string>> {
+  const image = await createImageBitmap(source.blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = source.width;
+  canvas.height = source.height;
+  try {
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(image, 0, 0);
+    const pixels = ctx.getImageData(0, 0, source.width, source.height).data;
+    const ids = new Set<string>();
+    for (const frame of frames) {
+      let visible = false;
+      for (let y = frame.y; y < frame.y + frame.height && !visible; y++)
+        for (let x = frame.x; x < frame.x + frame.width; x++)
+          if (pixels[(y * source.width + x) * 4 + 3]! > 0) {
+            visible = true;
+            break;
+          }
+      if (visible) ids.add(frame.id);
+    }
+    return ids;
+  } finally {
+    image.close();
+  }
+}
+export async function cropSpriteFrameSource(
+  source: SpriteSource,
+  frame: SpriteFrame,
+  name: string,
+): Promise<SpriteSource> {
+  const image = await createImageBitmap(source.blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = frame.width;
+  canvas.height = frame.height;
+  try {
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(
+      image,
+      frame.x,
+      frame.y,
+      frame.width,
+      frame.height,
+      0,
+      0,
+      frame.width,
+      frame.height,
+    );
+    return { id: uuid(), name, width: frame.width, height: frame.height, blob: await png(canvas) };
   } finally {
     image.close();
   }

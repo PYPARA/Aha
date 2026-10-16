@@ -350,6 +350,46 @@ describe("durable image generation tasks", () => {
     release.splice(0).forEach((fn) => fn());
     await waitFor(c.id, "succeeded");
   });
+  it("accepts extra returned outputs and records counts without reporting partial completion", async () => {
+    const provider = await f.engine.upsertProvider(providerInput());
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(f.response(2)));
+    const job = await f.engine.createJob(input(provider.id));
+    await f.engine.tick();
+    const done = await waitFor(job.id, "succeeded");
+    expect(done.outputs).toHaveLength(2);
+    expect(done.error).toBeNull();
+    expect(done.actualParameters).toMatchObject({
+      requestedCount: 1,
+      returnedCount: 2,
+      savedCount: 2,
+      failedCount: 0,
+    });
+  });
+  it("reports partial completion when an extra returned output cannot be saved", async () => {
+    const provider = await f.engine.upsertProvider(providerInput());
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              data: [{ b64_json: f.png.toString("base64") }, { b64_json: "invalid" }],
+            }),
+          ),
+        ),
+    );
+    const job = await f.engine.createJob(input(provider.id));
+    await f.engine.tick();
+    const done = await waitFor(job.id, "partial");
+    expect(done.outputs).toHaveLength(1);
+    expect(done.actualParameters).toMatchObject({
+      requestedCount: 1,
+      returnedCount: 2,
+      savedCount: 1,
+      failedCount: 1,
+    });
+  });
   it("saves usable results, metadata and a partial result without resending", async () => {
     const p = await f.engine.upsertProvider(providerInput());
     const fetcher = vi.fn().mockResolvedValue(f.response());
@@ -719,9 +759,16 @@ describe("sprite workbench generation through Drawing", () => {
       projectId: context.projectId,
       input: { requestId: "character-one", kind: "character" as const, prompt: "Fox" },
     };
-    const first = await sprites.command(create);
+    const proposal = await sprites.command(create);
+    expect(proposal.runs).toHaveLength(0);
+    expect((await sprites.command(create)).plans).toHaveLength(1);
+    const first = await sprites.confirm({
+      projectId: context.projectId,
+      threadId: context.threadId,
+      planId: proposal.plans![0]!.id,
+      version: 1,
+    });
     const jobId = first.runs[0]!.jobId!;
-    expect((await sprites.command(create)).runs).toHaveLength(1);
     await f.engine.tick();
     await waitFor(jobId, "succeeded");
     await sprites.tick();
@@ -732,10 +779,30 @@ describe("sprite workbench generation through Drawing", () => {
       projectId: context.projectId,
       context: { ...context, referenceAssetId: done.runs[0]!.frames[0]!.id },
     });
-    const animation = await sprites.command({
-      operation: "generate",
+    const reference = done.runs[0]!.frames[0]!;
+    const animationPlan = await sprites.command({
+      operation: "propose",
       projectId: context.projectId,
+      configuration: {
+        ...proposal.plans![0]!.configuration,
+        kind: "animation",
+        prompt: "Idle breathing",
+        references: [
+          {
+            referenceId: `candidate:${done.runs[0]!.id}:${reference.id}`,
+            asset: reference,
+            role: "character",
+            actionId: null,
+          },
+        ],
+      },
       input: { requestId: "idle-one", kind: "animation", prompt: "Idle breathing" },
+    });
+    const animation = await sprites.confirm({
+      projectId: context.projectId,
+      threadId: context.threadId,
+      planId: animationPlan.plans!.at(-1)!.id,
+      version: 1,
     });
     const animationJob = animation.runs[1]!.jobId!;
     expect((await f.engine.getJob(animationJob)).inputs).toHaveLength(2);
@@ -746,7 +813,8 @@ describe("sprite workbench generation through Drawing", () => {
     await restored.initialize();
     const recovered = await restored.forThread("sprite-thread");
     expect(recovered?.runs[1]!.frames).toHaveLength(2);
-    expect(recovered?.runs[1]!.status).toBe("ready");
+    expect(recovered?.runs[1]!.status).toBe("needs-adjustment");
+    expect(recovered?.runs[1]!.candidates?.[0]?.analysis).toBeDefined();
     await f.engine.deleteJob(animationJob);
     expect((await f.engine.getAsset(recovered!.runs[1]!.source!.id)).id).toBe(
       recovered!.runs[1]!.source!.id,
@@ -763,12 +831,43 @@ describe("sprite workbench generation through Drawing", () => {
       runId: recovered!.runs[1]!.id,
       input: { requestId: "retry-idle", kind: "animation", prompt: "More motion" },
     });
-    expect(retry.runs).toHaveLength(3);
+    expect(retry.runs).toHaveLength(2);
+    expect(retry.plans!.at(-1)!.status).toBe("draft");
     expect(retry.runs[1]!.frames).toHaveLength(2);
+    const retryPlan = retry.plans!.at(-1)!;
+    expect(retryPlan.configuration.prompt).toBe("More motion");
+    expect(retryPlan.configuration.needsReview).toBeUndefined();
+    const reviewed = await restored.command({
+      operation: "update-plan",
+      projectId: context.projectId,
+      planId: retryPlan.id,
+      version: retryPlan.version,
+      configuration: {
+        ...retryPlan.configuration,
+        needsReview: false,
+        prompt: "More motion",
+        creative: {
+          character: "A fox",
+          style: "Pixel art",
+          view: "Side view",
+          sources: { character: "user", style: "user", view: "user" },
+        },
+        actions: retryPlan.configuration.actions.map((a) => ({
+          ...a,
+          description: "Idle breathing",
+        })),
+      },
+    });
+    const resubmitted = await restored.confirm({
+      projectId: context.projectId,
+      threadId: context.threadId,
+      planId: retryPlan.id,
+      version: reviewed.plans!.find((p) => p.id === retryPlan.id)!.version,
+    });
     await restored.command({
       operation: "cancel",
       projectId: context.projectId,
-      runId: retry.runs[2]!.id,
+      runId: resubmitted.runs[2]!.id,
     });
     expect(
       (await restored.command({ operation: "get", projectId: context.projectId })).runs[2]!.status,

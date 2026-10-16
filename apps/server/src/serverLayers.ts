@@ -146,7 +146,12 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(serverSettingsLayer),
     Layer.provideMerge(providerHealthLayer),
   );
+  const imageGenerationLayer = ImageGenerationServiceLive.pipe(
+    Layer.provideMerge(ImageGenerationRepositoryLive),
+    Layer.provideMerge(ServerSecretStoreLive),
+  );
   const providerCommandReactorLayer = ProviderCommandReactorLive.pipe(
+    Layer.provideMerge(imageGenerationLayer),
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(providerHealthLayer),
     Layer.provideMerge(OrchestrationEventDeliveryRepositoryLive),
@@ -238,10 +243,6 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(AgentGatewayOperationRepositoryLive),
     Layer.provideMerge(serverSettingsLayer),
     Layer.provideMerge(providerHealthLayer),
-  );
-  const imageGenerationLayer = ImageGenerationServiceLive.pipe(
-    Layer.provideMerge(ImageGenerationRepositoryLive),
-    Layer.provideMerge(ServerSecretStoreLive),
   );
   const agentGatewayLayer = AgentGatewayLive.pipe(
     Layer.provideMerge(

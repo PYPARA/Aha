@@ -70,6 +70,27 @@ async function stagePersistedComposerImageAttachments(input: {
       .filter((attachment) => currentImageIds.has(attachment.id));
   }
 }
+/** Persist an embedded intake even if its composer unmounts during preparation. */
+export async function persistComposerDraftImages(threadId: ThreadId): Promise<void> {
+  while (true) {
+    const images = useComposerDraftStore.getState().draftsByThreadId[threadId]?.images;
+    if (!images?.length) return;
+    const attachments = await stagePersistedComposerImageAttachments({
+      threadId,
+      images,
+      getPersistedAttachments: () =>
+        useComposerDraftStore.getState().draftsByThreadId[threadId]?.persistedAttachments ?? [],
+    });
+    if (images !== useComposerDraftStore.getState().draftsByThreadId[threadId]?.images) continue;
+    if (attachments.length !== images.length)
+      throw new Error("Could not save image attachments. Try again.");
+    const result = await useComposerDraftStore
+      .getState()
+      .syncPersistedAttachments(threadId, attachments);
+    if (result === "rejected") throw new Error("Could not save image attachments. Try again.");
+    return;
+  }
+}
 interface ComposerAttachmentPersistenceInput {
   threadId: ThreadId;
   composerImages: readonly ComposerImageAttachment[];

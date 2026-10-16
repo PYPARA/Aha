@@ -34,6 +34,18 @@
     "./resourceLibrary": {
       "types": "./src/resourceLibrary.ts",
       "import": "./src/resourceLibrary.ts"
+    },
+    "./spriteLibrary": {
+      "types": "./src/spriteLibrary.ts",
+      "import": "./src/spriteLibrary.ts"
+    },
+    "./spriteLibrarySchema": {
+      "types": "./src/spriteLibrarySchema.ts",
+      "import": "./src/spriteLibrarySchema.ts"
+    },
+    "./imageSize": {
+      "types": "./src/imageSize.ts",
+      "import": "./src/imageSize.ts"
     }
   },
   "scripts": {

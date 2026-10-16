@@ -1,3 +1,8 @@
+import {
+  ImageGenerationService,
+  type ImageGenerationServiceShape,
+} from "../../imageGeneration/Services/ImageGenerationService";
+import { SPRITE_CHAT_GUIDANCE } from "../../spriteAnimation/spriteConversation";
 // FILE: ProviderCommandReactor.test.ts
 // Purpose: Verifies provider intent orchestration, queueing, rollback, and transcript bootstrap flows.
 // Layer: Orchestration integration tests
@@ -360,6 +365,10 @@ describe("ProviderCommandReactor", () => {
           readonly archivedAt?: string | null;
         }
       | undefined;
+    readonly spriteService?: Pick<
+      ImageGenerationServiceShape,
+      "spriteForThread" | "spriteDetachThread"
+    >;
     readonly formatContextPacket?: string;
     readonly projectAdditionalFolders?: readonly string[];
     readonly getPersistedSessionProfile?: ProviderServiceShape["getPersistedSessionProfile"];
@@ -761,9 +770,12 @@ describe("ProviderCommandReactor", () => {
             : Option.none(),
         ),
     } as unknown as (typeof ProjectAgentRepository)["Service"]);
+    const spriteLayer = input?.spriteService
+      ? Layer.succeed(ImageGenerationService, input.spriteService as ImageGenerationServiceShape)
+      : Layer.empty;
     const reactorLayer = makeProviderCommandReactorLive(input);
     const layer = Layer.mergeAll(reactorLayer, ProviderRuntimeIngestionLive).pipe(
-      Layer.provideMerge(projectAgentLayer),
+      Layer.provideMerge(Layer.mergeAll(projectAgentLayer, spriteLayer)),
       Layer.provideMerge(projectAgentRepositoryLayer),
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
@@ -1222,6 +1234,104 @@ describe("ProviderCommandReactor", () => {
       )?.text,
     ).toBe("What happened?");
     expect((await harness.completionState())[0]?.context_consumed).toBe(1);
+  });
+
+  it.each([true, false])(
+    "injects sprite instructions into actual provider dispatch only for a bound chat (%s)",
+    async (bound) => {
+      const detach = vi.fn(() => Effect.void);
+      const harness = await createHarness({
+        spriteService: {
+          spriteForThread: () =>
+            Effect.succeed(
+              bound ? { context: {} as import("@synara/contracts").SpriteContext, runs: [] } : null,
+            ),
+          spriteDetachThread: detach,
+        },
+      });
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          commandId: CommandId.makeUnsafe("sprite-send"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          message: {
+            messageId: MessageId.makeUnsafe("sprite-message"),
+            role: "user",
+            text: "Generate a fox",
+            attachments: [],
+          },
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      const actual = harness.sendTurn.mock.calls[0]?.[0].input ?? "";
+      expect(actual.includes(SPRITE_CHAT_GUIDANCE)).toBe(bound);
+      expect(actual).toContain("Generate a fox");
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.delete",
+          commandId: CommandId.makeUnsafe("sprite-delete"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+        }),
+      );
+      await waitFor(() => detach.mock.calls.length === 1);
+      expect(detach).toHaveBeenCalledWith("thread-1");
+    },
+  );
+
+  it("includes sprite guidance when steering a running ordinary provider session", async () => {
+    const harness = await createHarness({
+      spriteService: {
+        spriteForThread: () =>
+          Effect.succeed({ context: {} as import("@synara/contracts").SpriteContext, runs: [] }),
+        spriteDetachThread: () => Effect.void,
+      },
+    });
+    const now = new Date().toISOString();
+    harness.setRuntimeSessionTurnState({
+      threadId: "thread-1",
+      status: "running",
+      activeTurnId: asTurnId("turn-running"),
+    });
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("sprite-session-running"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-running"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("sprite-steer"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("sprite-steer-message"),
+          role: "user",
+          text: "Make the action faster",
+          attachments: [],
+        },
+        dispatchMode: "steer",
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.steerTurn.mock.calls.length === 1);
+    expect(harness.steerTurn.mock.calls[0]?.[0].input).toContain(SPRITE_CHAT_GUIDANCE);
+    expect(harness.steerTurn.mock.calls[0]?.[0].input).toContain("Make the action faster");
   });
 
   it("prefixes the provider input with the project context packet", async () => {

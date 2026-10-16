@@ -33,6 +33,7 @@ import { suppressCoordinatorCheckinMessages } from "@synara/shared/coordinatorCh
 import { PROVIDER_DESCRIPTORS } from "@synara/shared/providerMetadata";
 import {
   deriveReadableToolTitle,
+  deriveSpriteToolTitle,
   deriveSynaraMcpToolTitle,
   isGenericToolTitle,
   normalizeCompactToolLabel,
@@ -54,6 +55,53 @@ import {
 import { stripProposedPlanBlocksFromText } from "./proposedPlan";
 
 import type { ChatMessage, ProposedPlan } from "./types";
+
+export function extractSpritePlanPointer(
+  value: unknown,
+  depth = 0,
+): { projectId: string; planId: string; threadId: string } | undefined {
+  if (depth > 12) return undefined;
+  if (typeof value === "string") {
+    try {
+      return extractSpritePlanPointer(JSON.parse(value), depth + 1);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!value || typeof value !== "object") return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const p = extractSpritePlanPointer(item, depth + 1);
+      if (p) return p;
+    }
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const pointer = record.spritePlan;
+  if (pointer && typeof pointer === "object") {
+    const p = pointer as Record<string, unknown>;
+    if (
+      [p.projectId, p.planId, p.threadId].every(
+        (id) => typeof id === "string" && /^[\w-]{1,128}$/.test(id),
+      )
+    )
+      return p as { projectId: string; planId: string; threadId: string };
+  }
+  for (const key of [
+    "data",
+    "rawOutput",
+    "item",
+    "result",
+    "output",
+    "content",
+    "text",
+    "details",
+  ]) {
+    const found = extractSpritePlanPointer(record[key], depth + 1);
+    if (found) return found;
+  }
+  return undefined;
+}
 
 export type WorkLogRequestKind = ApprovalRequestKind;
 
@@ -155,6 +203,13 @@ export interface WorkLogEntry {
   // Set on the one entry a turn's subagents fold into: the transcript renders
   // it as the subagent card (see SubagentRunCard.logic.ts).
   subagentRun?: WorkLogSubagentRun;
+  spritePlan?: {
+    projectId: string;
+    planId: string;
+    threadId: string;
+    historical?: boolean;
+    history?: { projectId: string; planId: string; threadId: string }[];
+  };
   automation?: WorkLogAutomation;
   synaraThreadCreation?: WorkLogSynaraThreadCreation;
   // Deterministic coordinator-monitor rows (worker settled / stuck /
@@ -1859,6 +1914,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     title: commandActionDisplay?.title ?? title,
   });
   const readableTitle =
+    deriveSpriteToolTitle({ toolName, payload }) ??
     extractCollabActionTitle(payload) ??
     computerToolDescription?.summary ??
     deriveSynaraMcpToolTitle({
@@ -1892,6 +1948,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       normalizeToolTextForComparison(entry.toolTitle ?? entry.label)
   ) {
     delete entry.detail;
+  }
+  if (deriveSpriteToolTitle({ toolName, payload }) && payload) {
+    const pointer = extractSpritePlanPointer(payload);
+    if (pointer) entry.spritePlan = pointer;
   }
   const toolDetails = deriveWorkLogToolDetails({
     payload,
@@ -2434,6 +2494,9 @@ function mergeDerivedWorkLogEntries(
     ...(toolStatus ? { toolStatus } : {}),
     ...(liveActivity ? { liveActivity } : {}),
     ...(toolDetails ? { toolDetails } : {}),
+    ...((next.spritePlan ?? previous.spritePlan)
+      ? { spritePlan: next.spritePlan ?? previous.spritePlan }
+      : {}),
   };
 }
 

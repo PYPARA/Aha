@@ -12,7 +12,7 @@ import {
   type ComputerToolName,
 } from "./computerToolPresentation";
 import { basenameOfPath } from "../file-icons";
-import { extractToolArgumentField } from "./toolArgumentSummary";
+import { parseToolArgumentSummary, extractToolArgumentField } from "./toolArgumentSummary";
 
 export function normalizeCompactToolLabel(value: string): string {
   return value
@@ -644,7 +644,61 @@ export function sanitizeSynaraMcpToolPreview(input: {
   return preview;
 }
 
+export function deriveSpriteToolTitle(input: {
+  toolName?: string | null | undefined;
+  payload?: Record<string, unknown> | null | undefined;
+}): string | null {
+  const names: string[] = input.toolName ? [input.toolName] : [];
+  let operation: unknown;
+  let kind: unknown;
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 5) return;
+    if (typeof value === "string") {
+      const parsed = parseToolArgumentSummary(value);
+      if (parsed?.toolName) names.push(parsed.toolName);
+      if (parsed?.args) visit(parsed.args, depth + 1);
+      return;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const record = value as Record<string, unknown>;
+    for (const key of ["toolName", "tool_name", "tool", "name"]) {
+      if (typeof record[key] === "string") names.push(record[key] as string);
+    }
+    operation ??= record.operation;
+    kind ??= record.kind;
+    for (const key of ["args", "arguments", "input", "data", "item", "detail"])
+      visit(record[key], depth + 1);
+  };
+  visit(input.payload, 0);
+  if (!names.some((name) => /(?:^|__|[:.])sprite_animation$/i.test(name))) return null;
+  switch (operation) {
+    case "get":
+      return "Read sprite context";
+    case "generate":
+    case "propose":
+      return kind === "animation"
+        ? "Prepare sprite animation plan"
+        : "Prepare sprite character plan";
+    case "update-plan":
+      return "Update sprite generation plan";
+    case "dismiss-plan":
+      return "Dismiss sprite generation plan";
+    case "status":
+      return "Check sprite generation";
+    case "preview":
+      return "Preview sprite generation";
+    case "cancel":
+      return "Cancel sprite generation";
+    case "retry":
+      return "Prepare sprite retry plan";
+    default:
+      return "Sprite generation";
+  }
+}
+
 export function deriveReadableToolTitle(input: ReadableToolTitleInput): string | null {
+  const spriteTitle = deriveSpriteToolTitle({ payload: input.payload });
+  if (spriteTitle) return spriteTitle;
   const normalizedTitle = normalizeCompactToolLabel(input.title ?? "");
   const normalizedFallback = normalizeCompactToolLabel(input.fallbackLabel);
   const commandLabel = input.command

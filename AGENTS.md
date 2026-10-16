@@ -1,0 +1,11 @@
+# 项目工作规则
+
+## 本地打包
+
+- 用户说“打包”时，默认构建 macOS Apple Silicon（arm64）的 Aha 正式版，并直接替换仓库中的 `release/mac-arm64`；无需另行询问是否覆盖。
+- 除非用户特别要求，不使用另一个版本目录代替默认产物目录。构建及必要验证通过后，将新产物放到 `release/mac-arm64/Aha.app`。
+- “打包”只授权更新上述产物；替换其他安装位置、推送源码或对外发布按用户的具体要求处理。
+
+<!-- postman-cli:installation:start -->
+Postman CLI is installed on this device, and can be used for API Engineering work.
+<!-- postman-cli:installation:end -->

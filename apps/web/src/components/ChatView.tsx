@@ -1,3 +1,10 @@
+import { mergeSpritePlanEntries } from "./sprite/spritePlanTimeline";
+import { useSpriteConversationPlans } from "./sprite/useSpriteConversationPlans";
+import { persistComposerDraftImages } from "./chat/useComposerAttachmentPersistence";
+import {
+  type EmbeddedChatAttachments,
+  useEmbeddedAttachmentPending,
+} from "./chat/EmbeddedChatAttachments";
 import { ResourceChatContext, useResourceAttachments } from "./resources/resourceLibrary";
 import { useAhaTranslation } from "../aha/AppearanceProvider";
 import { AhaBackgroundLayer } from "../aha/BackgroundLayer";
@@ -159,6 +166,7 @@ import { createPastedTextDraft } from "../lib/composerPastedText";
 import {
   buildComposerFileAttachmentsFromFiles,
   effectiveComposerAttachmentCount,
+  prepareComposerImageAttachmentsFromFiles,
 } from "../lib/composerSend";
 import {
   deriveContextWindowSelectionStatus,
@@ -566,7 +574,9 @@ function ComposerModelLoadingControl(props: { widthClassName: string }) {
 }
 
 interface ChatViewProps {
+  attachmentBridge?: EmbeddedChatAttachments | undefined;
   beforeSend?: () => Promise<void>;
+  beforeTurnDispatch?: ((threadId: ThreadId) => Promise<void>) | undefined;
   threadId: ThreadId;
   hideHeader?: boolean;
   paneScopeId?: string;
@@ -600,7 +610,9 @@ interface ChatViewProps {
 // back-and-forth (user request, Synara's clarifying questions) inline like Codex.
 
 export default function ChatView({
+  attachmentBridge,
   beforeSend,
+  beforeTurnDispatch,
   threadId,
   hideHeader: hideHeaderProp,
   paneScopeId: paneScopeIdProp,
@@ -2029,18 +2041,20 @@ export default function ChatView({
       hasPendingUserInput: pendingUserInputs.length > 0,
     })
   );
+  const spritePlanEntries = useSpriteConversationPlans(threadId);
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(
         timelineMessages,
         activeThread?.proposedPlans ?? [],
-        agentActivityTimelineState.timelineWorkEntries,
+        mergeSpritePlanEntries(agentActivityTimelineState.timelineWorkEntries, spritePlanEntries),
         // Coordinator check-in turns run in the background and never appear
         // in this transcript — their outcomes live in the group activity log.
         { suppressCoordinatorCheckins: isCoordinatorConversation },
       ),
     [
       activeThread?.proposedPlans,
+      spritePlanEntries,
       agentActivityTimelineState.timelineWorkEntries,
       isCoordinatorConversation,
       timelineMessages,
@@ -2881,15 +2895,57 @@ export default function ChatView({
   );
   const {
     addImages: enqueueComposerImages,
-    isPreparingImages: isPreparingComposerImages,
+    isPreparingImages: localPreparingComposerImages,
     pendingImageCount: pendingComposerImageCount,
-    waitForPending: waitForPendingComposerImages,
+    waitForPending: waitForLocalComposerImages,
   } = useComposerImageIntake({
     threadId,
     existingAttachmentCount: composerImageAttachmentCount,
     commitImages: commitPreparedComposerImages,
     onError: setComposerImagePreparationError,
   });
+
+  const embeddedAttachmentPending = useEmbeddedAttachmentPending(attachmentBridge, threadId);
+  const isPreparingComposerImages = localPreparingComposerImages || embeddedAttachmentPending;
+  const waitForPendingComposerImages = useCallback(async () => {
+    await attachmentBridge?.wait(threadId);
+    await waitForLocalComposerImages();
+  }, [attachmentBridge, threadId, waitForLocalComposerImages]);
+  useEffect(() => {
+    if (!attachmentBridge || isSidechatExpired || pendingUserInputs.length) return;
+    return attachmentBridge.register(threadId, async (files) => {
+      const result = await prepareComposerImageAttachmentsFromFiles({
+        files,
+        existingAttachmentCount: composerImageAttachmentCount(),
+      });
+      const accepted = commitPreparedComposerImages(result.images);
+      const error =
+        accepted < result.images.length
+          ? `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} references per message.`
+          : result.error;
+      setComposerImagePreparationError(error);
+      if (error) throw new Error(error);
+      try {
+        await persistComposerDraftImages(threadId);
+      } catch (cause) {
+        // Roll back only this intake. Existing text/attachments survive a storage failure.
+        for (const image of result.images)
+          useComposerDraftStore.getState().removeImage(threadId, image.id);
+        setComposerImagePreparationError(
+          cause instanceof Error ? cause.message : "Could not save image attachments. Try again.",
+        );
+        throw cause;
+      }
+    });
+  }, [
+    attachmentBridge,
+    threadId,
+    isSidechatExpired,
+    pendingUserInputs.length,
+    composerImageAttachmentCount,
+    commitPreparedComposerImages,
+    setComposerImagePreparationError,
+  ]);
 
   const focusComposer = useCallback(() => {
     // A disabled editor (dispatch connecting, pending approval) cannot
@@ -4464,6 +4520,7 @@ export default function ChatView({
 
   const { onSend: submitComposerTurn } = useChatTurnSubmission({
     threadId,
+    beforeTurnDispatch,
     hasLiveTurn,
     canSendWithProviderHandoff,
     prepareProviderHandoffForSend,

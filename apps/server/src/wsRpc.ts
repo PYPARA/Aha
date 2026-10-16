@@ -3075,6 +3075,32 @@ const makeWsRpcHandlersLayer = () =>
                 ),
               )
             : Stream.fail(tasksUnavailableError()),
+        [WS_METHODS.spriteForThread]: (input) =>
+          rpcEffect(
+            imageGenerationService.spriteForThread(input.threadId).pipe(
+              Effect.map((state) =>
+                state
+                  ? {
+                      ...state,
+                      plans: state.plans?.filter((p) => p.threadId === input.threadId),
+                      runs: state.runs.filter((r) => r.context.threadId === input.threadId),
+                      referencePool: state.referencePool?.filter(
+                        (r) => r.threadId === input.threadId,
+                      ),
+                      selectedReferences: state.selectedReferences?.filter(
+                        (r) => r.threadId === input.threadId,
+                      ),
+                      turnContexts: state.turnContexts?.filter(
+                        (r) => r.threadId === input.threadId,
+                      ),
+                    }
+                  : null,
+              ),
+            ),
+            "Sprite conversation lookup failed",
+          ),
+        [WS_METHODS.spriteConfirm]: (input) =>
+          rpcEffect(imageGenerationService.spriteConfirm(input), "Sprite confirmation failed"),
         [WS_METHODS.spriteCommand]: (input) =>
           rpcEffect(imageGenerationService.spriteCommand(input), "Sprite request failed"),
         [WS_METHODS.imageProviderList]: () =>

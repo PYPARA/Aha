@@ -195,6 +195,15 @@ export class ImageGenerationEngine {
   async getJob(id: string) {
     const job = await Effect.runPromise(this.repository.getJob(id));
     if (!job) throw new ImageApiError("not_found", "Image task was not found.");
+    if (
+      job.status === "partial" &&
+      job.actualParameters.failedCount === 0 &&
+      job.actualParameters.savedCount === job.outputs.length &&
+      job.outputs.length >= job.parameters.n &&
+      job.actualParameters.returnedCount === job.outputs.length
+    ) {
+      return this.save({ ...job, status: "succeeded", error: null });
+    }
     return job;
   }
   async getAsset(id: string) {
@@ -537,7 +546,12 @@ export class ImageGenerationEngine {
     await this.locked(async () => {
       const current = await this.getJob(job.id);
       if (current.status !== "saving" || this.stopped) return;
-      const actual: Record<string, import("effect").Schema.Json> = {};
+      const actual: Record<string, import("effect").Schema.Json> = {
+        requestedCount: current.parameters.n,
+        returnedCount: data.length,
+        savedCount: current.outputs.length,
+        failedCount: failures,
+      };
       for (const k of ["size", "quality", "background", "output_format", "created"])
         if (payload[k] !== undefined) actual[k] = payload[k] as import("effect").Schema.Json;
       const revised = data
@@ -546,7 +560,7 @@ export class ImageGenerationEngine {
       if (revised.length) actual.revised_prompts = revised as string[];
       const count = current.outputs.length;
       const status =
-        count === current.parameters.n && !failures ? "succeeded" : count ? "partial" : "failed";
+        count >= current.parameters.n && !failures ? "succeeded" : count ? "partial" : "failed";
       const completed = await this.save({
         ...current,
         status,

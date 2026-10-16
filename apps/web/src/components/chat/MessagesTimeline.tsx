@@ -1,4 +1,6 @@
+import { SPRITE_PLAN_FOCUS, focusedSpritePlan } from "../sprite/spritePlanNavigation";
 import { ResourceCapture } from "../resources/ResourceCollectionDialog";
+import { SpritePlanCard } from "../sprite/SpritePlanCard";
 import { resolveWsHttpUrl as resourceHttpUrl } from "~/lib/wsHttpUrl";
 // FILE: MessagesTimeline.tsx
 // Purpose: Renders the chat transcript rows and lets LegendList own scrolling/follow behavior.
@@ -859,6 +861,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  useEffect(() => {
+    const focus = (event?: Event) => {
+      const id = event ? (event as CustomEvent<string>).detail : focusedSpritePlan();
+      const index = rows.findIndex(
+        (row) =>
+          row.kind === "work" &&
+          row.groupedEntries.some((entry) => entry.spritePlan?.planId === id),
+      );
+      if (index < 0) return;
+      scrollLegendListToIndex(resolvedListRef, { index, animated: true, viewPosition: 0.2 });
+    };
+    focus();
+    window.addEventListener(SPRITE_PLAN_FOCUS, focus);
+    return () => window.removeEventListener(SPRITE_PLAN_FOCUS, focus);
+  }, [rows, resolvedListRef]);
   const canRenderForkSourceDivider = forkSource !== null && onOpenThread !== undefined;
   const forkSourceDivider = useMemo(
     () =>
@@ -1496,6 +1513,23 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       {forkDividerBeforeRowId === row.id ? forkSourceDivider : null}
       {row.kind === "work" &&
         row.groupedEntries.map((entry) =>
+          entry.spritePlan ? (
+            entry.spritePlan.history ? (
+              <details key={entry.id} className="my-2 rounded-lg border p-3 text-xs">
+                <summary className="cursor-pointer">
+                  <HistoricalPlansLabel /> · {entry.spritePlan.history.length}
+                </summary>
+                {entry.spritePlan.history.map((p) => (
+                  <SpritePlanCard key={p.planId} {...p} />
+                ))}
+              </details>
+            ) : (
+              <SpritePlanCard key={entry.id} {...entry.spritePlan} />
+            )
+          ) : null,
+        )}
+      {row.kind === "work" &&
+        row.groupedEntries.map((entry) =>
           entry.turnFailure ? (
             <div key={entry.id} data-turn-failure={entry.turnId ?? entry.id}>
               <ThreadErrorBanner
@@ -1533,6 +1567,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           const groupedEntries = row.groupedEntries.filter(
             (workEntry) =>
               !workEntry.synaraThreadCreation &&
+              !workEntry.spritePlan &&
               !workEntry.providerHandoff &&
               !workEntry.turnFailure,
           );
@@ -3945,4 +3980,9 @@ function UserInputExchange(props: {
       ))}
     </div>
   );
+}
+
+function HistoricalPlansLabel() {
+  const tr = useAhaTranslation();
+  return <>{tr("Historical plans")}</>;
 }

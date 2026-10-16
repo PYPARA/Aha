@@ -25,6 +25,14 @@ it.skipIf(!target)(
         }
         await page.waitForTimeout(400);
       }
+      await page.getByTestId("sprite-library").waitFor();
+      await page
+        .getByRole("button", { name: /New sprite project|新建精灵项目/, exact: true })
+        .click();
+      await page
+        .getByRole("textbox", { name: /Project name|项目名称/, exact: true })
+        .fill("Sprite E2E");
+      await page.getByRole("button", { name: /Create|创建/, exact: true }).click();
       await page.getByTestId("sprite-workbench").waitFor();
       const png = await page.evaluate(async () => {
         const canvas = document.createElement("canvas");

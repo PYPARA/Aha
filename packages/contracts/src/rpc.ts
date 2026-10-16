@@ -1,4 +1,4 @@
-import { SpriteCommand, SpriteState } from "./spriteAnimation";
+import { SpriteCommand, SpriteState, SpritePlanConfirmInput } from "./spriteAnimation";
 import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -2147,7 +2147,20 @@ export const WsSpriteCommandRpc = Rpc.make(WS_METHODS.spriteCommand, {
   error: WsRpcError,
 });
 
+export const WsSpriteConfirmRpc = Rpc.make(WS_METHODS.spriteConfirm, {
+  payload: SpritePlanConfirmInput,
+  success: SpriteState,
+  error: WsRpcError,
+});
+
+const WsSpriteForThreadRpc = Rpc.make(WS_METHODS.spriteForThread, {
+  payload: Schema.Struct({ threadId: Schema.String }),
+  success: Schema.NullOr(SpriteState),
+  error: WsRpcError,
+});
 const WsImageGenerationRpcGroup = RpcGroup.make(
+  WsSpriteForThreadRpc,
+  WsSpriteConfirmRpc,
   WsSpriteCommandRpc,
   WsImageProviderListRpc,
   WsImageProviderUpsertRpc,

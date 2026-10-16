@@ -985,6 +985,8 @@ export function createWsNativeApi(): NativeApi {
       onEvent: todoEventListeners.subscribe,
     },
     imageGeneration: {
+      spriteForThread: (input) => transport.request(WS_METHODS.spriteForThread, input),
+      spriteConfirm: (input) => transport.request(WS_METHODS.spriteConfirm, input),
       spriteCommand: (input) => transport.request(WS_METHODS.spriteCommand, input),
       listProviders: () => transport.request(WS_METHODS.imageProviderList, {}),
       upsertProvider: (input) => transport.request(WS_METHODS.imageProviderUpsert, input),

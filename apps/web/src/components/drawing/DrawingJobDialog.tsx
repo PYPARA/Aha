@@ -126,6 +126,12 @@ export function DrawingJobDialog({
                   <span>{tr(job.status)}</span>
                 </div>
               )}
+              {job.outputs.length > job.parameters.n && (
+                <p className="text-xs text-muted-foreground">
+                  {tr("The provider returned extra images; all saved images are available.")} (
+                  {job.outputs.length}/{job.parameters.n})
+                </p>
+              )}
               {job.outputs.length > 1 ? (
                 <>
                   <Button

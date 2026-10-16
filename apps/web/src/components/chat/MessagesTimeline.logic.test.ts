@@ -2200,6 +2200,115 @@ describe("deriveMessagesTimelineRows", () => {
     expect(rows.map((row) => row.kind)).toEqual(["message", "user-input", "message"]);
     expect(collapsedSignature(messageRow(rows, "a1")!)).toEqual(["work:w1", "work:w2"]);
   });
+  it.each([false, true])(
+    "keeps sprite generation plans outside settled turn disclosures (conversationOnly=%s)",
+    (conversationOnly) => {
+      const proposal = workEntry(
+        "sprite-plan",
+        "2026-01-01T00:00:03Z",
+        "Prepare sprite retry plan",
+      );
+      if (proposal.kind !== "work") throw new Error("Expected work entry");
+      proposal.entry.spritePlan = { projectId: "project", planId: "plan", threadId: "thread" };
+      const rows = deriveMessagesTimelineRows({
+        ...baseInput,
+        conversationOnly,
+        timelineEntries: [
+          userEntry("u1", "2026-01-01T00:00:00Z"),
+          assistantEntry("preamble", "2026-01-01T00:00:01Z", {
+            turnId: "t1",
+            text: "Preparing the plan",
+          }),
+          workEntry("w1", "2026-01-01T00:00:02Z", "Read sprite context"),
+          proposal,
+          workEntry("w2", "2026-01-01T00:00:04Z", "Check sprite generation"),
+          assistantEntry("final", "2026-01-01T00:00:05Z", {
+            turnId: "t1",
+            text: "Confirm the plan card.",
+            completedAt: "2026-01-01T00:00:06Z",
+          }),
+        ],
+      });
+      expect(
+        rows
+          .filter((row) => row.kind === "work")
+          .map((row) => row.groupedEntries.map((entry) => entry.id)),
+      ).toEqual([["sprite-plan"]]);
+      expect(rows.indexOf(messageRow(rows, "final")!)).toBeLessThan(
+        rows.findIndex((row) => row.kind === "work" && row.groupedEntries[0]?.spritePlan),
+      );
+      if (!conversationOnly)
+        expect(collapsedSignature(messageRow(rows, "final")!)).toEqual([
+          "narration:preamble",
+          "work:w1",
+          "work:w2",
+        ]);
+    },
+  );
+  it("places multiple sprite plans after their response without crossing the next user request", () => {
+    const plan = (id: string): TimelineEntry => ({
+      kind: "work",
+      id,
+      createdAt: "2026-01-01T00:00:02Z",
+      entry: {
+        id,
+        createdAt: "2026-01-01T00:00:02Z",
+        label: "Plan",
+        tone: "tool",
+        spritePlan: { projectId: "project", planId: id, threadId: "thread" },
+      },
+    });
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        userEntry("u1", "2026-01-01T00:00:00Z"),
+        plan("plan-1"),
+        plan("plan-2"),
+        assistantEntry("a1", "2026-01-01T00:00:03Z", { turnId: "t1", text: "Confirm below." }),
+        userEntry("u2", "2026-01-01T00:00:04Z"),
+        assistantEntry("a2", "2026-01-01T00:00:05Z", { turnId: "t2", text: "Next answer." }),
+      ],
+    });
+    expect(rows.map((row) => (row.kind === "message" ? row.message.id : row.id))).toEqual([
+      "u1",
+      "a1",
+      "plan-1",
+      "plan-2",
+      "u2",
+      "a2",
+    ]);
+  });
+  it("groups adjacent abandoned sprite plans without crossing a user message", () => {
+    const plan = (id: string): TimelineEntry => ({
+      kind: "work",
+      id,
+      createdAt: "2026-01-01T00:00:02Z",
+      entry: {
+        id,
+        createdAt: "2026-01-01T00:00:02Z",
+        label: "Plan",
+        tone: "tool",
+        spritePlan: { projectId: "p", planId: id, threadId: "t", historical: true },
+      },
+    });
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        userEntry("u1", "2026-01-01T00:00:00Z"),
+        plan("p1"),
+        plan("p2"),
+        userEntry("u2", "2026-01-01T00:00:03Z"),
+        plan("p3"),
+      ],
+    });
+    const work = rows.filter((row) => row.kind === "work");
+    expect(work).toHaveLength(2);
+    expect(work[0]!.groupedEntries[0]!.spritePlan?.history?.map((p) => p.planId)).toEqual([
+      "p1",
+      "p2",
+    ]);
+    expect(work[1]!.groupedEntries[0]!.spritePlan?.planId).toBe("p3");
+  });
   const workerMonitorEntry = (id: string, createdAt: string, label: string): TimelineEntry => ({
     id: `entry-${id}`,
     kind: "work",

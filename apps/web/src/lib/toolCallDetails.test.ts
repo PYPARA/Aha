@@ -65,3 +65,26 @@ describe("tool output exit-code suffixes", () => {
     expect(details?.output?.exitCode).toBe(exitCode);
   });
 });
+
+it("shows the sprite failure reason while preserving the structured tool output for details", () => {
+  const output = JSON.stringify({
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: {
+            code: "SPRITE_REFERENCE_FAILED",
+            phase: "reference",
+            message: "The active turn message is unavailable.",
+            submitted: false,
+          },
+        }),
+      },
+    ],
+    isError: true,
+  });
+  expect(
+    deriveToolFailureSummary({ kind: "command", title: "Read sprite context", output: { output } })
+      .excerpt,
+  ).toBe("The active turn message is unavailable.");
+});

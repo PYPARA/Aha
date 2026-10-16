@@ -1,13 +1,12 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { ThreadId } from "@synara/contracts";
 import {
-  resourceType,
   type ResourceEntry,
   type ResourcePage,
   type ResourceQuery,
-  type ResourceReadResult,
   type ResourceImportResult,
   type ResourceCommand,
 } from "@synara/contracts/resourceLibrary";
@@ -20,7 +19,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "~/components/ui/dialog";
-import { FolderIcon, FileIcon, SearchIcon, XIcon, PlusIcon } from "~/lib/icons";
+import { FolderIcon, SearchIcon, XIcon } from "~/lib/icons";
 import { useStore } from "~/store";
 import { useHandleNewChat } from "~/hooks/useHandleNewChat";
 import {
@@ -30,42 +29,13 @@ import {
   useResourceLibrary,
   useResourceTransfer,
 } from "./resourceLibrary";
-const field =
-  "rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring";
-const humanBytes = (n: number) =>
-  n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`;
-function Preview({ entry, large = false }: { entry: ResourceEntry; large?: boolean }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const preview = useQuery({
-    queryKey: [...resourceKey, "preview", entry.id, entry.hash, large],
-    queryFn: () => resourceApi<ResourceReadResult>({ op: "read", id: entry.id, thumbnail: !large }),
-    enabled: entry.kind === "file" && resourceType(entry.name) === "image",
-    retry: false,
-    staleTime: Infinity,
-  });
-  useEffect(() => {
-    if (!preview.data) return;
-    const objectUrl = URL.createObjectURL(
-      new Blob([new Uint8Array(preview.data.bytes)], { type: preview.data.mimeType }),
-    );
-    setUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [preview.data]);
-  return url ? (
-    <img
-      src={url}
-      alt={entry.name}
-      className={
-        large ? "max-h-[65vh] max-w-full object-contain" : "h-full w-full object-contain p-2"
-      }
-      loading="lazy"
-    />
-  ) : entry.kind === "directory" ? (
-    <FolderIcon className="size-10 text-muted-foreground" />
-  ) : (
-    <FileIcon className="size-9 text-muted-foreground" />
-  );
-}
+import { ResourceDirectoryTree } from "./ResourceDirectoryTree";
+import { ResourceDetailsDialog } from "./ResourceDetailsDialog";
+import {
+  ResourcePreview as Preview,
+  humanResourceBytes as humanBytes,
+  resourceFieldClassName as field,
+} from "./ResourcePreview";
 export default function ResourceCenter() {
   const tr = useAhaTranslation();
   const client = useQueryClient();
@@ -83,7 +53,16 @@ export default function ResourceCenter() {
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
   const [detail, setDetail] = useState<ResourceEntry | null>(null);
-  const [fullPreview, setFullPreview] = useState(false);
+  const detailTrigger = useRef<HTMLElement | null>(null);
+  const breadcrumbRef = useRef<HTMLElement | null>(null);
+  const firstClick = useRef<{ id: string; selected: string[] } | null>(null);
+  const treeFirstClick = useRef<{ id: string; selected: string[] } | null>(null);
+  const treeTarget = useRef<{
+    entry: ResourceEntry;
+    offset: number;
+    trigger: HTMLElement;
+    open: boolean;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState("");
@@ -93,8 +72,6 @@ export default function ResourceCenter() {
   >(null);
   const [value, setValue] = useState("");
   const [destination, setDestination] = useState("");
-  const [notes, setNotes] = useState("");
-  const [tags, setTags] = useState("");
   const dirs = library.data?.directories ?? [];
   const breadcrumbs = current
     .split("/")
@@ -122,9 +99,14 @@ export default function ResourceCenter() {
     [],
   );
   useEffect(() => {
-    setOffset(0);
+    setOffset(treeTarget.current?.offset ?? 0);
     setSelected([]);
+    firstClick.current = null;
   }, [current, query, tag, type, sort, scope]);
+  useEffect(() => {
+    const breadcrumb = breadcrumbRef.current;
+    if (breadcrumb) breadcrumb.scrollLeft = breadcrumb.scrollWidth - breadcrumb.clientWidth;
+  }, [current]);
   useEffect(() => setSelected([]), [offset]);
   useEffect(() => {
     if (
@@ -139,11 +121,79 @@ export default function ResourceCenter() {
     setCurrent("");
     setSelected([]);
     setDetail(null);
+    firstClick.current = null;
+    treeFirstClick.current = null;
+    treeTarget.current = null;
   }, [library.data?.libraryId]);
-  const openDetails = (entry: ResourceEntry) => {
+  const openDetails = (entry: ResourceEntry, trigger: HTMLElement) => {
+    detailTrigger.current = trigger;
     setDetail(entry);
-    setNotes(entry.notes);
-    setTags(entry.tags.join(", "));
+  };
+  const navigateFolder = (path: string) => {
+    treeTarget.current = null;
+    treeFirstClick.current = null;
+    setCurrent(path);
+    setDetail(null);
+  };
+  const toggleSelection = (id: string) =>
+    setSelected((previous) =>
+      previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id],
+    );
+  const locateTreeFile = (
+    entry: ResourceEntry,
+    pageOffset: number,
+    trigger: HTMLElement,
+    open: boolean,
+  ) => {
+    treeTarget.current = { entry, offset: pageOffset, trigger, open };
+    setDetail(null);
+    setCurrent(entry.path.split("/").slice(0, -1).join("/"));
+    setQuery("");
+    setTag("");
+    setScope("folder");
+    setType("all");
+    setSort("name");
+    setOffset(pageOffset);
+  };
+  const clickTreeFile = (
+    entry: ResourceEntry,
+    pageOffset: number,
+    event: MouseEvent<HTMLButtonElement>,
+  ) => {
+    if (event.detail > 1) return;
+    const parent = entry.path.split("/").slice(0, -1).join("/");
+    if (
+      current === parent &&
+      scope === "folder" &&
+      !query &&
+      !tag &&
+      type === "all" &&
+      !page.isPending &&
+      page.data?.entries.some((item) => item.id === entry.id)
+    ) {
+      treeFirstClick.current = event.detail === 1 ? { id: entry.id, selected } : null;
+      toggleSelection(entry.id);
+    } else {
+      treeFirstClick.current = null;
+      locateTreeFile(entry, pageOffset, event.currentTarget, false);
+    }
+  };
+  const doubleClickTreeFile = (
+    entry: ResourceEntry,
+    pageOffset: number,
+    trigger: HTMLElement,
+    restoreSelection = true,
+  ) => {
+    if (restoreSelection && treeFirstClick.current?.id === entry.id)
+      setSelected(treeFirstClick.current.selected);
+    treeFirstClick.current = null;
+    if (treeTarget.current?.entry.id === entry.id) treeTarget.current.open = true;
+    else if (
+      current === entry.path.split("/").slice(0, -1).join("/") &&
+      page.data?.entries.some((item) => item.id === entry.id)
+    )
+      openDetails(entry, trigger);
+    else locateTreeFile(entry, pageOffset, trigger, true);
   };
   useEffect(() => {
     if (page.data)
@@ -151,6 +201,38 @@ export default function ResourceCenter() {
         previous ? (page.data.entries.find((e) => e.id === previous.id) ?? null) : null,
       );
   }, [page.data]);
+  useEffect(() => {
+    const target = treeTarget.current;
+    if (
+      !target ||
+      current !== target.entry.path.split("/").slice(0, -1).join("/") ||
+      query ||
+      tag ||
+      scope !== "folder" ||
+      type !== "all" ||
+      sort !== "name"
+    )
+      return;
+    // Filter/navigation resets run first; apply the tree's page after those resets.
+    if (offset !== target.offset) {
+      setOffset(target.offset);
+      return;
+    }
+    if (page.isPending) return;
+    if (page.error) {
+      treeTarget.current = null;
+      return;
+    }
+    const entry = page.data?.entries.find((item) => item.id === target.entry.id);
+    treeTarget.current = null;
+    if (!entry) return;
+    setSelected([entry.id]);
+    const card = document.querySelector<HTMLElement>(
+      `[data-resource-entry-id="${CSS.escape(entry.id)}"]`,
+    );
+    card?.scrollIntoView({ block: "nearest" });
+    if (target.open) openDetails(entry, target.trigger);
+  }, [current, query, tag, scope, type, sort, offset, page.data, page.isPending, page.error]);
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError(null);
@@ -223,7 +305,8 @@ export default function ResourceCenter() {
           parent: modal === "project" ? "" : current,
           name: value,
         });
-        setCurrent(created.path);
+        await client.invalidateQueries({ queryKey: [...resourceKey, "snapshot"] });
+        navigateFolder(created.path);
       }
       if (modal === "rename") await resourceApi({ op: "rename", ids: selected, name: value });
       if (modal === "move") await resourceApi({ op: "move", ids: selected, target: destination });
@@ -235,26 +318,6 @@ export default function ResourceCenter() {
     });
   const selectedEntries = page.data?.entries.filter((e) => selected.includes(e.id)) ?? [];
   const filesOnly = selectedEntries.length > 0 && selectedEntries.every((e) => e.kind === "file");
-  const tree = (parent: string, depth = 0): React.ReactNode =>
-    dirs
-      .filter((d) => d.path.split("/").slice(0, -1).join("/") === parent)
-      .toSorted((a, b) => a.name.localeCompare(b.name))
-      .map((d) => (
-        <div key={d.id}>
-          <button
-            className={`flex w-full items-center gap-2 rounded-lg py-2 pr-2 text-left text-sm hover:bg-muted ${current === d.path ? "bg-muted font-medium" : ""}`}
-            style={{ paddingLeft: 12 + depth * 14 }}
-            onClick={() => {
-              setCurrent(d.path);
-              setDetail(null);
-            }}
-          >
-            <FolderIcon className="size-4 shrink-0" />
-            <span className="truncate">{d.name}</span>
-          </button>
-          {tree(d.path, depth + 1)}
-        </div>
-      ));
   if (!window.desktopBridge?.resourceLibrary)
     return <div className="p-8">{tr("Resource center is available in the desktop app.")}</div>;
   return (
@@ -308,37 +371,23 @@ export default function ResourceCenter() {
           </Button>
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 overflow-auto">
-          <aside className="w-52 shrink-0 overflow-y-auto border-r border-border p-3">
-            <Button
-              className="mb-3 w-full justify-start"
-              variant="outline"
-              disabled={busy}
-              onClick={() => open("project")}
-            >
-              <PlusIcon className="size-4" />
-              {tr("New project")}
-            </Button>
-            <button
-              className={`mb-1 w-full rounded-lg px-3 py-2 text-left text-sm ${!current ? "bg-muted font-medium" : "hover:bg-muted"}`}
-              onClick={() => {
-                setCurrent("");
-                setDetail(null);
-              }}
-            >
-              {tr("All projects")}
-            </button>
-            {tree("")}
-            <button
-              className="mt-4 w-full break-all px-2 text-left text-xs text-muted-foreground"
-              title={library.data.root}
-              onClick={() => void execute({ op: "reveal" })}
-            >
-              {library.data.root}
-            </button>
-          </aside>
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <ResourceDirectoryTree
+            key={library.data.libraryId}
+            directories={dirs}
+            current={current}
+            root={library.data.root}
+            busy={busy}
+            onNavigate={navigateFolder}
+            onNewProject={() => open("project")}
+            onRevealRoot={() => void execute({ op: "reveal" })}
+            libraryId={library.data.libraryId}
+            selected={selected}
+            onFileClick={clickTreeFile}
+            onFileDoubleClick={doubleClickTreeFile}
+          />
           <main
-            className="flex min-w-0 flex-1 flex-col"
+            className="flex min-h-0 min-w-0 flex-1 flex-col"
             onDragOver={(e) => {
               if (current) {
                 e.preventDefault();
@@ -355,22 +404,40 @@ export default function ResourceCenter() {
               if (paths.length) void importFiles(paths);
             }}
           >
-            <div className="space-y-3 border-b border-border p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setCurrent("")}>
-                  {tr("All projects")}
-                </Button>
-                {breadcrumbs.map((crumb) => (
+            <div className="shrink-0 space-y-3 border-b border-border p-4">
+              <div className="flex items-center gap-2">
+                <nav
+                  ref={breadcrumbRef}
+                  aria-label={tr("Resource path")}
+                  className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap"
+                >
                   <Button
-                    key={crumb.path}
                     variant="ghost"
                     size="sm"
-                    onClick={() => setCurrent(crumb.path)}
+                    className="px-1"
+                    onClick={() => navigateFolder("")}
+                    aria-current={!current ? "page" : undefined}
                   >
-                    / {crumb.label}
+                    {tr("All projects")}
                   </Button>
-                ))}
-                <div className="ml-auto flex gap-2">
+                  {breadcrumbs.map((crumb) => (
+                    <Fragment key={crumb.path}>
+                      <span aria-hidden="true" className="text-sm text-muted-foreground">
+                        /
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="px-1"
+                        onClick={() => navigateFolder(crumb.path)}
+                        aria-current={current === crumb.path ? "page" : undefined}
+                      >
+                        {crumb.label}
+                      </Button>
+                    </Fragment>
+                  ))}
+                </nav>
+                <div className="flex shrink-0 gap-2">
                   <Button
                     size="sm"
                     variant="outline"
@@ -449,64 +516,71 @@ export default function ResourceCenter() {
                   {tr(view === "grid" ? "List view" : "Grid view")}
                 </Button>
               </div>
-              {selected.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span>
-                    {selected.length} {tr("selected")}
-                  </span>
-                  {(["rename", "move", "tags", "chat"] as const).map((mode) => (
-                    <Button
-                      key={mode}
-                      size="sm"
-                      variant="outline"
-                      disabled={busy || (mode === "chat" && !filesOnly)}
-                      onClick={() => open(mode)}
-                    >
-                      {tr(
-                        {
-                          rename: "Rename",
-                          move: "Move to",
-                          tags: "Edit tags",
-                          chat: "Use in chat",
-                        }[mode],
-                      )}
-                    </Button>
-                  ))}
+              <div
+                className="flex h-10 items-center gap-2 overflow-x-auto whitespace-nowrap text-sm"
+                aria-label={tr("Resource actions")}
+                data-testid="resource-actions"
+              >
+                <span className="w-28 shrink-0 tabular-nums">
+                  {selected.length} {tr("selected")}
+                </span>
+                {(["rename", "move", "tags", "chat"] as const).map((mode) => (
                   <Button
+                    key={mode}
                     size="sm"
                     variant="outline"
-                    disabled={busy || !filesOnly}
-                    onClick={() => void run(() => transfer("drawing"))}
+                    disabled={busy || !selected.length || (mode === "chat" && !filesOnly)}
+                    onClick={() => open(mode)}
                   >
-                    {tr("Use in drawing")}
+                    {tr(
+                      {
+                        rename: "Rename",
+                        move: "Move to",
+                        tags: "Edit tags",
+                        chat: "Use in chat",
+                      }[mode],
+                    )}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => void execute({ op: "export", ids: selected })}
-                  >
-                    {tr("Export")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        await resourceApi({ op: "trash", ids: selected });
-                        setSelected([]);
-                        setDetail(null);
-                      })
-                    }
-                  >
-                    {tr("Move to trash")}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setSelected([])}>
-                    {tr("Clear selection")}
-                  </Button>
-                </div>
-              ) : null}
+                ))}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || !filesOnly}
+                  onClick={() => void run(() => transfer("drawing"))}
+                >
+                  {tr("Use in drawing")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || !selected.length}
+                  onClick={() => void execute({ op: "export", ids: selected })}
+                >
+                  {tr("Export")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy || !selected.length}
+                  onClick={() =>
+                    void run(async () => {
+                      await resourceApi({ op: "trash", ids: selected });
+                      setSelected([]);
+                      setDetail(null);
+                    })
+                  }
+                >
+                  {tr("Move to trash")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!selected.length}
+                  onClick={() => setSelected([])}
+                >
+                  {tr("Clear selection")}
+                </Button>
+              </div>
             </div>
             {busy ? (
               <div
@@ -561,7 +635,7 @@ export default function ResourceCenter() {
                 ) : null}
               </div>
             ) : null}
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="resource-scroll">
               {page.isPending ? (
                 <p className="text-sm text-muted-foreground">{tr("Loading...")}</p>
               ) : !page.data?.entries.length ? (
@@ -574,6 +648,7 @@ export default function ResourceCenter() {
                 </div>
               ) : (
                 <div
+                  data-testid="resource-entries"
                   className={
                     view === "grid"
                       ? "grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3"
@@ -583,11 +658,12 @@ export default function ResourceCenter() {
                   {page.data.entries.map((entry) => (
                     <article
                       key={entry.id}
+                      data-resource-entry-id={entry.id}
                       className={`group relative overflow-hidden rounded-xl border ${selected.includes(entry.id) ? "border-primary bg-primary/5" : "border-border bg-muted/10"} ${view === "list" ? "flex items-center" : ""}`}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setSelected([entry.id]);
-                        openDetails(entry);
+                        firstClick.current = null;
                       }}
                     >
                       <input
@@ -597,13 +673,10 @@ export default function ResourceCenter() {
                           view === "grid" ? "absolute left-2 top-2 z-10 size-4" : "ml-3 size-4"
                         }
                         checked={selected.includes(entry.id)}
-                        onChange={(e) =>
-                          setSelected((old) =>
-                            e.target.checked
-                              ? [...old, entry.id]
-                              : old.filter((id) => id !== entry.id),
-                          )
-                        }
+                        onChange={() => {
+                          firstClick.current = null;
+                          toggleSelection(entry.id);
+                        }}
                       />
                       <button
                         className={
@@ -611,16 +684,34 @@ export default function ResourceCenter() {
                             ? "block w-full text-left"
                             : "flex min-w-0 flex-1 items-center text-left"
                         }
-                        onClick={() => {
+                        title={tr(
+                          entry.kind === "file"
+                            ? "Click to select, double-click for details"
+                            : "Open folder",
+                        )}
+                        onClick={(event) => {
                           if (entry.kind === "directory") {
-                            setCurrent(entry.path);
-                            setDetail(null);
-                          } else openDetails(entry);
+                            navigateFolder(entry.path);
+                          } else if (event.detail <= 1) {
+                            firstClick.current =
+                              event.detail === 1 ? { id: entry.id, selected } : null;
+                            toggleSelection(entry.id);
+                          }
                         }}
-                        onDoubleClick={() => {
-                          if (entry.kind === "file" && resourceType(entry.name) === "image") {
-                            openDetails(entry);
-                            setFullPreview(true);
+                        onDoubleClick={(event) => {
+                          if (entry.kind === "file") {
+                            // A native double-click includes a first click that already toggled selection.
+                            if (firstClick.current?.id === entry.id)
+                              setSelected(firstClick.current.selected);
+                            firstClick.current = null;
+                            openDetails(entry, event.currentTarget);
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (entry.kind === "file" && event.key === "Enter") {
+                            event.preventDefault();
+                            firstClick.current = null;
+                            openDetails(entry, event.currentTarget);
                           }
                         }}
                       >
@@ -648,7 +739,7 @@ export default function ResourceCenter() {
                 </div>
               )}
             </div>
-            <footer className="flex items-center justify-between border-t border-border px-4 py-2 text-xs text-muted-foreground">
+            <footer className="flex shrink-0 items-center justify-between border-t border-border px-4 py-2 text-xs text-muted-foreground">
               <span>
                 {page.data?.total ?? 0} {tr("resources")}
               </span>
@@ -673,122 +764,6 @@ export default function ResourceCenter() {
               </div>
             </footer>
           </main>
-          {detail ? (
-            <aside className="w-72 shrink-0 space-y-4 overflow-y-auto border-l border-border p-4">
-              <div className="flex justify-between gap-2">
-                <h2 className="break-all text-sm font-semibold">{detail.name}</h2>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={tr("Close")}
-                  onClick={() => setDetail(null)}
-                >
-                  <XIcon />
-                </Button>
-              </div>
-              <button
-                className="flex h-48 w-full items-center justify-center rounded-lg bg-muted/30"
-                onClick={() => setFullPreview(true)}
-                disabled={detail.kind !== "file" || resourceType(detail.name) !== "image"}
-              >
-                <Preview entry={detail} />
-              </button>
-              <p className="break-all text-xs text-muted-foreground">
-                {detail.path}
-                <br />
-                {humanBytes(detail.bytes)} · {new Date(detail.modifiedAt).toLocaleString()}
-              </p>
-              <label className="block space-y-1 text-sm">
-                {tr("Tags")}
-                <input
-                  className={`${field} w-full`}
-                  value={tags}
-                  onChange={(e) => setTags(e.target.value)}
-                  placeholder={tr("Separate tags with commas")}
-                />
-              </label>
-              <label className="block space-y-1 text-sm">
-                {tr("Notes")}
-                <textarea
-                  className={`${field} min-h-24 w-full`}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                />
-              </label>
-              <Button
-                size="sm"
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    await resourceApi({
-                      op: "metadata",
-                      ids: [detail.id],
-                      tags: tags.split(","),
-                      notes,
-                    });
-                    setDetail({
-                      ...detail,
-                      tags: tags
-                        .split(",")
-                        .map((t) => t.trim())
-                        .filter(Boolean),
-                      notes,
-                    });
-                  })
-                }
-              >
-                {tr("Save")}
-              </Button>
-              {detail.origin ? (
-                <div className="space-y-2 text-xs">
-                  <h3 className="font-medium">{tr("Source")}</h3>
-                  <p>{tr(detail.origin.kind)}</p>
-                  {detail.origin.threadId ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!threads[detail.origin.threadId]}
-                      onClick={() =>
-                        void navigate({
-                          to: "/$threadId",
-                          params: { threadId: detail.origin!.threadId! as ThreadId },
-                        })
-                      }
-                    >
-                      {tr(
-                        threads[detail.origin.threadId]
-                          ? "Open source chat"
-                          : "Source is unavailable",
-                      )}
-                    </Button>
-                  ) : null}
-                  {detail.origin.prompt ? (
-                    <p className="whitespace-pre-wrap">{detail.origin.prompt}</p>
-                  ) : null}
-                  {detail.origin.model ? <p>{detail.origin.model}</p> : null}
-                  {detail.origin.parameters ? (
-                    <pre className="overflow-auto rounded bg-muted p-2">
-                      {JSON.stringify(detail.origin.parameters, null, 2)}
-                    </pre>
-                  ) : null}
-                </div>
-              ) : null}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void execute({ op: "reveal", id: detail.id })}
-              >
-                {tr("Show in folder")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void execute({ op: "export", ids: [detail.id] })}
-              >
-                {tr("Export")}
-              </Button>
-            </aside>
-          ) : null}
         </div>
       )}
       <Dialog
@@ -893,17 +868,14 @@ export default function ResourceCenter() {
           </div>
         </DialogPopup>
       </Dialog>
-      <Dialog open={fullPreview && !!detail} onOpenChange={setFullPreview}>
-        <DialogPopup className="max-w-5xl">
-          <DialogHeader>
-            <DialogTitle>{detail?.name}</DialogTitle>
-            <DialogDescription>{tr("Image preview")}</DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-center p-4">
-            {detail ? <Preview entry={detail} large /> : null}
-          </div>
-        </DialogPopup>
-      </Dialog>
+      <ResourceDetailsDialog
+        entry={detail}
+        onClose={() => setDetail(null)}
+        onUpdated={(entry) =>
+          setDetail((previous) => (previous?.id === entry.id ? entry : previous))
+        }
+        returnFocus={detailTrigger}
+      />
     </div>
   );
 }

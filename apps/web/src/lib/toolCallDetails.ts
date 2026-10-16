@@ -461,6 +461,38 @@ function firstExplanatoryLine(value: string | undefined): string | null {
 // The exit code and one-line reason a failed tool row shows under its command.
 // Claude prefixes failed Bash output with "Exit code N" instead of reporting a
 // structured code, so that line supplies the code and is never the excerpt.
+function spriteFailureMessage(value: string | undefined): string | null {
+  if (!value) return null;
+  const visit = (input: unknown, depth: number): string | null => {
+    if (depth > 6) return null;
+    if (typeof input === "string") {
+      try {
+        return visit(JSON.parse(input), depth + 1);
+      } catch {
+        return null;
+      }
+    }
+    if (Array.isArray(input)) {
+      for (const part of input) {
+        const message = visit(part, depth + 1);
+        if (message) return message;
+      }
+      return null;
+    }
+    const record = asRecord(input);
+    if (!record) return null;
+    const error = asRecord(record.error);
+    if (
+      typeof error?.code === "string" &&
+      error.code.startsWith("SPRITE_") &&
+      typeof error.message === "string"
+    )
+      return error.message;
+    return visit(record.content ?? record.text ?? record.output, depth + 1);
+  };
+  return visit(value, 0);
+}
+
 export function deriveToolFailureSummary(
   details: WorkLogToolDetails | undefined,
 ): ToolFailureSummary {
@@ -473,6 +505,8 @@ export function deriveToolFailureSummary(
   return {
     exitCode: exitCode !== null && Number.isFinite(exitCode) ? exitCode : null,
     excerpt:
+      spriteFailureMessage(output?.output) ??
+      spriteFailureMessage(output?.stderr) ??
       firstExplanatoryLine(output?.stderr) ??
       firstExplanatoryLine(output?.output) ??
       firstExplanatoryLine(output?.stdout),

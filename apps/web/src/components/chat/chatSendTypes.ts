@@ -124,6 +124,7 @@ export interface ChatTurnSubmissionInput {
   >;
   isLocalDraftThread: boolean;
   threadNotes: string;
+  beforeTurnDispatch?: ((threadId: ThreadId) => Promise<void>) | undefined;
   setSettledThreadBranchWarningDismissedThreadId: Dispatch<SetStateAction<ThreadId | null>>;
   setQueuedSteerGate: Dispatch<SetStateAction<QueuedSteerGate | null>>;
   planSidebarDismissedForTurnRef: RefObject<string | null>;

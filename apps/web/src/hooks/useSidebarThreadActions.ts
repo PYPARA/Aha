@@ -1,3 +1,7 @@
+import {
+  clearDeletedThreadResources,
+  showThreadArchiveUndoToast,
+} from "../lib/threadLifecycleClient";
 // FILE: useSidebarThreadActions.ts
 // Purpose: Owns Sidebar thread pinning, Done/undo, snooze, archive/undo, deletion, and project-batch actions.
 // Layer: Web Sidebar controller hook
@@ -10,7 +14,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AppSettings } from "../appSettings";
-import { useComposerDraftStore } from "../composerDraftStore";
 import { showConfirmDialogFallback } from "../confirmDialogFallback";
 import {
   getFallbackThreadIdAfterDelete,
@@ -61,7 +64,6 @@ import {
   useSplitViewStore,
 } from "../splitViewStore";
 import { useStore } from "../store";
-import { useTemporaryThreadStore } from "../temporaryThreadStore";
 import { getThreadFromState } from "../threadDerivation";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import type { Project, SidebarThreadSummary } from "../types";
@@ -142,16 +144,10 @@ export function useSidebarThreadActions(input: {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const removeWorktreeMutation = useMutation(gitRemoveWorktreeMutationOptions({ queryClient }));
-  const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
-  const clearProjectDraftThreadById = useComposerDraftStore(
-    (store) => store.clearProjectDraftThreadById,
-  );
   const persistedPinnedThreadIds = usePinnedThreadsStore((store) => store.pinnedThreadIds);
   const pinThreadLocally = usePinnedThreadsStore((store) => store.pinThread);
   const unpinThread = usePinnedThreadsStore((store) => store.unpinThread);
   const prunePinnedThreads = usePinnedThreadsStore((store) => store.prunePinnedThreads);
-  const removeThreadFromSplitViews = useSplitViewStore((store) => store.removeThreadFromSplitViews);
-  const clearTemporaryThread = useTemporaryThreadStore((store) => store.clearTemporaryThread);
   const removeFromSelection = useThreadSelectionStore((store) => store.removeFromSelection);
 
   const archivePendingThreadIdsRef = useRef<Set<ThreadId>>(new Set());
@@ -690,12 +686,8 @@ export function useSidebarThreadActions(input: {
             : null,
         }),
         onDeleted: ({ thread, prepared }) => {
-          unpinThread(threadId);
-          clearComposerDraftForThread(threadId);
-          clearProjectDraftThreadById(thread.projectId, thread.id);
+          clearDeletedThreadResources(threadId, thread.projectId);
           clearTerminalState(threadId);
-          removeThreadFromSplitViews(threadId);
-          clearTemporaryThread(threadId);
 
           if (routeSplitViewId && prepared?.deletedPaneInActiveSplit) {
             const nextActiveSplitView =
@@ -737,18 +729,13 @@ export function useSidebarThreadActions(input: {
     [
       activeSplitView,
       appSettings.sidebarThreadSortOrder,
-      clearComposerDraftForThread,
-      clearProjectDraftThreadById,
-      clearTemporaryThread,
       clearTerminalState,
       handleNewChat,
       navigate,
-      removeThreadFromSplitViews,
       removeWorktreeMutation,
       routeSplitViewId,
       routeThreadId,
       sidebarThreads,
-      unpinThread,
     ],
   );
 
@@ -883,29 +870,16 @@ export function useSidebarThreadActions(input: {
 
   const showArchiveUndoToast = useCallback(
     (threadId: ThreadId, archiveSequence: number, options?: { returnToThreadOnUndo?: boolean }) => {
-      toastManager.add({
-        id: `archive-undo:${threadId}:${randomUUID()}`,
-        timeout: 0,
-        // Covers swipe/Escape dismissal as well as the visible timer. A pending
-        // Undo must never turn a disappearing toast into a cleanup request.
-        onClose: () => {
-          if (archiveUndoPendingThreadIdsRef.current.has(threadId)) return;
-          releaseArchivedWorktree(threadId, archiveSequence);
-        },
-        data: {
-          allowCrossThreadVisibility: true,
-          dismissAfterVisibleMs: ARCHIVE_UNDO_TOAST_DURATION_MS,
-          archiveUndo: {
-            onNoUndo: () => releaseArchivedWorktree(threadId, archiveSequence),
-            onUndo: () =>
-              restoreArchivedThreadFromToast({
-                threadId,
-                returnToThreadOnUndo: options?.returnToThreadOnUndo === true,
-              }),
-            onViewArchived: () => {
-              void navigate({ to: "/settings", search: { section: "archived" } });
-            },
-          },
+      showThreadArchiveUndoToast({
+        threadId,
+        onNoUndo: () => releaseArchivedWorktree(threadId, archiveSequence),
+        onUndo: () =>
+          restoreArchivedThreadFromToast({
+            threadId,
+            returnToThreadOnUndo: options?.returnToThreadOnUndo === true,
+          }),
+        onViewArchived: () => {
+          void navigate({ to: "/settings", search: { section: "archived" } });
         },
       });
     },

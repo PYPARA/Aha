@@ -1,4 +1,5 @@
 import { ImageGenerationService } from "../../imageGeneration/Services/ImageGenerationService";
+import { makeSpriteReferenceReader } from "../spriteReferences";
 import { makeSpriteTools } from "../spriteTools";
 import { ProjectionThreadMessageRepository } from "../../persistence/Services/ProjectionThreadMessages.ts";
 /**
@@ -1591,7 +1592,17 @@ export const makeAgentGateway = Effect.gen(function* () {
   });
 
   const tools: ReadonlyArray<ToolEntry> = [
-    ...(Option.isSome(spriteImages) ? makeSpriteTools(spriteImages.value) : []),
+    ...(Option.isSome(spriteImages) && hubMessages
+      ? makeSpriteTools(
+          spriteImages.value,
+          makeSpriteReferenceReader({
+            turns: projectionTurns,
+            messages: hubMessages,
+            attachments: attachmentRepository,
+            attachmentsDir: serverConfig.attachmentsDir,
+          }),
+        )
+      : []),
     ...readTools,
     ...diagnosticTools,
     createThreads,

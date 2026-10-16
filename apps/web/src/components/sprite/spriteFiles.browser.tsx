@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { unzipSync, strFromU8, zipSync, strToU8 } from "fflate";
 import {
   decodeSpriteSource,
@@ -7,7 +7,15 @@ import {
   importSpriteProject,
 } from "./spriteFiles";
 import { newSpriteProject, sliceFrames } from "./spriteModel";
-import { saveSpriteProject, listSpriteProjects, deleteSpriteProject } from "./spriteStorage";
+import {
+  saveSpriteProject,
+  listSpriteProjects,
+  getSpriteProject,
+  deleteSpriteProject,
+} from "./spriteStorage";
+vi.mock("../drawing/useDrawing", () => ({
+  drawingApi: () => ({ spriteCommand: async () => ({ context: null, runs: [] }) }),
+}));
 async function fixture() {
   const canvas = document.createElement("canvas");
   canvas.width = 32;
@@ -23,7 +31,8 @@ async function fixture() {
   p.width = 16;
   p.height = 16;
   p.sources = [source];
-  p.threadId = "private-thread";
+  p.threadIds = ["private-thread", "second-private-thread"];
+  p.activeThreadId = "private-thread";
   p.providerId = "private-provider";
   p.actions[0]!.frames = sliceFrames(source, {
     mode: "grid",
@@ -42,28 +51,29 @@ describe("portable sprite exports in a real browser", () => {
     const blob = await exportSpriteProject(p);
     const restored = await importSpriteProject(new File([blob], "sprite.zip"));
     expect(restored.id).not.toBe(p.id);
-    expect(restored.threadId).toBeNull();
+    expect(restored.threadIds).toEqual([]);
+    expect(restored.activeThreadId).toBeNull();
     expect(restored.providerId).toBe("");
     expect(restored.actions).toEqual(p.actions);
     expect(new Uint8Array(await restored.sources[0]!.blob.arrayBuffer())).toEqual(
       new Uint8Array(await p.sources[0]!.blob.arrayBuffer()),
     );
     await saveSpriteProject(restored);
-    expect(
-      (await listSpriteProjects()).find((x) => x.id === restored.id)?.sources[0]!.blob.size,
-    ).toBe(p.sources[0]!.blob.size);
+    expect((await getSpriteProject(restored.id)).sources[0]!.blob.size).toBe(
+      p.sources[0]!.blob.size,
+    );
     await deleteSpriteProject(restored.id);
   });
   it("exports atlas rectangles and sequence pixels with matching alpha and motion", async () => {
     const p = await fixture();
-    for (const mode of ["atlas", "sequence"] as const) {
+    for (const mode of ["combined", "atlas", "sequence"] as const) {
       const blob = await exportSpriteAssets(p, [p.actions[0]!.id], mode, 2, 2);
       const files = unzipSync(new Uint8Array(await blob.arrayBuffer()));
       const metadata = JSON.parse(strFromU8(files["animation.json"]!));
       expect(metadata.actions[0].frames).toHaveLength(2);
       expect(metadata.actions[0].frames[0].durationMs).toBeCloseTo(1000 / 12);
       const filename =
-        mode === "atlas" ? metadata.actions[0].image : metadata.actions[0].frames[1].file;
+        mode !== "sequence" ? metadata.actions[0].image : metadata.actions[0].frames[1].file;
       const bitmap = await createImageBitmap(
         new Blob([new Uint8Array(files[filename]!)], { type: "image/png" }),
       );
@@ -73,15 +83,97 @@ describe("portable sprite exports in a real browser", () => {
       c.getContext("2d")!.drawImage(bitmap, 0, 0);
       bitmap.close();
       const ctx = c.getContext("2d")!;
-      const offset = mode === "atlas" ? 18 : 0;
+      const offset = mode !== "sequence" ? 18 : 0;
       expect([...ctx.getImageData(offset + 4, 2, 1, 1).data]).toEqual([0, 0, 255, 255]);
       expect(ctx.getImageData(offset, 0, 1, 1).data[3]).toBe(0);
-      if (mode === "atlas") {
+      if (mode !== "sequence") {
         expect(c.width).toBe(34);
         expect(metadata.actions[0].frames[1].x).toBe(18);
         expect(ctx.getImageData(16, 8, 1, 1).data[3]).toBe(0);
       }
     }
+  });
+  it("combines unequal actions in separate rows with absolute rectangles and transparent gaps", async () => {
+    const p = await fixture();
+    const [red, blue] = p.actions[0]!.frames;
+    p.actions[0]!.frames = [red!, blue!, red!];
+    p.actions.push({
+      id: "second",
+      name: p.actions[0]!.name,
+      fps: 8,
+      loop: false,
+      frames: [blue!],
+    });
+    // Caller order must not change sidebar order; duplicate action names are valid.
+    const blob = await exportSpriteAssets(p, ["second", p.actions[0]!.id], "combined", 2, 2);
+    const files = unzipSync(new Uint8Array(await blob.arrayBuffer()));
+    expect(Object.keys(files).toSorted()).toEqual(["animation.json", "atlas.png"]);
+    const metadata = JSON.parse(strFromU8(files["animation.json"]!));
+    expect(metadata).toMatchObject({ version: 1, width: 16, height: 16 });
+    expect(metadata.actions.map((a: { image: string }) => a.image)).toEqual([
+      "atlas.png",
+      "atlas.png",
+    ]);
+    expect(metadata.actions[0].frames.map((f: { x: number; y: number }) => [f.x, f.y])).toEqual([
+      [0, 0],
+      [18, 0],
+      [0, 18],
+    ]);
+    expect(metadata.actions[1]).toMatchObject({
+      fps: 8,
+      loop: false,
+      frames: [{ x: 0, y: 36, width: 16, height: 16, durationMs: 125 }],
+    });
+    const bitmap = await createImageBitmap(
+      new Blob([new Uint8Array(files["atlas.png"]!)], { type: "image/png" }),
+    );
+    expect([bitmap.width, bitmap.height]).toEqual([34, 52]);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    expect([...ctx.getImageData(4, 38, 1, 1).data]).toEqual([0, 0, 255, 255]);
+    expect([...ctx.getImageData(4, 26, 1, 1).data]).toEqual([255, 0, 0, 255]);
+    for (const [x, y] of [
+      [18, 36],
+      [16, 8],
+      [4, 16],
+      [4, 34],
+    ])
+      expect(ctx.getImageData(x!, y!, 1, 1).data[3]).toBe(0);
+
+    const single = unzipSync(
+      new Uint8Array(
+        await (await exportSpriteAssets(p, ["second"], "combined", 8, 0)).arrayBuffer(),
+      ),
+    );
+    const image = await createImageBitmap(
+      new Blob([new Uint8Array(single["atlas.png"]!)], { type: "image/png" }),
+    );
+    expect([image.width, image.height]).toEqual([16, 16]);
+    image.close();
+  });
+  it("rejects empty scopes and oversized combined layouts, and cancels before returning a ZIP", async () => {
+    const p = await fixture();
+    await expect(exportSpriteAssets(p, [], "combined", 8, 0)).rejects.toThrow(
+      "No frames to export",
+    );
+    const ids = [p.actions[0]!.id];
+    p.width = 9000;
+    await expect(exportSpriteAssets(p, ids, "combined", 2, 0)).rejects.toThrow("output limit");
+    p.width = 4000;
+    p.height = 9000;
+    await expect(exportSpriteAssets(p, ids, "combined", 2, 0)).rejects.toThrow("output limit");
+    p.width = p.height = 16;
+    const controller = new AbortController();
+    await expect(
+      exportSpriteAssets(p, ids, "combined", 2, 0, controller.signal, () => controller.abort()),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    await expect(
+      exportSpriteAssets(p, ids, "combined", 2, 0, controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
   });
   it("rejects unsupported packages, bad frame references and empty export actions", async () => {
     const p = await fixture();
@@ -122,4 +214,125 @@ it("replaces decoded source images without drawing a released ImageBitmap", asyn
     )
     .toBe(255);
   await view.unmount();
+});
+
+it("starts a new library without reading the old browser database", async () => {
+  const oldId = "old-sprite-ignored";
+  const old = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open("aha-sprites-v1", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("projects", { keyPath: "id" });
+    request.onsuccess = () => resolve(request.result);
+    request.addEventListener("error", () => reject(request.error));
+  });
+  const tx = old.transaction("projects", "readwrite");
+  tx.objectStore("projects").put({ ...newSpriteProject(), id: oldId, name: "Old project" });
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.addEventListener("error", () => reject(tx.error));
+  });
+  old.close();
+  expect((await listSpriteProjects()).projects.some((p) => p.id === oldId)).toBe(false);
+  const p = await fixture();
+  await saveSpriteProject(p);
+  const summary = (await listSpriteProjects()).projects.find((s) => s.id === p.id)!;
+  expect(summary.name).toBe(p.name);
+  expect(summary).not.toHaveProperty("sources");
+  const { readSpriteThumbnail } = await import("./spriteStorage");
+  expect((await readSpriteThumbnail(p.id))?.type).toBe("image/png");
+  await deleteSpriteProject(p.id);
+  await expect(saveSpriteProject(p)).rejects.toThrow("deleted");
+});
+
+it("reports desktop save errors without falling back to browser storage", async () => {
+  const p = await fixture();
+  const original = window.desktopBridge;
+  Object.defineProperty(window, "desktopBridge", {
+    configurable: true,
+    value: {
+      ...original,
+      spriteLibrary: {
+        request: async () => {
+          throw new Error("Disk unavailable");
+        },
+      },
+    },
+  });
+  try {
+    await expect(saveSpriteProject(p)).rejects.toThrow("Disk unavailable");
+  } finally {
+    Object.defineProperty(window, "desktopBridge", { configurable: true, value: original });
+  }
+  expect((await listSpriteProjects()).projects.some((s) => s.id === p.id)).toBe(false);
+});
+
+it("normalizes single-chat projects only in the current browser library", async () => {
+  const p = await fixture();
+  await saveSpriteProject(p);
+  const { threadIds: _ids, activeThreadId: _active, ...legacy } = p;
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open("aha-sprite-library-v2", 2);
+    request.onsuccess = () => resolve(request.result);
+    request.addEventListener("error", () => reject(request.error));
+  });
+  const tx = db.transaction("projects", "readwrite");
+  tx.objectStore("projects").put({ ...legacy, threadId: "old-current-chat" }, p.id);
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.addEventListener("error", () => reject(tx.error));
+  });
+  db.close();
+  const restored = await getSpriteProject(p.id);
+  expect(restored).toMatchObject({
+    threadIds: ["old-current-chat"],
+    activeThreadId: "old-current-chat",
+  });
+  expect(restored).not.toHaveProperty("threadId");
+  await saveSpriteProject({
+    ...restored,
+    threadIds: ["old-current-chat", "second-chat"],
+    activeThreadId: "second-chat",
+  });
+  expect(await getSpriteProject(p.id)).toMatchObject({
+    threadIds: ["old-current-chat", "second-chat"],
+    activeThreadId: "second-chat",
+  });
+  await deleteSpriteProject(p.id);
+});
+
+it("keeps internal generated frames and their provenance through offline project packages", async () => {
+  const p = await fixture();
+  p.sources[0]!.usage = "generated-frame";
+  p.sources[0]!.assetId = "frame-asset";
+  p.sources[0]!.origin = { runId: "run", candidateId: "candidate", processingVersionId: "v2" };
+  p.adoptedCandidateIds = ["run:candidate:walk"];
+  p.provenance = [
+    {
+      runId: "run",
+      candidateId: "candidate",
+      actionId: "walk",
+      localActionId: p.actions[0]!.id,
+      processingVersionId: "v2",
+      prompt: "walk",
+      action: "walk",
+      providerId: "provider",
+      model: "image",
+    },
+  ];
+  const blob = await exportSpriteProject(p),
+    restored = await importSpriteProject(new File([blob], "frames.zip"));
+  expect(restored.sources[0]).toMatchObject({
+    usage: "generated-frame",
+    assetId: "frame-asset",
+    origin: { runId: "run", candidateId: "candidate", processingVersionId: "v2" },
+  });
+  expect(restored.adoptedCandidateIds).toEqual(["run:candidate:walk"]);
+  expect(restored.provenance[0]).toMatchObject({
+    localActionId: p.actions[0]!.id,
+    processingVersionId: "v2",
+  });
+  await saveSpriteProject(restored);
+  const reopened = await getSpriteProject(restored.id);
+  expect(reopened.sources.filter((s) => s.usage !== "generated-frame")).toHaveLength(0);
+  expect(reopened.actions[0]!.frames).toHaveLength(2);
+  await deleteSpriteProject(restored.id);
 });

@@ -1,3 +1,5 @@
+import { ImageGenerationService } from "../../imageGeneration/Services/ImageGenerationService";
+import { spriteConversationPrompt } from "../../spriteAnimation/spriteConversation";
 import { appendAppSnapPromptContext } from "../../provider/appSnapPromptContext.ts";
 import { isServerBetaFeatureEnabled } from "../../betaFeatureGate";
 import { computerActivationMetadata } from "../../computer/computerActivation.ts";
@@ -909,6 +911,7 @@ const make = Effect.gen(function* () {
   const queuedTurnPromotions = yield* QueuedTurnPromotionRepository;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
+  const spriteImages = Option.getOrUndefined(yield* Effect.serviceOption(ImageGenerationService));
   const computerService = yield* Effect.serviceOption(ComputerService);
   const gatewaySessions = yield* Effect.serviceOption(AgentGatewaySessionRegistry);
   // Resolved at make time: fibers that run turn dispatch do not inherit the
@@ -3043,6 +3046,7 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
+    const spritePrompt = yield* spriteConversationPrompt(spriteImages, input.threadId);
     const projectContextPacket = yield* (
       Option.isSome(projectAgentService)
         ? projectAgentService.value.formatContextPacketForTurn(input.threadId)
@@ -3057,7 +3061,7 @@ const make = Effect.gen(function* () {
           additionalFolders: threadProject.additionalFolders ?? [],
         })
       : null;
-    const projectContext = [projectContextPacket, projectFoldersPreamble ?? ""]
+    const projectContext = [spritePrompt, projectContextPacket, projectFoldersPreamble ?? ""]
       .filter((block) => block.trim().length > 0)
       .join("\n\n");
     const debugPromptOverheadChars = debugModePromptOverheadChars(input.interactionMode);
@@ -3117,7 +3121,8 @@ const make = Effect.gen(function* () {
                   PROVIDER_SEND_TURN_MAX_INPUT_CHARS -
                     messageText.length -
                     PROVIDER_INPUT_SAFETY_MARGIN_CHARS -
-                    providerPromptOverheadChars,
+                    providerPromptOverheadChars -
+                    spritePrompt.length,
                 ),
               }),
             ).pipe(
@@ -3129,9 +3134,9 @@ const make = Effect.gen(function* () {
               ),
             )
           : "";
-      const steerMessageWithSkills = steerSkillInlineText
-        ? `${messageText}\n\n${steerSkillInlineText}`
-        : messageText;
+      const steerMessageWithSkills = [spritePrompt, messageText, steerSkillInlineText]
+        .filter(Boolean)
+        .join("\n\n");
       const composedSteerInput = withProviderThreadStatePrompts({
         interactionMode: input.interactionMode,
         goal: activeThreadGoal(thread),
@@ -7137,6 +7142,7 @@ const make = Effect.gen(function* () {
             updatedAt: event.payload.deletedAt,
           });
           yield* clearThreadRuntimeCaches(event.payload.threadId);
+          if (spriteImages) yield* spriteImages.spriteDetachThread(event.payload.threadId);
           // Finish local cleanup before computer teardown, which can reject or
           // time out independently of the durable queue and runtime caches.
           if (Option.isSome(computerService))
