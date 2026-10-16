@@ -13,6 +13,7 @@ import {
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Statement from "effect/unstable/sql/Statement";
 
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
@@ -136,6 +137,45 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           { nativeEventType: "background_tasks_changed", data: { tasks: [] } },
         ],
       );
+    }),
+  );
+
+  it.effect("keeps only the newest value of each task patch field across many updates", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = asThreadId("task-progress-volume");
+      const now = "2026-10-11T10:00:00.000Z";
+      yield* sql`INSERT INTO projection_projects
+        (project_id, title, workspace_root, scripts_json, created_at, updated_at)
+        VALUES ('task-progress-project', 'Tasks', '/tmp/task-progress-project', '[]', ${now}, ${now})`;
+      yield* sql`INSERT INTO projection_threads
+        (thread_id, project_id, title, model_selection_json, created_at, updated_at)
+        VALUES (${threadId}, 'task-progress-project', 'Tasks', '{"provider":"codex","model":"gpt-5"}', ${now}, ${now})`;
+      // Long-lived threads accumulate thousands of progress patches. Older
+      // ones fall outside the detail window and must be superseded per field.
+      yield* sql`WITH RECURSIVE progress(n) AS (
+        SELECT 1 UNION ALL SELECT n + 1 FROM progress WHERE n < 4000
+      ) INSERT INTO projection_thread_activities
+        (activity_id, thread_id, tone, kind, summary, payload_json, sequence, created_at)
+        SELECT 'progress-' || n, ${threadId}, 'info', 'task.progress', 'Progress',
+          json_object('taskId', 'task-' || (n % 4), 'lastToolName', 'tool-' || n),
+          n, ${now}
+        FROM progress`;
+      yield* sql`INSERT INTO projection_thread_activities
+        (activity_id, thread_id, tone, kind, summary, payload_json, sequence, created_at)
+        VALUES
+          ('early-description', ${threadId}, 'info', 'task.progress', 'Progress', '{"taskId":"task-1","description":"Kept"}', 0, ${now}),
+          ('task-2-completed', ${threadId}, 'info', 'task.completed', 'Done', '{"taskId":"task-2","lastToolName":"final"}', 4001, ${now})`;
+
+      const detail = Option.getOrThrow(yield* query.getThreadDetailSnapshotById(threadId));
+      const outsideWindow = detail.thread.activities
+        .filter((activity) => (activity.sequence ?? 0) <= 2001)
+        .map((activity) => activity.id);
+      // Each of task-0, task-1 and task-3 keeps only its newest lastToolName;
+      // task-2 was superseded by its completion. The untouched field survives.
+      assert.deepEqual(outsideWindow, ["early-description"]);
+      assert.isTrue(detail.thread.activities.some((activity) => activity.id === "progress-4000"));
     }),
   );
 
@@ -3018,10 +3058,33 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           runtime_payload_json = excluded.runtime_payload_json
       `;
 
-      const candidates = yield* snapshotQuery.listStaleInFlightThreadIds({
-        updatedBefore: "2026-07-23T09:00:00.000Z",
-        limit: 10,
-      });
+      const verifyTurnSeeks: Statement.Transformer = (statement) =>
+        Effect.gen(function* () {
+          const [query, parameters] = statement.compile();
+          if (!query.includes("projection_thread_messages")) return statement;
+          const plan = yield* sql
+            .unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, parameters)
+            .pipe(Effect.provideService(Statement.CurrentTransformer, undefined), Effect.orDie);
+          // The five-second sweep must seek active turns, not scan every old
+          // message in each thread. This checks the real migrated SQLite plan.
+          const messageReads = plan.filter((row) => /\bmessages\b/.test(row.detail));
+          assert.isAbove(messageReads.length, 0);
+          assert.isTrue(
+            messageReads.every(
+              (row) =>
+                row.detail.includes("COVERING INDEX") &&
+                row.detail.includes("thread_id=? AND turn_id=?"),
+            ),
+            JSON.stringify(messageReads),
+          );
+          return statement;
+        });
+      const candidates = yield* snapshotQuery
+        .listStaleInFlightThreadIds({
+          updatedBefore: "2026-07-23T09:00:00.000Z",
+          limit: 10,
+        })
+        .pipe(Effect.provideService(Statement.CurrentTransformer, verifyTurnSeeks));
 
       // Candidacy covers every thread whose projection still claims an active
       // lifecycle past the staleness cutoff, including starting/running sessions
@@ -3078,10 +3141,12 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         limit: 10,
       });
       assert.equal(bindingOnlyCandidates.includes(bindingOnlyThreadId), false);
-      const activityBatch = yield* snapshotQuery.getThreadShellsByIds(
-        [bindingOnlyThreadId, bindingOnlyThreadId, ThreadId.makeUnsafe("missing-runtime-thread")],
-        { includeLatestMessageActivity: true },
-      );
+      const activityBatch = yield* snapshotQuery
+        .getThreadShellsByIds(
+          [bindingOnlyThreadId, bindingOnlyThreadId, ThreadId.makeUnsafe("missing-runtime-thread")],
+          { includeLatestMessageActivity: true },
+        )
+        .pipe(Effect.provideService(Statement.CurrentTransformer, verifyTurnSeeks));
       assert.equal(activityBatch.length, 1);
       assert.equal(activityBatch[0]?.updatedAt, "2026-07-23T09:30:00.000Z");
       const storedBatch = yield* snapshotQuery.getThreadShellsByIds([bindingOnlyThreadId]);

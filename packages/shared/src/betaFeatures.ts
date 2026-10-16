@@ -33,7 +33,20 @@ export const AUDIO_TRAIL_BETA_FEATURE = "audio-trail";
 /** Auto-fix CI (Stable and Beta): the PR menu checkbox, RPCs, and check watcher. */
 export const PULL_REQUEST_AUTO_FIX_BETA_FEATURE = "pull-request-auto-fix";
 
-export const BETA_ONLY_FEATURES: readonly BetaOnlyFeature[] = [];
+/**
+ * Inline visuals (Stable and Beta): the `synara_show_visual` agent tool,
+ * component-spec and sandboxed HTML transcript rows, and the document read.
+ */
+export const INLINE_VISUALS_BETA_FEATURE = "inline-visuals";
+
+/**
+ * Connectors (Beta only): remote MCP servers (Supabase, Linear, ...) the user
+ * signs in to from Settings, proxied to provider sessions through the agent
+ * gateway. Stable refuses the RPCs, the OAuth callback, and the proxy routes.
+ */
+export const MCP_CONNECTORS_BETA_FEATURE = "mcp-connectors";
+
+export const BETA_ONLY_FEATURES: readonly BetaOnlyFeature[] = [MCP_CONNECTORS_BETA_FEATURE];
 
 /**
  * Whether a Beta-only feature is on for this host. Only the Stable
@@ -44,10 +57,7 @@ export function isBetaFeatureEnabled(
   feature: BetaOnlyFeature,
   flavor: SynaraDesktopFlavor | "unknown",
 ): boolean {
-  // Aha retains the complete pinned Beta feature set independently of diagnostics.
-  void feature;
-  void flavor;
-  return true;
+  return !BETA_ONLY_FEATURES.includes(feature) || flavor !== "production";
 }
 
 /** Maps a desktop bundle id to its flavor; blank or unrecognized -> "unknown". */

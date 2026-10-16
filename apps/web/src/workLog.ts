@@ -3,6 +3,8 @@ import {
   type ComputerBuildSignature,
   COMPUTER_CONTROL_DENIED_ACTIVITY_KIND,
   COMPUTER_SETUP_REQUIRED_ACTIVITY_KIND,
+  INLINE_VISUAL_ACTIVITY_KIND,
+  InlineVisualActivityPayload,
   isToolLifecycleItemType,
   type ModelSelection,
   STUDIO_OUTPUTS_ACTIVITY_KIND,
@@ -13,6 +15,7 @@ import {
   type TurnId,
   type UserInputQuestion,
 } from "@synara/contracts";
+import { Option, Schema } from "effect";
 import {
   decodeSubagentAgentStates,
   extractSubagentIdentityHints,
@@ -35,6 +38,7 @@ import {
   deriveReadableToolTitle,
   deriveSpriteToolTitle,
   deriveSynaraMcpToolTitle,
+  extractMcpServerName,
   isGenericToolTitle,
   normalizeCompactToolLabel,
   normalizeToolTextForComparison,
@@ -53,6 +57,7 @@ import {
   type FastModeNotice,
 } from "./lib/fastModeState";
 import { stripProposedPlanBlocksFromText } from "./proposedPlan";
+import { INLINE_VISUALS_ON } from "./betaFeatures";
 
 import type { ChatMessage, ProposedPlan } from "./types";
 
@@ -114,6 +119,7 @@ const SESSION_CONTEXT_RECAP_PREVIEW_MAX_CHARS = 600;
 // Mirror the same-thread Hand off activities in ProviderCommandReactor.ts.
 export const PROVIDER_HANDOFF_ACTIVITY_KIND = "provider.handoff";
 export const PROVIDER_HANDOFF_FAILED_ACTIVITY_KIND = "provider.handoff.failed";
+export const PROVIDER_HANDOFF_BACKGROUND_TASKS_REASON = "background-tasks";
 
 export interface ProviderHandoffInfo {
   status: "completed" | "failed";
@@ -128,6 +134,8 @@ export interface ProviderHandoffInfo {
   contextText: string | null;
   /** Why the target could not start; only set on failure. */
   failureDetail: string | null;
+  /** The failure was the source's live background tasks, which the user may stop. */
+  blockedByBackgroundTasks?: boolean;
   /** Set when that side requested fast mode but its session was not serving it. */
   sourceFastModeNotice?: FastModeNotice | null;
   targetFastModeNotice?: FastModeNotice | null;
@@ -192,6 +200,8 @@ export interface WorkLogEntry {
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
   toolName?: string;
+  /** MCP server that served the call; picks the row's icon (connector, brand). */
+  mcpServer?: string;
   toolCallId?: string;
   toolStatus?: SynaraMcpToolStatus;
   liveActivity?: WorkLogLiveActivity;
@@ -222,6 +232,9 @@ export interface WorkLogEntry {
     name: string;
     output: string;
     outcome: "updated" | "completed" | "failed" | "stopped";
+    // Arrived while its turn was already working: an update inside that
+    // response, not a wake-up that starts a new one.
+    midTurn?: true;
   };
   backgroundTaskCompletion?: WorkLogBackgroundTaskCompletion;
   // One background task for its whole life: the row sits where the agent
@@ -243,6 +256,10 @@ export interface WorkLogEntry {
   // renders as a question/answer exchange that stays visible outside the
   // collapsed turn instead of as two bare "User input" log lines.
   userInputExchange?: ReadonlyArray<WorkLogUserInputExchangeItem>;
+  // A visual the agent published with `synara_show_visual`. Like an answered
+  // question, it renders as its own row that stays visible outside the
+  // collapsed turn; the document is fetched by id when the row mounts.
+  inlineVisual?: InlineVisualActivityPayload;
   // Source activity kind, kept so the timeline can pick a kind-specific icon
   // (e.g. user-input.requested -> question glyph) instead of the generic
   // tone fallback. Same rationale as `toolName` below.
@@ -579,7 +596,13 @@ export function deriveWorkLogEntries(
     // Server-side Studio output attribution is environment-panel data, not transcript work.
     .filter((activity) => activity.kind !== STUDIO_OUTPUTS_ACTIVITY_KIND)
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
-    .map(toDerivedWorkLogEntry);
+    .map(toDerivedWorkLogEntry)
+    // A visual activity is only its row: drop it when the row cannot render
+    // (feature off on Stable, or a payload that does not decode).
+    .filter(
+      (entry) =>
+        entry.activityKind !== INLINE_VISUAL_ACTIVITY_KIND || entry.inlineVisual !== undefined,
+    );
   const userInputExchangeEntries = withUserInputExchanges(entries, ordered);
   // Strip the derivation-only helpers that exist solely on DerivedWorkLogEntry.
   // `toolName` and `activityKind` are intentionally kept: they are public
@@ -615,7 +638,23 @@ export function deriveWorkLogEntries(
       derived[index] = { ...entry, providerHandoff: { ...entry.providerHandoff, ...notices } };
     }
   }
-  const completions = deriveBackgroundTaskCompletionEntries(ordered, latestTurnId, visibleTurnIds);
+  const midTurnNotificationIds = deriveMidTurnNotificationIds(ordered);
+  if (midTurnNotificationIds.size > 0) {
+    for (const [index, entry] of derived.entries()) {
+      if (!entry.monitorNotification || !midTurnNotificationIds.has(entry.id)) continue;
+      // Copy rather than mutate: the entry is shared with the per-activity cache.
+      derived[index] = {
+        ...entry,
+        monitorNotification: { ...entry.monitorNotification, midTurn: true },
+      };
+    }
+  }
+  const completions = deriveBackgroundTaskCompletionEntries(
+    ordered,
+    latestTurnId,
+    visibleTurnIds,
+    midTurnNotificationIds,
+  );
   return [
     ...withBackgroundTaskRows(withSubagentProgressOutcomes(derived, ordered), ordered),
     ...completions,
@@ -1076,14 +1115,50 @@ function deriveTurnFailureEntries(
   return [...failures.values()];
 }
 
+// A background task completion or Monitor event wakes an idle agent into a new
+// response. One that arrives while its turn is already working (the agent
+// stopped its own server, or a build finished between tool calls) is only a
+// status update inside that response. A turn is working once it has run a tool
+// or launched a task, until it completes; a response woken by the notification
+// itself has done neither yet.
+function deriveMidTurnNotificationIds(
+  ordered: ReadonlyArray<OrchestrationThreadActivity>,
+): Set<string> {
+  const workingTurnIds = new Set<string>();
+  const ids = new Set<string>();
+  for (const activity of ordered) {
+    const turnId = activity.turnId;
+    if (!turnId) continue;
+    if (activity.kind === "turn.completed" || activity.kind === "turn.aborted") {
+      workingTurnIds.delete(turnId);
+    } else if (
+      activity.kind.startsWith("tool.") ||
+      activity.kind.startsWith("approval.") ||
+      activity.kind === "task.started"
+    ) {
+      workingTurnIds.add(turnId);
+    } else if (
+      workingTurnIds.has(turnId) &&
+      (activity.kind === "task.completed" ||
+        (activity.kind === "runtime.warning" &&
+          asRecord(activity.payload)?.nativeEventType === "monitor_event"))
+    ) {
+      ids.add(activity.id);
+    }
+  }
+  return ids;
+}
+
 // Completions of tasks a visible "Moved to background" notice announced. They
 // bypass the turn filter once the notice that launched them is visible, and
 // belong to the turn that launched the task: a completion can arrive after the
 // user already started another turn (a stopped turn's subagents report late).
+// A mid-turn completion adds nothing: the task's own row already shows it.
 function deriveBackgroundTaskCompletionEntries(
   ordered: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
   visibleTurnIds: ReadonlySet<TurnId | string> | undefined,
+  midTurnNotificationIds: ReadonlySet<string>,
 ): WorkLogEntry[] {
   const backgroundTasks = new Map<
     string,
@@ -1114,6 +1189,7 @@ function deriveBackgroundTaskCompletionEntries(
     const launched = backgroundTasks.get(payload.taskId);
     if (!launched) continue;
     backgroundTasks.delete(payload.taskId);
+    if (midTurnNotificationIds.has(activity.id)) continue;
     const { turnId: launchTurnId, ...task } = launched;
     const turnId = launchTurnId ?? activity.turnId;
     const noun = task.taskType === "local_agent" ? "Subagent" : "Background task";
@@ -1469,7 +1545,7 @@ function asHandoffModelSelection(
   return fallback as ModelSelection;
 }
 
-function extractProviderHandoffInfo(
+export function extractProviderHandoffInfo(
   payload: Record<string, unknown> | null,
   status: ProviderHandoffInfo["status"],
 ): ProviderHandoffInfo | null {
@@ -1496,6 +1572,9 @@ function extractProviderHandoffInfo(
     }),
     contextText: asTrimmedString(payload?.contextText),
     failureDetail: asTrimmedString(payload?.detail),
+    ...(status === "failed" && payload?.reason === PROVIDER_HANDOFF_BACKGROUND_TASKS_REASON
+      ? { blockedByBackgroundTasks: true }
+      : {}),
   };
 }
 
@@ -1691,6 +1770,7 @@ function withUserInputExchanges(
   return withExchanges.filter((entry) => !answeredActivityIds.has(entry.id));
 }
 
+const decodeInlineVisualPayload = Schema.decodeUnknownOption(InlineVisualActivityPayload);
 const derivedWorkLogEntryCache = new WeakMap<OrchestrationThreadActivity, DerivedWorkLogEntry>();
 
 // Only provider runtime sequences order transcript rows causally; a fallback
@@ -1715,6 +1795,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
   const toolName = extractToolName(payload);
+  const mcpServer = extractMcpServerName(toolName, payload);
   const toolCallId = extractToolCallId(payload);
   const toolStatus = deriveToolLifecycleStatus(activity.kind, payload);
   const entry: DerivedWorkLogEntry = {
@@ -1726,6 +1807,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     tone: activity.tone === "approval" ? "info" : activity.tone,
     activityKind: activity.kind,
     ...(toolName ? { toolName } : {}),
+    ...(mcpServer ? { mcpServer } : {}),
     ...(toolCallId ? { toolCallId } : {}),
     ...(toolStatus ? { toolStatus } : {}),
   };
@@ -1858,6 +1940,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     const automation = extractWorkLogAutomation(payload);
     if (automation) {
       entry.automation = automation;
+    }
+  }
+  if (activity.kind === INLINE_VISUAL_ACTIVITY_KIND && INLINE_VISUALS_ON) {
+    const inlineVisual = Option.getOrUndefined(decodeInlineVisualPayload(activity.payload));
+    if (inlineVisual) {
+      entry.inlineVisual = inlineVisual;
     }
   }
   if (activity.kind === "synara.threads.created") {
@@ -2456,6 +2544,7 @@ function mergeDerivedWorkLogEntries(
   const synaraThreadCreation = next.synaraThreadCreation ?? previous.synaraThreadCreation;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolName = next.toolName ?? previous.toolName;
+  const mcpServer = next.mcpServer ?? previous.mcpServer;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const preservePreviousTerminalState =
     previous.liveActivity !== undefined &&
@@ -2490,6 +2579,7 @@ function mergeDerivedWorkLogEntries(
     ...(synaraThreadCreation ? { synaraThreadCreation } : {}),
     ...(collapseKey ? { collapseKey } : {}),
     ...(toolName ? { toolName } : {}),
+    ...(mcpServer ? { mcpServer } : {}),
     ...(toolCallId ? { toolCallId } : {}),
     ...(toolStatus ? { toolStatus } : {}),
     ...(liveActivity ? { liveActivity } : {}),

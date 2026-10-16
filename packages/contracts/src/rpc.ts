@@ -108,6 +108,14 @@ import {
   ExternalMcpRevokeIntegrationInput,
 } from "./externalMcp";
 import {
+  McpConnector,
+  McpConnectorConnectInput,
+  McpConnectorConnectResult,
+  McpConnectorDisconnectInput,
+  McpConnectorDisconnectResult,
+  McpConnectorSetup,
+} from "./mcpConnectors";
+import {
   DEVICE_WS_METHODS,
   DeviceAttachInput,
   DeviceBootInput,
@@ -483,6 +491,15 @@ export const WsOrchestrationGetTurnDiffRpc = Rpc.make(ORCHESTRATION_WS_METHODS.g
   success: OrchestrationRpcSchemas.getTurnDiff.output,
   error: WsRpcError,
 });
+
+export const WsOrchestrationGetInlineVisualRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getInlineVisual,
+  {
+    payload: OrchestrationRpcSchemas.getInlineVisual.input,
+    success: OrchestrationRpcSchemas.getInlineVisual.output,
+    error: WsRpcError,
+  },
+);
 
 export const WsOrchestrationGetFullThreadDiffRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.getFullThreadDiff,
@@ -1413,6 +1430,30 @@ export const WsServerRefreshExternalMcpPairingRpc = Rpc.make(
   },
 );
 
+export const WsServerListMcpConnectorsRpc = Rpc.make(WS_METHODS.serverListMcpConnectors, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(McpConnector),
+  error: WsRpcError,
+});
+
+export const WsServerConnectMcpConnectorRpc = Rpc.make(WS_METHODS.serverConnectMcpConnector, {
+  payload: McpConnectorConnectInput,
+  success: McpConnectorConnectResult,
+  error: WsRpcError,
+});
+
+export const WsServerDisconnectMcpConnectorRpc = Rpc.make(WS_METHODS.serverDisconnectMcpConnector, {
+  payload: McpConnectorDisconnectInput,
+  success: McpConnectorDisconnectResult,
+  error: WsRpcError,
+});
+
+export const WsServerGetMcpConnectorSetupRpc = Rpc.make(WS_METHODS.serverGetMcpConnectorSetup, {
+  payload: Schema.Struct({}),
+  success: McpConnectorSetup,
+  error: WsRpcError,
+});
+
 export const WsServerListWorktreesRpc = Rpc.make(WS_METHODS.serverListWorktrees, {
   payload: Schema.Struct({}),
   success: ServerListWorktreesResult,
@@ -2004,6 +2045,7 @@ const WsCoreFeatureRpcGroup = RpcGroup.make(
   WsOrchestrationRepairStateRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
+  WsOrchestrationGetInlineVisualRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationListProviderDeliveryBlockersRpc,
   WsOrchestrationReconcileProviderDeliveryRpc,
@@ -2089,6 +2131,10 @@ const WsCoreFeatureRpcGroup = RpcGroup.make(
   WsServerCreateExternalMcpIntegrationRpc,
   WsServerRevokeExternalMcpIntegrationRpc,
   WsServerRefreshExternalMcpPairingRpc,
+  WsServerListMcpConnectorsRpc,
+  WsServerConnectMcpConnectorRpc,
+  WsServerDisconnectMcpConnectorRpc,
+  WsServerGetMcpConnectorSetupRpc,
   WsServerListWorktreesRpc,
   WsServerListLocalServersRpc,
   WsServerStopLocalServerRpc,

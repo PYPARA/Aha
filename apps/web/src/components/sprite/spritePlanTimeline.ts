@@ -13,7 +13,12 @@ export function spriteConversationPlanEntries(
       turnId: !p.displayAfter && p.turnId ? TurnId.makeUnsafe(p.turnId) : null,
       label: "Sprite generation plan",
       tone: "tool",
-      spritePlan: { projectId: p.projectId, planId: p.id, threadId: p.threadId, historical: p.status === "dismissed" && !p.confirmedAt },
+      spritePlan: {
+        projectId: p.projectId,
+        planId: p.id,
+        threadId: p.threadId,
+        historical: p.status === "dismissed" && !p.confirmedAt,
+      },
     }));
 }
 export function mergeSpritePlanEntries(

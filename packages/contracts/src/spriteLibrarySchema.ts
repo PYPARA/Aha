@@ -22,7 +22,13 @@ const ProjectSchema = z
           mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
           assetId: SpriteId.optional(),
           usage: z.enum(["material", "generated-frame"]).optional(),
-          origin: z.object({runId: SpriteId, candidateId: SpriteId, processingVersionId: SpriteId.optional()}).optional(),
+          origin: z
+            .object({
+              runId: SpriteId,
+              candidateId: SpriteId,
+              processingVersionId: SpriteId.optional(),
+            })
+            .optional(),
         }),
       )
       .max(1024),

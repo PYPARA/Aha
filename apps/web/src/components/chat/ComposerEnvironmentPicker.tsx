@@ -93,7 +93,9 @@ export function ComposerEnvironmentPicker({
           <button
             type="button"
             className={
-              isPanel ? ENVIRONMENT_ROW_CLASS_NAME : COMPOSER_TOOLBAR_PICKER_TRIGGER_CLASS_NAME
+              isPanel
+                ? ENVIRONMENT_ROW_CLASS_NAME
+                : `${COMPOSER_TOOLBAR_PICKER_TRIGGER_CLASS_NAME} shrink-0`
             }
           />
         }

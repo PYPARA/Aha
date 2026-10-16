@@ -5,6 +5,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { inspectMigrationBackupPlan } from "./MigrationBackup.ts";
 import { migrationEntries, planMigrationLineageAliasRepairs, runMigrations } from "./Migrations.ts";
 import ImageGenerationMigration from "./Migrations/135_ImageGeneration.ts";
+import ActivityIndexMigration from "./Migrations/137_ProjectionMessageTurnActivityIndex.ts";
 import * as NodeSqliteClient from "./NodeSqliteClient.ts";
 
 const expectedTracker = migrationEntries.map(([id, name]) => ({ migration_id: id, name }));
@@ -42,12 +43,12 @@ it.effect(
       const before = yield* readDrawing();
       const prefixBefore = (yield* readTracker(sql)).filter((row) => row.migration_id <= 131);
       const backup = yield* inspectMigrationBackupPlan;
-      assert.deepStrictEqual(backup, { sourceVersion: "v132", targetVersion: 136 });
+      assert.deepStrictEqual(backup, { sourceVersion: "v132", targetVersion: 137 });
 
       const executed = yield* runMigrations();
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [132, 133, 134, 135, 136],
+        [132, 133, 134, 135, 136, 137],
       );
       assert.deepStrictEqual(yield* readDrawing(), before);
       const tracker = yield* readTracker(sql);
@@ -89,6 +90,7 @@ it.effect("adds drawing to a native Synara 1.0.3 database and supports a fresh d
     assert.deepStrictEqual(yield* runMigrations(), [
       [135, "ImageGeneration"],
       [136, "ImageEditDocuments"],
+      [137, "ProjectionMessageTurnActivityIndex"],
     ]);
     assert.deepStrictEqual(yield* readTracker(sql), expectedTracker);
     const tables =
@@ -112,5 +114,117 @@ it.effect("does not classify an unrelated or mixed lineage as the known Aha draw
     const unrelated = new Map<number, string>(prefix);
     unrelated.set(132, "UnrecognizedMigration");
     assert.deepStrictEqual(planMigrationLineageAliasRepairs(unrelated), []);
+  }),
+);
+
+for (const priorId of [135, 136] as const) {
+  it.effect(`upgrades Aha ${priorId} without renumbering drawing or editing documents`, () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: priorId });
+      yield* sql`INSERT INTO image_jobs VALUES ('preserved-job', 'request', 'provider', 'completed', '2026-10-16', '{"prompt":"Keep"}')`;
+      if (priorId === 136) {
+        yield* sql`INSERT INTO image_edit_documents VALUES ('document', '2026-10-16', '{"layers":[]}')`;
+        yield* sql`INSERT INTO image_edit_document_assets VALUES ('document', 'asset')`;
+        yield* sql`INSERT INTO image_job_documents VALUES ('preserved-job', 'document')`;
+        yield* sql`INSERT INTO image_draft_documents VALUES ('draft', 'document')`;
+      }
+      const beforeTracker = yield* readTracker(sql);
+      const jobs = yield* sql`SELECT * FROM image_jobs`;
+      const documents = priorId === 136 ? yield* sql`SELECT * FROM image_edit_documents` : [];
+      assert.deepStrictEqual(yield* inspectMigrationBackupPlan, {
+        sourceVersion: `v${priorId}`,
+        targetVersion: 137,
+      });
+      assert.deepStrictEqual(
+        (yield* runMigrations()).map(([id]) => id),
+        priorId === 135 ? [136, 137] : [137],
+      );
+      assert.deepStrictEqual(yield* sql`SELECT * FROM image_jobs`, jobs);
+      if (priorId === 136) {
+        assert.deepStrictEqual(yield* sql`SELECT * FROM image_edit_documents`, documents);
+        assert.deepStrictEqual(yield* sql`SELECT * FROM image_edit_document_assets`, [
+          { document_id: "document", asset_id: "asset" },
+        ]);
+        assert.deepStrictEqual(yield* sql`SELECT * FROM image_job_documents`, [
+          { job_id: "preserved-job", document_id: "document" },
+        ]);
+        assert.deepStrictEqual(yield* sql`SELECT * FROM image_draft_documents`, [
+          { draft_id: "draft", document_id: "document" },
+        ]);
+      }
+      assert.deepStrictEqual(
+        (yield* readTracker(sql)).filter((row) => row.migration_id <= priorId),
+        beforeTracker,
+      );
+      assert.deepStrictEqual(yield* readTracker(sql), expectedTracker);
+      assert.deepStrictEqual(yield* runMigrations(), []);
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+  );
+}
+
+it.effect(
+  "imports native Synara 135 through the reviewed alias and keeps its existing activity index",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 134 });
+      yield* ActivityIndexMigration;
+      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (135, 'ProjectionMessageTurnActivityIndex')`;
+      const beforeIndex =
+        yield* sql`SELECT sql FROM sqlite_master WHERE name = 'idx_projection_thread_messages_turn_activity'`;
+      assert.deepStrictEqual(yield* inspectMigrationBackupPlan, {
+        sourceVersion: "v135",
+        targetVersion: 137,
+      });
+      assert.deepStrictEqual(
+        (yield* runMigrations()).map(([id]) => id),
+        [135, 136, 137],
+      );
+      assert.deepStrictEqual(yield* readTracker(sql), expectedTracker);
+      assert.deepStrictEqual(
+        yield* sql`SELECT sql FROM sqlite_master WHERE name = 'idx_projection_thread_messages_turn_activity'`,
+        beforeIndex,
+      );
+      assert.deepStrictEqual(yield* runMigrations(), []);
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("creates the complete fresh lineage and the exact activity-index columns", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    assert.isNull(yield* inspectMigrationBackupPlan);
+    yield* runMigrations();
+    assert.deepStrictEqual(yield* readTracker(sql), expectedTracker);
+    const columns = yield* sql<{
+      name: string;
+    }>`SELECT name FROM pragma_index_info('idx_projection_thread_messages_turn_activity')`;
+    assert.deepStrictEqual(
+      columns.map((row) => row.name),
+      ["thread_id", "turn_id", "updated_at"],
+    );
+    assert.isNull(yield* inspectMigrationBackupPlan);
+    assert.deepStrictEqual(yield* runMigrations(), []);
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect("does not repair mixed or newer native-index trackers through the new alias", () =>
+  Effect.sync(() => {
+    const native = new Map<number, string>(
+      migrationEntries.filter(([id]) => id <= 134).map(([id, name]) => [id, name]),
+    );
+    native.set(135, "ProjectionMessageTurnActivityIndex");
+    assert.deepStrictEqual(planMigrationLineageAliasRepairs(native), [
+      { kind: "remove", migrationId: 135 },
+    ]);
+    for (const [id, name] of [
+      [130, "UnexpectedMigration"],
+      [136, "FutureSynaraMigration"],
+      [138, "FutureAhaMigration"],
+    ] as const) {
+      const mixed = new Map(native);
+      mixed.set(id, name);
+      assert.deepStrictEqual(planMigrationLineageAliasRepairs(mixed), []);
+    }
   }),
 );

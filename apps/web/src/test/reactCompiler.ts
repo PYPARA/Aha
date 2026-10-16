@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { transformSync } from "@babel/core";
 
 export interface CompilerEvent {
@@ -10,6 +11,7 @@ export interface CompilerEvent {
 
 export function compileReactModule(filePath: string): CompilerEvent[] {
   const events: CompilerEvent[] = [];
+  const compilerPath = createRequire(import.meta.url).resolve("babel-plugin-react-compiler");
   transformSync(readFileSync(filePath, "utf8"), {
     filename: filePath,
     configFile: false,
@@ -17,7 +19,7 @@ export function compileReactModule(filePath: string): CompilerEvent[] {
     parserOpts: { plugins: ["typescript", "jsx"] },
     plugins: [
       [
-        "babel-plugin-react-compiler",
+        compilerPath,
         {
           panicThreshold: "none",
           logger: {

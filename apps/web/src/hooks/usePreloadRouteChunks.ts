@@ -17,12 +17,14 @@ export function usePreloadRouteChunks() {
     // New-task navigation is a primary startup action. Warm that route as soon
     // as the root commits so an immediate click never waits for the browser's
     // idle callback (which can be delayed for several seconds during hydration).
-    router.preloadRoute({ to: "/$threadId", params: { threadId: "chunk-preload" } }).catch(() => {
+    // Warm code directly: a synthetic match can be removed by startup redirects
+    // while preloadRoute is still completing, leaving its loader with no owner.
+    Promise.resolve(router.loadRouteChunk(router.routesById["/_chat/$threadId"])).catch(() => {
       // Preloading is best-effort; navigation falls back to loading on demand.
     });
 
     const preloadSettings = () => {
-      router.preloadRoute({ to: "/settings" }).catch(() => {
+      Promise.resolve(router.loadRouteChunk(router.routesById["/_chat/settings"])).catch(() => {
         // Preloading is best-effort; navigation falls back to loading on demand.
       });
     };

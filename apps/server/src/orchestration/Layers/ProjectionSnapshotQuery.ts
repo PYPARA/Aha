@@ -1170,22 +1170,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   SELECT MAX(messages.updated_at)
                   FROM projection_thread_messages AS messages
                   WHERE messages.thread_id = threads.thread_id
-                    AND (
-                      (
-                        sessions.active_turn_id IS NOT NULL
-                        AND messages.turn_id = sessions.active_turn_id
-                      )
-                      OR (
-                        json_extract(runtime.runtime_payload_json, '$.activeTurnId') IS NOT NULL
-                        AND messages.turn_id = json_extract(
-                          runtime.runtime_payload_json,
-                          '$.activeTurnId'
-                        )
-                      )
-                      OR (
-                        latest_turn.state = 'running'
-                        AND messages.turn_id = latest_turn.turn_id
-                      )
+                    AND messages.turn_id IN (
+                      sessions.active_turn_id,
+                      json_extract(runtime.runtime_payload_json, '$.activeTurnId'),
+                      CASE WHEN latest_turn.state = 'running' THEN latest_turn.turn_id END
                     )
                 ),
                 threads.updated_at
@@ -2065,6 +2053,45 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 AND turn_id IS NOT cutoff_turn_id
             ) AS has_newer_turn
           FROM cutoff_turn
+        ),
+        -- Resolve the newest task state and the newest value of each task
+        -- patch field in one pass. Per-row NOT EXISTS lookups re-scanned the
+        -- whole thread for every task row and stalled long-lived threads.
+        task_activities AS MATERIALIZED (
+          SELECT
+            ranked.activity_id,
+            ranked.activity_rank,
+            activity.kind,
+            activity.payload_json,
+            json_extract(activity.payload_json, '$.taskId') AS task_id
+          FROM ranked
+          JOIN projection_thread_activities AS activity USING (thread_id, activity_id)
+          WHERE activity.kind IN ('task.updated', 'task.progress', 'task.completed')
+        ),
+        latest_task_states AS MATERIALIZED (
+          SELECT activity_id
+          FROM (
+            SELECT
+              activity_id,
+              activity_rank,
+              MIN(activity_rank) OVER (PARTITION BY task_id) AS newest_rank
+            FROM task_activities
+            WHERE kind IN ('task.updated', 'task.completed') AND task_id IS NOT NULL
+          )
+          WHERE activity_rank = newest_rank
+        ),
+        latest_task_patches AS MATERIALIZED (
+          SELECT DISTINCT activity_id
+          FROM (
+            SELECT
+              task.activity_id,
+              task.activity_rank,
+              patch.key,
+              MIN(task.activity_rank) OVER (PARTITION BY task.task_id, patch.key) AS newest_rank
+            FROM task_activities AS task, json_each(task.payload_json) AS patch
+            WHERE task.task_id IS NOT NULL
+          )
+          WHERE key != 'taskId' AND activity_rank = newest_rank
         )
         SELECT
           activity_id AS "activityId",
@@ -2135,30 +2162,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             -- displaced by earlier updates with lexically larger random IDs.
             OR (activity.kind = 'task.started' AND json_type(activity.payload_json, '$.taskId') = 'text')
             OR (activity.kind IN ('task.updated', 'task.completed')
-              AND json_type(activity.payload_json, '$.taskId') = 'text' AND NOT EXISTS (
-              SELECT 1 FROM ranked AS later_ranked
-              JOIN projection_thread_activities AS later USING (thread_id, activity_id)
-              WHERE later.thread_id = activity.thread_id
-                AND later.kind IN ('task.updated', 'task.completed')
-                AND json_extract(later.payload_json, '$.taskId') = json_extract(activity.payload_json, '$.taskId')
-                AND later_ranked.activity_rank < ranked.activity_rank
-            ))
+              AND json_type(activity.payload_json, '$.taskId') = 'text'
+              AND ranked.activity_id IN (SELECT activity_id FROM latest_task_states))
             OR (activity.kind IN ('task.updated', 'task.progress')
-              AND json_type(activity.payload_json, '$.taskId') = 'text' AND EXISTS (
-              SELECT 1 FROM json_each(activity.payload_json) patch
-              WHERE patch.key != 'taskId' AND NOT EXISTS (
-                SELECT 1 FROM ranked AS later_ranked
-                JOIN projection_thread_activities AS later USING (thread_id, activity_id)
-                WHERE later.thread_id = activity.thread_id
-                  AND later.kind IN ('task.updated', 'task.progress', 'task.completed')
-                  AND json_extract(later.payload_json, '$.taskId') = json_extract(activity.payload_json, '$.taskId')
-                  AND EXISTS (
-                    SELECT 1 FROM json_each(later.payload_json) newer_patch
-                    WHERE newer_patch.key = patch.key
-                  )
-                  AND later_ranked.activity_rank < ranked.activity_rank
-              )
-            ))
+              AND json_type(activity.payload_json, '$.taskId') = 'text'
+              AND ranked.activity_id IN (SELECT activity_id FROM latest_task_patches))
             OR (activity.kind = 'turn.tasks.updated' AND NOT EXISTS (
               SELECT 1 FROM ranked AS later_ranked
               JOIN projection_thread_activities AS later USING (thread_id, activity_id)
@@ -2276,9 +2284,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         SELECT
           messages.thread_id AS "threadId",
           MAX(messages.updated_at) AS "updatedAt"
-        FROM projection_thread_messages AS messages
-        INNER JOIN projection_threads AS threads
-          ON threads.thread_id = messages.thread_id
+        FROM projection_threads AS threads
         LEFT JOIN projection_thread_sessions AS sessions
           ON sessions.thread_id = threads.thread_id
         LEFT JOIN provider_session_runtime AS runtime
@@ -2286,23 +2292,18 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         LEFT JOIN projection_turns AS latest_turn
           ON latest_turn.thread_id = threads.thread_id
          AND latest_turn.turn_id = threads.latest_turn_id
-        WHERE messages.thread_id IN ${sql.in(threadIds)}
+        -- Keep message lookup after the small owner set so SQLite can bind
+        -- both thread_id and the in-flight turn IDs before reading the index.
+        CROSS JOIN projection_thread_messages AS messages
+        WHERE threads.thread_id IN ${sql.in(threadIds)}
+          AND messages.thread_id = threads.thread_id
           AND threads.deleted_at IS NULL
-          AND (
-            (
-              sessions.active_turn_id IS NOT NULL
-              AND messages.turn_id = sessions.active_turn_id
-            )
-            OR (
-              json_extract(runtime.runtime_payload_json, '$.activeTurnId') IS NOT NULL
-              AND messages.turn_id = json_extract(runtime.runtime_payload_json, '$.activeTurnId')
-            )
-            OR (
-              latest_turn.state = 'running'
-              AND messages.turn_id = latest_turn.turn_id
-            )
+          AND messages.turn_id IN (
+            sessions.active_turn_id,
+            json_extract(runtime.runtime_payload_json, '$.activeTurnId'),
+            CASE WHEN latest_turn.state = 'running' THEN latest_turn.turn_id END
           )
-        GROUP BY messages.thread_id
+        GROUP BY threads.thread_id
       `,
   });
 

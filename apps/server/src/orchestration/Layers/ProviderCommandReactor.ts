@@ -2,6 +2,7 @@ import { ImageGenerationService } from "../../imageGeneration/Services/ImageGene
 import { spriteConversationPrompt } from "../../spriteAnimation/spriteConversation";
 import { appendAppSnapPromptContext } from "../../provider/appSnapPromptContext.ts";
 import { isServerBetaFeatureEnabled } from "../../betaFeatureGate";
+import { MCP_CONNECTORS_BETA_FEATURE } from "@synara/shared/betaFeatures";
 import { computerActivationMetadata } from "../../computer/computerActivation.ts";
 import { parseComputerInvocation } from "@synara/shared/computerInvocation";
 import { AgentGatewaySessionRegistry } from "../../agentGateway/Services/AgentGatewaySessionRegistry";
@@ -122,6 +123,7 @@ import {
   resolveThreadMentionPromptProjection,
   threadMentionContextSuffix,
 } from "../../provider/threadMentionContext.ts";
+import { projectConnectorMentions } from "../../provider/connectorMentionContext.ts";
 import {
   TextGeneration,
   type BranchNameGenerationInput,
@@ -411,6 +413,8 @@ const serverCommandId = (tag: string): CommandId =>
 const PROVIDER_CONTEXT_LIFECYCLE_ACTIVITY_KIND = "provider.context.changed";
 const PROVIDER_HANDOFF_ACTIVITY_KIND = "provider.handoff";
 const PROVIDER_HANDOFF_FAILED_ACTIVITY_KIND = "provider.handoff.failed";
+// Failure reason the web reads to offer "stop tasks and switch" instead of the raw error.
+const PROVIDER_HANDOFF_BACKGROUND_TASKS_REASON = "background-tasks";
 
 // Activity payloads are plain JSON; a model selection already is, so a JSON
 // round-trip only drops absent optional fields for the payload's Json type.
@@ -3080,19 +3084,30 @@ const make = Effect.gen(function* () {
     // assembled provider input rather than joining `<latest_user_message>`.
     const projectContextPrefix = projectContext.trim().length > 0 ? `${projectContext}\n\n` : "";
     const promptWithProjectContext = `${projectContextPrefix}${authoredMessageText}`;
-    const threadMentionProjection = yield* resolveThreadMentionPromptProjection({
+    const connectorMentionProjection = projectConnectorMentions({
       mentions: input.mentions,
+      enabled: isServerBetaFeatureEnabled(MCP_CONNECTORS_BETA_FEATURE),
+    });
+    const threadMentionProjection = yield* resolveThreadMentionPromptProjection({
+      mentions: connectorMentionProjection.otherMentions,
       snapshotQuery: projectionSnapshotQuery,
+      // The connector block is appended after the thread blocks, so it comes out of
+      // the same input budget.
       maxTotalContextChars: availableThreadMentionContextChars(
         promptWithProjectContext,
-        providerPromptOverheadChars,
+        providerPromptOverheadChars +
+          threadMentionContextSuffix(connectorMentionProjection.contextBlocks).length,
       ),
     });
+    const mentionContextBlocks = [
+      ...threadMentionProjection.contextBlocks,
+      ...connectorMentionProjection.contextBlocks,
+    ];
     const messageText = appendThreadMentionContextBlocks({
       text: promptWithProjectContext,
-      contextBlocks: threadMentionProjection.contextBlocks,
+      contextBlocks: mentionContextBlocks,
     });
-    let mentionContextSuffix = threadMentionContextSuffix(threadMentionProjection.contextBlocks);
+    let mentionContextSuffix = threadMentionContextSuffix(mentionContextBlocks);
     const providerMentions = threadMentionProjection.providerMentions;
     // Subagent threads have no provider session of their own: their messages
     // steer the running child task through the parent session (mirrors the
@@ -4234,15 +4249,30 @@ const make = Effect.gen(function* () {
   const resolveFirstTurnThread = Effect.fnUntraced(function* (
     threadId: ThreadId,
     messageId: string,
+    sourceEventSequence: number,
+    titleSequence?: number,
   ) {
-    const thread = yield* resolveThread(threadId);
-    if (!thread) return null;
-    const userMessages = thread.messages.filter(
-      (message) =>
-        message.role === "user" &&
-        (message.source === "native" || message.source === "async-user-input"),
-    );
-    return userMessages.length === 1 && userMessages[0]?.id === messageId ? thread : null;
+    // The detail snapshot is a capped tail; only the durable first user send owns naming.
+    const first = yield* orchestrationEngine
+      .readThreadEventsThrough(threadId, 0, sourceEventSequence, ["thread.message-sent"])
+      .pipe(
+        Stream.filter(
+          (event) =>
+            event.type === "thread.message-sent" &&
+            event.payload.role === "user" &&
+            (event.payload.source === "native" || event.payload.source === "async-user-input"),
+        ),
+        Stream.runHead,
+      );
+    if (
+      Option.isNone(first) ||
+      first.value.type !== "thread.message-sent" ||
+      first.value.payload.messageId !== messageId ||
+      // A queued promotion is newer than its message; manual naming is fenced at the send.
+      (titleSequence !== undefined && titleSequence > first.value.sequence)
+    )
+      return null;
+    return yield* resolveThread(threadId);
   });
 
   const dispatchTurnForThread = Effect.fnUntraced(function* (
@@ -4358,6 +4388,7 @@ const make = Effect.gen(function* () {
 
   const maybeGenerateAndRenameWorktreeBranchForFirstTurn = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
+    readonly sourceEventSequence: number;
     readonly branch: string | null;
     readonly worktreePath: string | null;
     readonly messageId: string;
@@ -4371,7 +4402,11 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const thread = yield* resolveFirstTurnThread(input.threadId, input.messageId);
+    const thread = yield* resolveFirstTurnThread(
+      input.threadId,
+      input.messageId,
+      input.sourceEventSequence,
+    );
     if (!thread) return;
 
     const oldBranch = input.branch;
@@ -4434,6 +4469,7 @@ const make = Effect.gen(function* () {
   // Only auto-rename placeholder titles that still reflect the first-turn draft state.
   const maybeGenerateAndRenameThreadTitleForFirstTurn = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
+    readonly sourceEventSequence: number;
     readonly messageId: string;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
@@ -4443,7 +4479,12 @@ const make = Effect.gen(function* () {
     const expectedTitleSequence = yield* orchestrationEngine.getThreadTitleHighWaterSequence(
       input.threadId,
     );
-    const thread = yield* resolveFirstTurnThread(input.threadId, input.messageId);
+    const thread = yield* resolveFirstTurnThread(
+      input.threadId,
+      input.messageId,
+      input.sourceEventSequence,
+      expectedTitleSequence,
+    );
     if (!thread) return;
 
     const fallbackTitle = buildPromptThreadTitleFallback(
@@ -4736,6 +4777,7 @@ const make = Effect.gen(function* () {
 
       yield* maybeGenerateAndRenameWorktreeBranchForFirstTurn({
         threadId: event.payload.threadId,
+        sourceEventSequence: event.sequence,
         branch: thread.branch,
         worktreePath: thread.worktreePath,
         messageId: message.id,
@@ -4744,6 +4786,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.forkScoped);
       yield* maybeGenerateAndRenameThreadTitleForFirstTurn({
         threadId: event.payload.threadId,
+        sourceEventSequence: event.sequence,
         messageId: message.id,
         messageText: message.text,
         ...(message.attachments !== undefined ? { attachments: resolvedAttachments } : {}),
@@ -6860,6 +6903,8 @@ const make = Effect.gen(function* () {
     readonly occurredAt: string;
     readonly sourceModelSelection: ModelSelection;
     readonly targetModelSelection: ModelSelection;
+    // The user chose to stop the source's background tasks to switch now.
+    readonly stopBackgroundTasks: boolean;
   }) {
     const thread = yield* resolveThread(input.threadId);
     if (!thread) {
@@ -6876,6 +6921,7 @@ const make = Effect.gen(function* () {
     // protected: ProviderService refuses another provider on the thread until
     // the handoff explicitly abandons it. This also stops the source runtime.
     let sourceContinuationReset = false;
+    let blockedByBackgroundTasks = false;
     const startOutcome = yield* runBoundedProviderCall({
       label: "The provider handoff",
       // Reserve the remaining command budget for the durable source restore
@@ -6895,11 +6941,14 @@ const make = Effect.gen(function* () {
           });
         }
         // A settled foreground turn may still share its runtime with background
-        // tasks. Keep that owner alive until its tasks finish or are stopped.
+        // tasks. Keep that owner alive until its tasks finish or the user agrees
+        // to stop them; the source stop below ends them with the runtime.
         if (
+          !input.stopBackgroundTasks &&
           providerService.hasLiveRuntimeTasks &&
           (yield* providerService.hasLiveRuntimeTasks({ threadId: input.threadId }))
         ) {
+          blockedByBackgroundTasks = true;
           return yield* new ProviderAdapterValidationError({
             provider: input.sourceModelSelection.provider,
             operation: "thread.meta.update",
@@ -6983,6 +7032,9 @@ const make = Effect.gen(function* () {
       freshSessionContextBootstrapThreadIds.add(input.threadId);
     }
     const detail = Cause.squash(startFailure);
+    const sourceName =
+      PROVIDER_DISPLAY_NAMES[input.sourceModelSelection.provider] ??
+      input.sourceModelSelection.provider;
     yield* Effect.logWarning("provider handoff could not start the target session", {
       threadId: input.threadId,
       cause: Cause.pretty(startFailure),
@@ -7004,7 +7056,12 @@ const make = Effect.gen(function* () {
         summary: `Handoff to ${describe(input.targetModelSelection)} failed; the thread stays on ${describe(input.sourceModelSelection)}.`,
         payload: {
           ...payload,
-          detail: detail instanceof Error ? detail.message : String(detail),
+          ...(blockedByBackgroundTasks
+            ? {
+                reason: PROVIDER_HANDOFF_BACKGROUND_TASKS_REASON,
+                detail: `${sourceName} still has background tasks running in this thread.`,
+              }
+            : { detail: detail instanceof Error ? detail.message : String(detail) }),
         },
         turnId: null,
         createdAt,
@@ -7200,6 +7257,7 @@ const make = Effect.gen(function* () {
               occurredAt: event.occurredAt,
               sourceModelSelection: event.payload.providerHandoff.sourceModelSelection,
               targetModelSelection: event.payload.modelSelection,
+              stopBackgroundTasks: event.payload.providerHandoff.stopBackgroundTasks === true,
             });
             return;
           }

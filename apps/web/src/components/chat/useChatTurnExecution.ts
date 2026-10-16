@@ -21,6 +21,7 @@ import { useCallback } from "react";
 import { promoteThreadCreate } from "~/lib/threadCreatePromotion";
 import { waitForDraftThreadDispatchToSettle } from "~/lib/draftThreadDispatch";
 import { runComposerSendOnce } from "~/lib/composerSendOwnership";
+import { ProviderHandoffBackgroundTasksError } from "~/lib/threadHandoff";
 import { newCommandId, randomUUID } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import { dispatchThreadNotes } from "~/pinnedMessages";
@@ -156,6 +157,15 @@ type ChatTurnExecutionInput = Pick<
   | "scheduleFailedWorktreeSetupDispatchReset"
   | "resetLocalDispatch"
 >;
+
+// Keep optional embedded-surface initialization outside the dispatch try block
+// so React Compiler can retain memoization for this keystroke-sensitive hook.
+async function initializeEmbeddedTurnContext(
+  threadId: ThreadId,
+  initialize: ((threadId: ThreadId) => Promise<void>) | undefined,
+) {
+  await initialize?.(threadId);
+}
 
 export function useChatTurnExecution({
   prepareProviderHandoffForSend,
@@ -665,7 +675,7 @@ export function useChatTurnExecution({
           // Embedded surfaces initialize their context only after promotion and
           // before dispatch. Failure uses the normal draft/attachment restore path.
           try {
-            await beforeTurnDispatch?.(threadIdForSend);
+            await initializeEmbeddedTurnContext(threadIdForSend, beforeTurnDispatch);
           } catch (error) {
             surfaceInitializationFailed = true;
             throw error;
@@ -959,7 +969,9 @@ export function useChatTurnExecution({
           if (isFocusedSend)
             setComposerTrigger(detectComposerTrigger(promptForSend, promptForSend.length));
         }
-        if (!setupCancelled) {
+        // A handoff refused by the source's background tasks is explained by
+        // the composer notice, which also offers to stop them.
+        if (!setupCancelled && !(err instanceof ProviderHandoffBackgroundTasksError)) {
           setThreadError(
             threadIdForSend,
             err instanceof Error ? err.message : "Failed to send message.",

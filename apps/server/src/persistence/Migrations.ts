@@ -152,6 +152,7 @@ import Migration0133 from "./Migrations/133_ProjectionTurnsWorkspaceInitializati
 import Migration0134 from "./Migrations/134_ProjectionThreadsForkSourceMessage.ts";
 import Migration0135 from "./Migrations/135_ImageGeneration.ts";
 import Migration0136 from "./Migrations/136_ImageEditDocuments.ts";
+import Migration0137 from "./Migrations/137_ProjectionMessageTurnActivityIndex.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -304,6 +305,7 @@ export const migrationEntries = [
   [134, "ProjectionThreadsForkSourceMessage", Migration0134],
   [135, "ImageGeneration", Migration0135],
   [136, "ImageEditDocuments", Migration0136],
+  [137, "ProjectionMessageTurnActivityIndex", Migration0137],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
@@ -399,6 +401,14 @@ export interface MigrationLineageAlias {
 }
 
 export const MIGRATION_LINEAGE_ALIASES: readonly MigrationLineageAlias[] = [
+  {
+    // Native Synara 1.0.4/1.0.5 recorded the activity index at Aha's drawing
+    // slot. Replay Aha 135/136, then the idempotent index at its appended ID.
+    historicalId: 135,
+    historicalName: "ProjectionMessageTurnActivityIndex",
+    currentId: 137,
+    historicalSlotRequiresRerun: true,
+  },
   {
     // Aha's v1.0.1 drawing build occupied 132 before Synara introduced its own
     // 132–134. Remove only the known legacy tracker claim so upstream migrations

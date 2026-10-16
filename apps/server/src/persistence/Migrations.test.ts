@@ -683,6 +683,7 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         [134, "ProjectionThreadsForkSourceMessage"],
         [135, "ImageGeneration"],
         [136, "ImageEditDocuments"],
+        [137, "ProjectionMessageTurnActivityIndex"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -771,6 +772,7 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
           { migration_id: 134, name: "ProjectionThreadsForkSourceMessage" },
           { migration_id: 135, name: "ImageGeneration" },
           { migration_id: 136, name: "ImageEditDocuments" },
+          { migration_id: 137, name: "ProjectionMessageTurnActivityIndex" },
         ],
       );
       const groupConfigColumns = yield* sql<{ readonly name: string }>`
@@ -939,6 +941,7 @@ agentGatewayRetentionLegacyLayer(
           [134, "ProjectionThreadsForkSourceMessage"],
           [135, "ImageGeneration"],
           [136, "ImageEditDocuments"],
+          [137, "ProjectionMessageTurnActivityIndex"],
         ]);
 
         const columns = yield* sql<{ readonly name: string }>`
@@ -1070,6 +1073,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [134, "ProjectionThreadsForkSourceMessage"],
         [135, "ImageGeneration"],
         [136, "ImageEditDocuments"],
+        [137, "ProjectionMessageTurnActivityIndex"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -1142,6 +1146,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [134, "ProjectionThreadsForkSourceMessage"],
           [135, "ImageGeneration"],
           [136, "ImageEditDocuments"],
+          [137, "ProjectionMessageTurnActivityIndex"],
         ],
       );
 
@@ -1268,6 +1273,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [134, "ProjectionThreadsForkSourceMessage"],
         [135, "ImageGeneration"],
         [136, "ImageEditDocuments"],
+        [137, "ProjectionMessageTurnActivityIndex"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -1336,6 +1342,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [134, "ProjectionThreadsForkSourceMessage"],
           [135, "ImageGeneration"],
           [136, "ImageEditDocuments"],
+          [137, "ProjectionMessageTurnActivityIndex"],
         ],
       );
       const preservedSpaces = yield* sql<{ readonly spaceId: string }>`

@@ -369,15 +369,13 @@ describe("durable image generation tasks", () => {
     const provider = await f.engine.upsertProvider(providerInput());
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              data: [{ b64_json: f.png.toString("base64") }, { b64_json: "invalid" }],
-            }),
-          ),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [{ b64_json: f.png.toString("base64") }, { b64_json: "invalid" }],
+          }),
         ),
+      ),
     );
     const job = await f.engine.createJob(input(provider.id));
     await f.engine.tick();

@@ -71,6 +71,7 @@ import {
 import { ProfileSettingsPanel } from "../components/settings/ProfileSettingsPanel";
 import { ProviderUsageSettingsPanel } from "../components/settings/ProviderUsageSettingsPanel";
 import { ExternalMcpSettingsPanel } from "../components/settings/ExternalMcpSettingsPanel";
+import { McpConnectorsSettingsPanel } from "../components/settings/McpConnectorsSettingsPanel";
 import {
   SettingResetButton,
   SettingsSegmentedControl,
@@ -478,6 +479,9 @@ function SettingsRouteView() {
     ...(settings.sidebarThreadSortOrder !== defaults.sidebarThreadSortOrder
       ? ["Thread sort order"]
       : []),
+    ...(settings.sidebarThreadAttentionFirst !== defaults.sidebarThreadAttentionFirst
+      ? ["Working and unread on top"]
+      : []),
     ...(settings.showChatsSection !== defaults.showChatsSection ? ["Chats section"] : []),
     ...(GROUPS_ON && settings.showGroupsSection !== defaults.showGroupsSection
       ? ["Hubs section"]
@@ -485,6 +489,7 @@ function SettingsRouteView() {
     ...(settings.showAutomationRunThreads !== defaults.showAutomationRunThreads
       ? ["Automation runs"]
       : []),
+    ...(settings.showAsciiBackground !== defaults.showAsciiBackground ? ["ASCII background"] : []),
     ...(settings.uiDensity !== defaults.uiDensity ? ["UI density"] : []),
     ...(settings.chatWidth !== defaults.chatWidth ? ["Chat width"] : []),
     ...(customTitleBarPreferenceDirty ? ["Custom title bar"] : []),
@@ -645,8 +650,8 @@ function SettingsRouteView() {
     const isChanged = settings[settingKey] !== defaults[settingKey];
     return (
       <SettingsRow
-        title={title}
-        description={description}
+        title={tr(title)}
+        description={tr(description)}
         resetAction={
           isChanged ? (
             <SettingResetButton
@@ -663,7 +668,7 @@ function SettingsRouteView() {
             onCheckedChange={(checked) =>
               updateSettings({ [settingKey]: Boolean(checked) } as Partial<AppSettings>)
             }
-            aria-label={ariaLabel}
+            aria-label={tr(ariaLabel)}
           />
         }
       />
@@ -884,6 +889,15 @@ function SettingsRouteView() {
             </SettingsSelectControl>
           }
         />
+
+        {renderBooleanSettingRow({
+          settingKey: "sidebarThreadAttentionFirst",
+          title: "Working and unread on top",
+          description:
+            "With Recently active order, move working and unread threads above the rest. The list holds still while your pointer is over it.",
+          resetLabel: "working and unread on top",
+          ariaLabel: "Move working and unread threads to the top of the sidebar",
+        })}
       </SettingsSection>
 
       <SettingsSection title={tr("Sidebar sections")}>
@@ -1103,6 +1117,17 @@ function SettingsRouteView() {
           ) : null}
         </SettingsSection>
       ) : null}
+
+      <SettingsSection title={tr("Chat background")}>
+        {renderBooleanSettingRow({
+          settingKey: "showAsciiBackground",
+          title: "ASCII background",
+          description:
+            "Show the animated ASCII field on empty chats. Reduced motion keeps the field still.",
+          resetLabel: "ASCII background",
+          ariaLabel: "ASCII background",
+        })}
+      </SettingsSection>
 
       <SettingsSection title="Typography and spacing">
         <SettingsRow
@@ -1731,7 +1756,11 @@ function SettingsRouteView() {
             <div
               className={cn(
                 "mx-auto w-full px-6 py-8",
-                activeSection === "profile" ? "max-w-3xl" : "max-w-2xl",
+                activeSection === "connectors"
+                  ? "max-w-4xl"
+                  : activeSection === "profile"
+                    ? "max-w-3xl"
+                    : "max-w-2xl",
               )}
             >
               {activeSection !== "profile" ? (
@@ -1819,6 +1848,7 @@ function SettingsRouteView() {
                   resetEpoch={resetEpoch}
                 />
                 <ImageProvidersSettingsPanel active={activeSection === "imageProviders"} />
+                <McpConnectorsSettingsPanel active={activeSection === "connectors"} />
                 <ExternalMcpSettingsPanel active={activeSection === "integrations"} />
                 <AdvancedSettingsPanel
                   active={activeSection === "advanced"}

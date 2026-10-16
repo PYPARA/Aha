@@ -996,6 +996,7 @@ export const copy: Record<string, string> = {
   Thinking: "思考中",
   Message: "消息",
   "Message the agent...": "向 Agent 发送消息…",
+  "Do anything in Aha": "在 Aha 中完成任何任务",
   "Ask anything...": "输入任务…",
   "New task": "新任务",
   "Add folder": "添加目录",
@@ -1241,4 +1242,18 @@ export const copy: Record<string, string> = {
   "Don't ask again this session": "本会话不再询问",
   "Reject and let the agent continue": "拒绝并让 Agent 继续",
   "Stop the current turn": "停止当前回合",
+  Priority: "优先处理",
+  "Activity options": "动态选项",
+  "Clear read from Priority": "从优先处理中移除已读项",
+  "Working and unread on top": "工作中和未读会话置顶",
+  "Move working and unread threads to the top of the sidebar": "将工作中和未读会话移至侧栏顶部",
+  "With Recently active order, move working and unread threads above the rest. The list holds still while your pointer is over it.":
+    "按最近活动排序时，将工作中和未读会话置顶。指针停留期间保持列表顺序。",
+  "Chat background": "聊天背景",
+  "ASCII background": "ASCII 背景",
+  "Show the animated ASCII field on empty chats. Reduced motion keeps the field still.":
+    "在空聊天中显示动态 ASCII 背景。减少动态效果时保持静止。",
+  "Stop tasks and switch": "停止任务并切换",
+  "{source} still has background tasks running in this thread, so it can't switch to {target} yet. Stop them to switch now, or wait for them to finish and send again.":
+    "{source} 在此会话中仍有后台任务，暂时无法切换到 {target}。可停止任务立即切换，或等待任务结束后重新发送。",
 };
