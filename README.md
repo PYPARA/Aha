@@ -2,7 +2,7 @@
 
 <img src="apps/web/public/aha-logo.png" alt="Aha 图标" width="96" />
 
-Aha 是基于 [Synara](https://github.com/Emanuele-web04/synara) 二次开发的本地编程 Agent 工作台，当前源码已合入 **Synara v1.0.5**。原基线、历次合并提交和数据库兼容信息见 [UPSTREAM.md](UPSTREAM.md)。
+Aha 是基于 [Synara](https://github.com/Emanuele-web04/synara) 二次开发的本地编程 Agent 工作台，当前源码已合入 **Synara v1.0.7**。原基线、历次合并提交和数据库兼容信息见 [UPSTREAM.md](UPSTREAM.md)。
 
 支持项目与聊天、供应商会话、Git、编辑器、终端、浏览器及自动化，并提供 Aha 中文界面、五区背景与内置皮肤、绘图工作台、精灵动画工作台和资源中心。供应商能力取决于本地运行时、账号和权限。
 

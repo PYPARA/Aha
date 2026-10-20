@@ -1167,8 +1167,9 @@ function mapCodexHookEvent(
   };
 }
 
-// Configuration/lifecycle bookkeeping belongs in native diagnostics, not the transcript.
+// Internal metadata and configuration/lifecycle bookkeeping stay in native diagnostics.
 const DIAGNOSTIC_ONLY_CODEX_METHODS = new Set([
+  "turn/moderationMetadata",
   "item/autoApprovalReview/started",
   "remoteControl/status/changed",
   "skills/changed",
@@ -1539,9 +1540,12 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "turn/diff/updated") {
+    // Each patch resends the whole cumulative turn diff. Keep it only in
+    // payload.unifiedDiff: copying it into raw doubles every journal write,
+    // sizing pass and decode for no reader.
     return [
       {
-        ...runtimeEventBase(event, canonicalThreadId),
+        ...runtimeDeltaEventBase(event, canonicalThreadId),
         type: "turn.diff.updated",
         payload: {
           unifiedDiff:

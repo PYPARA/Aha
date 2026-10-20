@@ -459,6 +459,10 @@
     "./ahaUserDirectories": {
       "types": "./src/ahaUserDirectories.ts",
       "import": "./src/ahaUserDirectories.ts"
+    },
+    "./wsRequestClass": {
+      "types": "./src/wsRequestClass.ts",
+      "import": "./src/wsRequestClass.ts"
     }
   },
   "scripts": {

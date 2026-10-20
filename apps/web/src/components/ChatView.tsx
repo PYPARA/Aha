@@ -978,6 +978,7 @@ export default function ChatView({
   ]);
 
   const composerFormRef = useRef<HTMLFormElement>(null);
+  const composerSurfaceRef = useRef<HTMLDivElement>(null);
   const composerStatusRowRef = useRef<HTMLDivElement>(null);
   // Set by whichever mounted GitActionsControl instance (header quick-action or the
   // Environment panel row) last registered — either performs the identical commit &
@@ -6460,6 +6461,7 @@ export default function ChatView({
             {...threadMentionDropzoneProps}
           >
             <div
+              ref={composerSurfaceRef}
               data-chat-composer-surface=""
               className={cn(
                 COMPOSER_INPUT_SURFACE_CLASS_NAME,
@@ -6928,7 +6930,7 @@ export default function ChatView({
                   className="relative flex min-h-0 flex-1 items-center justify-center"
                 >
                   {settings.showAsciiBackground && !terminalWorkspaceTerminalTabActive ? (
-                    <AsciiWaveBackground />
+                    <AsciiWaveBackground exclusionRef={composerSurfaceRef} />
                   ) : null}
                   {/* Pinned to the top so the heading stays optically centered; hidden on
                       short panes where it would crowd the heading. */}

@@ -22,6 +22,36 @@ import type { WhatsNewEntry } from "./logic";
 
 export const WHATS_NEW_ENTRIES: readonly WhatsNewEntry[] = [
   {
+    version: "1.0.7",
+    date: "Oct 20",
+    features: [
+      {
+        id: "long-conversations",
+        title: "Faster long conversations and parallel work",
+        description:
+          "Long chats do less repeated history work, while parallel requests share bounded queues and workspace refreshes.",
+      },
+      {
+        id: "long-turn-resources",
+        title: "Lighter long-running agent turns",
+        description:
+          "Streaming answers reuse completed Markdown blocks and unchanged chat rows. Desktop previews and browser helpers settle when unused.",
+      },
+      {
+        id: "workspace-recovery",
+        title: "Recovery before editing a message",
+        description:
+          "Aha keeps a Git recovery snapshot before an edit rolls back the conversation. If the snapshot fails, the rollback is stopped.",
+      },
+      {
+        id: "provider-recovery",
+        title: "More reliable model switches and session recovery",
+        description:
+          "Claude controls follow the installed CLI. Model discovery preserves complete results, and stopped OpenCode sessions can recover on the next turn.",
+      },
+    ],
+  },
+  {
     version: "1.0.5",
     date: "Oct 15",
     features: [

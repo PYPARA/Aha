@@ -7,6 +7,7 @@ import path from "node:path";
 // mock Images API. Normal test runs never connect to a configured provider.
 const target = process.env.AHA_DRAWING_E2E_URL;
 const mock = process.env.AHA_DRAWING_E2E_MOCK_URL;
+const artifacts = path.resolve(import.meta.dirname, "../../../../../.tmp/validation/drawing");
 let browser: Browser | undefined;
 let lastPage: Page | undefined;
 async function dismissStartupSheets(page: Page) {
@@ -22,7 +23,8 @@ async function dismissStartupSheets(page: Page) {
 afterAll(async () => {
   if (lastPage && !lastPage.isClosed()) {
     console.log("FINAL_URL", lastPage.url(), await lastPage.locator("body").innerText());
-    await lastPage.screenshot({ path: "/private/tmp/aha-drawing-last.png" });
+    await mkdir(artifacts, { recursive: true });
+    await lastPage.screenshot({ path: path.join(artifacts, "last.png") });
   }
   await browser?.close();
 });
@@ -108,7 +110,6 @@ describe.skipIf(!target || !mock)("drawing workspace through the real UI and RPC
     await providerRow.hover();
     await page.getByRole("menuitemradio", { name: "gpt-image-second", exact: true }).waitFor();
     await assertMenuWidth();
-    const artifacts = path.resolve(".smoke/drawing");
     await mkdir(artifacts, { recursive: true });
     await page.screenshot({ path: path.join(artifacts, "drawing-provider-picker-fixed.png") });
     await page.getByRole("menuitemradio", { name: "gpt-image-second", exact: true }).click();

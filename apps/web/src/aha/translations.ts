@@ -5,6 +5,18 @@ import { resourceCopy } from "./resourceCopy";
 export const copy: Record<string, string> = {
   ...resourceCopy,
   ...spriteV5Copy,
+  "Faster long conversations and parallel work": "长对话与并行工作更流畅",
+  "Long chats do less repeated history work, while parallel requests share bounded queues and workspace refreshes.":
+    "减少长聊天中重复的历史读取；并行请求通过有界队列处理，工作区刷新更加平稳。",
+  "Lighter long-running agent turns": "长回合运行更轻量",
+  "Streaming answers reuse completed Markdown blocks and unchanged chat rows. Desktop previews and browser helpers settle when unused.":
+    "流式回答复用已完成的 Markdown 区块和未变化的聊天行；桌面预览与浏览器辅助视图在闲置时释放资源。",
+  "Recovery before editing a message": "编辑消息前保留恢复快照",
+  "Aha keeps a Git recovery snapshot before an edit rolls back the conversation. If the snapshot fails, the rollback is stopped.":
+    "编辑消息需要回滚对话时，Aha 会先保留 Git 恢复快照；快照创建失败时停止回滚。",
+  "More reliable model switches and session recovery": "模型切换与会话恢复更可靠",
+  "Claude controls follow the installed CLI. Model discovery preserves complete results, and stopped OpenCode sessions can recover on the next turn.":
+    "Claude 控件跟随已安装 CLI 的能力；模型探测保留完整结果，已停止的 OpenCode 会话可在下一回合恢复。",
   "Loading task results…": "正在读取任务与结果…",
   "Task results partially recovered": "任务结果已部分恢复",
   "Task results unavailable": "任务结果读取异常",
