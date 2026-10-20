@@ -5,7 +5,11 @@ import {
   type EmbeddedChatAttachments,
   useEmbeddedAttachmentPending,
 } from "./chat/EmbeddedChatAttachments";
-import { ResourceChatContext, useResourceAttachments } from "./resources/resourceLibrary";
+import {
+  ResourceChatContext,
+  useResourceAttachments,
+  type ResourceReceiveResult,
+} from "./resources/resourceLibrary";
 import { useAhaTranslation } from "../aha/AppearanceProvider";
 import { AhaBackgroundLayer } from "../aha/BackgroundLayer";
 import { type LegendListRef } from "@legendapp/list/react";
@@ -119,6 +123,7 @@ import {
 } from "../composer-logic";
 import {
   useComposerDraftStore,
+  type ComposerFileAttachment,
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
 } from "../composerDraftStore";
@@ -144,7 +149,7 @@ import { MCP_CONNECTORS_ON } from "../betaFeatures";
 import { mcpConnectorsQueryOptions } from "../lib/mcpConnectorsReactQuery";
 import { providerSupportsMcpConnectors } from "@synara/shared/mcpConnectors";
 import { useComposerThreadMentionDrop } from "../hooks/useComposerThreadMentionDrop";
-import { splitComposerDropzoneFiles, useComposerDropzone } from "../hooks/useComposerDropzone";
+import { useComposerDropzone } from "../hooks/useComposerDropzone";
 import { useComposerImageIntake } from "../hooks/useComposerImageIntake";
 import { useComposerSlashCommands } from "../hooks/useComposerSlashCommands";
 import { useClaudeContextCompaction } from "../hooks/useClaudeContextCompaction";
@@ -540,6 +545,55 @@ function getRateLimitBannerDismissalKey(
     status.resetsAt ?? "",
     typeof status.utilization === "number" ? String(Math.round(status.utilization * 100)) : "",
   ].join("\u001f");
+}
+
+// Keep intake outside ChatView: React Compiler cannot lower throws inside a try block.
+async function receiveComposerResourceFiles(
+  files: readonly File[],
+  threadId: ThreadId,
+  addImages: (images: ComposerImageAttachment[]) => number,
+  addFiles: (files: ComposerFileAttachment[]) => number,
+): Promise<ResourceReceiveResult> {
+  const result: ResourceReceiveResult = { accepted: [], rejected: [] };
+  for (const [index, file] of files.entries()) {
+    try {
+      const existingAttachmentCount = effectiveComposerAttachmentCount(
+        useComposerDraftStore.getState().draftsByThreadId[threadId],
+      );
+      if (file.type.startsWith("image/")) {
+        const prepared = await prepareComposerImageAttachmentsFromFiles({
+          files: [file],
+          existingAttachmentCount,
+        });
+        const accepted = prepared.images.length ? addImages(prepared.images) : 0;
+        if (!accepted) {
+          for (const image of prepared.images)
+            if (image.previewUrl.startsWith("blob:")) URL.revokeObjectURL(image.previewUrl);
+          throw new Error(
+            prepared.error ??
+              `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} references per message.`,
+          );
+        }
+      } else {
+        const prepared = buildComposerFileAttachmentsFromFiles({
+          files: [file],
+          existingAttachmentCount,
+        });
+        if (!prepared.files.length || !addFiles(prepared.files))
+          throw new Error(
+            prepared.error ??
+              `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} references per message.`,
+          );
+      }
+      result.accepted.push(index);
+    } catch (cause) {
+      result.rejected.push({
+        index,
+        error: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  }
+  return result;
 }
 
 const VOICE_RECORDER_ACTION_ARM_DELAY_MS = 250;
@@ -4232,16 +4286,35 @@ export default function ChatView({
   );
 
   const addComposerAttachments = useCallback(
-    (files: readonly File[]) => {
-      const { imageFiles, genericFiles } = splitComposerDropzoneFiles(files);
-      if (imageFiles.length > 0) {
-        addComposerImages(imageFiles);
+    async (files: readonly File[]): Promise<ResourceReceiveResult> => {
+      if (!activeThreadId || isSidechatExpired || pendingUserInputs.length) {
+        return {
+          accepted: [],
+          rejected: files.map((_, index) => ({
+            index,
+            error: "The destination is not ready to accept attachments.",
+          })),
+        };
       }
-      if (genericFiles.length > 0) {
-        addComposerFiles(genericFiles);
-      }
+      await waitForLocalComposerImages();
+      const result = await receiveComposerResourceFiles(
+        files,
+        activeThreadId,
+        addComposerImagesToDraft,
+        addComposerFilesToDraft,
+      );
+      setThreadError(activeThreadId, result.rejected.map((item) => item.error).join("\n") || null);
+      return result;
     },
-    [addComposerFiles, addComposerImages],
+    [
+      activeThreadId,
+      isSidechatExpired,
+      pendingUserInputs.length,
+      waitForLocalComposerImages,
+      addComposerImagesToDraft,
+      addComposerFilesToDraft,
+      setThreadError,
+    ],
   );
 
   useResourceAttachments(

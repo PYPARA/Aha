@@ -1,10 +1,11 @@
+import { validateSpriteEdit } from "./spriteEdit";
 import type {
   SpritePlanAction,
   SpriteSliceConfiguration,
   SpriteLayoutIssue,
   SpriteCandidate,
 } from "./spriteAnimation";
-export const SPRITE_ANALYSIS_VERSION = "layout-1";
+export const SPRITE_ANALYSIS_VERSION = "layout-2";
 export function spriteBoundaries(length: number, count: number, start = 0): number[] {
   if (![length, count, start].every(Number.isInteger) || count < 1 || length < count || start < 0)
     throw new Error("Invalid grid dimensions.");
@@ -41,6 +42,7 @@ export function validateSpriteSlice(
   width: number,
   height: number,
 ) {
+  if (slice.edit) return validateSpriteEdit(slice.edit, width, height);
   const cells = slice.rows.flatMap((r) => r.cells);
   if (
     !slice.rows.length ||
@@ -63,6 +65,18 @@ export function validateSpriteSlice(
         c.y + c.height > height
       )
         throw new Error("Frame is outside its source image.");
+    for (const c of row.cells) {
+      const left = slice.anchorX + (c.originX === undefined ? 0 : c.x - c.originX);
+      const top = slice.anchorY + (c.originY === undefined ? 0 : c.y - c.originY);
+      if (
+        ![left, top].every(Number.isFinite) ||
+        left < 0 ||
+        top < 0 ||
+        left + c.width > slice.canvasWidth ||
+        top + c.height > slice.canvasHeight
+      )
+        throw new Error("The shared canvas must contain every frame region.");
+    }
   }
   const active = cells.filter((c) => c.enabled);
   for (let i = 0; i < active.length; i++)
@@ -91,23 +105,64 @@ export function validateSpriteSlice(
     throw new Error("The shared anchor falls outside the canvas.");
 }
 export function spriteBlockedActions(candidate: SpriteCandidate): Set<string> {
-  const reviewed = new Set(candidate.slice?.reviewedActionIds ?? []);
+  if (["failed", "pending", "processing"].includes(candidate.status))
+    return new Set(candidate.actions.map((a) => a.action.id));
+  if (candidate.slice) {
+    try {
+      validateSpriteSlice(candidate.slice, candidate.source.width, candidate.source.height);
+    } catch {
+      return new Set(candidate.actions.map((a) => a.action.id));
+    }
+  }
+  const emptyActions = candidate.actions
+    .filter(
+      (a) =>
+        !a.frames.length || (a.action.frameCount > 0 && a.frames.length !== a.action.frameCount),
+    )
+    .map((a) => a.action.id);
+  const reviewed = new Set([
+    ...(candidate.slice?.reviewedActionIds ?? []),
+    ...(candidate.reviews ?? [])
+      .filter(
+        (r) =>
+          r.processingVersionId === candidate.processingVersionId &&
+          r.analysisRevision === (candidate.analysisRevision ?? 0),
+      )
+      .map((r) => r.actionId),
+  ]);
   const actionIds = new Set(candidate.actions.map((a) => a.action.id));
-  return new Set(
-    (candidate.issues ?? [])
+  return new Set([
+    ...emptyActions,
+    ...(candidate.issues ?? [])
       .filter(
         (i) =>
           i.severity === "error" &&
-          (!i.actionId || (actionIds.has(i.actionId) && !reviewed.has(i.actionId))),
+          (!i.actionId ||
+            (actionIds.has(i.actionId) &&
+              (["empty", "missing-frames"].includes(i.code) || !reviewed.has(i.actionId)))),
       )
       .flatMap((i) =>
         i.actionId
           ? [i.actionId]
           : (candidate.actions ?? [])
-              .filter((a) => !reviewed.has(a.action.id))
+              .filter(
+                (a) => ["empty", "missing-frames"].includes(i.code) || !reviewed.has(a.action.id),
+              )
               .map((a) => a.action.id),
       ),
-  );
+  ]);
+}
+/** Structural validity is required before preview assembly; human review is recorded separately. */
+export function spriteStructuralBlockedActions(candidate: SpriteCandidate): Set<string> {
+  return spriteBlockedActions({
+    ...candidate,
+    reviews: candidate.actions.map((a) => ({
+      actionId: a.action.id,
+      processingVersionId: candidate.processingVersionId,
+      analysisRevision: candidate.analysisRevision ?? 0,
+      createdAt: "",
+    })),
+  });
 }
 export function spriteIssue(
   code: string,

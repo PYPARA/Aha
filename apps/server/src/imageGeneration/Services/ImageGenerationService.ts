@@ -1,5 +1,10 @@
 import { SpriteEngine } from "../../spriteAnimation/spriteEngine";
-import type { SpriteCommand, SpriteState, SpritePlanConfirmInput } from "@synara/contracts";
+import type {
+  SpriteCommand,
+  SpriteState,
+  SpritePlanConfirmInput,
+  SpriteRetryConfirmInput,
+} from "@synara/contracts";
 import { Effect, Layer, PubSub, ServiceMap, Stream } from "effect";
 import path from "node:path";
 import type {
@@ -25,6 +30,7 @@ import { ImageGenerationEngine } from "../imageGenerationEngine";
 export interface ImageGenerationServiceShape {
   spriteDetachThread: (threadId: string) => Effect.Effect<void, Error>;
   spritePropose: (input: SpriteCommand) => Effect.Effect<SpriteState, Error>;
+  spriteRetryConfirm: (input: SpriteRetryConfirmInput) => Effect.Effect<SpriteState, Error>;
   spriteConfirm: (input: SpritePlanConfirmInput) => Effect.Effect<SpriteState, Error>;
   spriteCommand: (input: SpriteCommand) => Effect.Effect<SpriteState, Error>;
   spriteForThread: (threadId: string, turnId?: string) => Effect.Effect<SpriteState | null, Error>;
@@ -104,6 +110,7 @@ export const ImageGenerationServiceLive = Layer.effect(
     const service: ImageGenerationServiceShape = {
       spriteDetachThread: (id) => promise(() => sprites.detachThread(id)),
       spritePropose: (input) => promise(() => sprites.command(input, true)),
+      spriteRetryConfirm: (input) => promise(() => sprites.retryConfirm(input)),
       spriteConfirm: (input) => promise(() => sprites.confirm(input)),
       spriteCommand: (input) => promise(() => sprites.command(input)),
       spriteForThread: (id, turnId) => promise(() => sprites.forThread(id, turnId)),

@@ -3311,8 +3311,14 @@ describe("ChatView transcript geometry (full app)", () => {
         .toBeVisible();
       await page.getByRole("button", { name: "New sprite project", exact: true }).click();
       await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Fox knight");
-      await page.getByRole("button", { name: "Create", exact: true }).click();
+      await page.getByRole("button", { name: "Create sprite project", exact: true }).click();
       await expect.element(page.getByTestId("sprite-workbench")).toBeVisible();
+      const openSpriteAssistant = async () => {
+        if (document.querySelector('button[aria-label="Open inspector"]'))
+          await page.getByRole("button", { name: "Open inspector", exact: true }).click();
+        await page.getByRole("button", { name: "AI assistant", exact: true }).click();
+      };
+      await openSpriteAssistant();
       await page.getByRole("button", { name: "New conversation", exact: true }).first().click();
       await waitForComposerEditor();
       const sprite = [...projects.values()][0]!;
@@ -3340,6 +3346,9 @@ describe("ChatView transcript geometry (full app)", () => {
         )!,
         new File([imageBlob], "fox.png", { type: "image/png" }),
       );
+      if (document.querySelector('button[aria-label="Actions list"]'))
+        await page.getByRole("button", { name: "Actions list", exact: true }).click();
+      await page.getByRole("button", { name: "Image sources", exact: true }).click();
       await page.getByRole("button", { name: "Add to conversation: fox.png", exact: true }).click();
       await vi.waitFor(() =>
         expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.images).toHaveLength(1),
@@ -3431,22 +3440,24 @@ describe("ChatView transcript geometry (full app)", () => {
       );
       await page.getByRole("combobox", { name: "Sprite conversations", exact: true }).click();
       await page.getByTestId(`sprite-chat-option-${secondId}`).click();
-      await page.getByRole("button", { name: "Back to projects", exact: true }).click();
+      await page.getByRole("button", { name: "Project options", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Back to projects", exact: true }).click();
       await expect
         .element(page.getByRole("button", { name: "Open project: Fox knight", exact: true }))
         .toBeVisible();
-      await page.getByRole("button", { name: "Rename", exact: true }).click();
+      await page.getByRole("button", { name: "Project options: Fox knight", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Rename", exact: true }).click();
       await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Knight idle");
       await page.getByRole("button", { name: "Save", exact: true }).click();
       await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
       await page
-        .getByRole("textbox", { name: "Search sprite projects", exact: true })
+        .getByRole("searchbox", { name: "Search sprite projects", exact: true })
         .fill("missing");
       await expect
         .element(page.getByRole("button", { name: "Open project: Knight idle", exact: true }))
         .not.toBeInTheDocument();
       await page
-        .getByRole("textbox", { name: "Search sprite projects", exact: true })
+        .getByRole("searchbox", { name: "Search sprite projects", exact: true })
         .fill("Knight");
       emitWsTransportState("open");
       await waitForLayout();
@@ -3458,6 +3469,7 @@ describe("ChatView transcript geometry (full app)", () => {
       await expect.element(page.getByTestId("sprite-workbench")).toBeVisible();
       expect(mounted.router.state.location.search).toMatchObject({ projectId: sprite.id });
       expect(projects.get(sprite.id)?.activeThreadId).toBe(secondId);
+      await openSpriteAssistant();
       await waitForComposerEditor();
       emitWsTransportState("open");
       await waitForLayout();
@@ -3467,7 +3479,8 @@ describe("ChatView transcript geometry (full app)", () => {
       });
       const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
       try {
-        await page.getByRole("button", { name: "Delete", exact: true }).click();
+        await page.getByRole("button", { name: "Project options", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
         await expect.element(page.getByTestId("sprite-library")).toBeVisible();
         expect(projects.size).toBe(0);
         expect(fixture.snapshot.threads.some((t) => t.id === threadId)).toBe(true);

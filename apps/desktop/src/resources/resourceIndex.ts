@@ -8,6 +8,7 @@ import {
 } from "@synara/contracts/resourceLibrary";
 export class ResourceIndex {
   private database: DatabaseSync;
+  revision = 0;
   constructor(file: string) {
     this.database = new DatabaseSync(file);
     this.database.exec(`CREATE TABLE IF NOT EXISTS resource_entries (
@@ -43,49 +44,98 @@ export class ResourceIndex {
       throw e;
     }
   }
-  list(query: ResourceQuery): ResourcePage {
+  private conditions(query: ResourceQuery, filtered = true) {
     const predicates: string[] = [];
     const values: (string | number)[] = [];
+    if (query.kind) {
+      predicates.push("kind = ?");
+      values.push(query.kind);
+    }
     if (query.recursive) {
       if (query.path) {
-        predicates.push("substr(path, 1, ?) = ?");
-        values.push(query.path.length + 1, query.path + "/");
+        predicates.push("instr(path, ?) = 1");
+        values.push(query.path + "/");
       }
     } else {
       predicates.push("parent = ?");
       values.push(query.path);
     }
-    if (query.query) {
-      predicates.push("instr(lower(name), lower(?)) > 0");
+    if (filtered && query.query) {
+      predicates.push(
+        query.searchIn === "nameAndPath"
+          ? "(instr(lower(name), lower(?)) > 0 OR instr(lower(path), lower(?)) > 0)"
+          : "instr(lower(name), lower(?)) > 0",
+      );
       values.push(query.query);
+      if (query.searchIn === "nameAndPath") values.push(query.query);
     }
-    if (query.tag) {
+    if (filtered && query.tag) {
       predicates.push(
         "EXISTS (SELECT 1 FROM json_each(resource_entries.tags) WHERE instr(lower(value), lower(?)) > 0)",
       );
       values.push(query.tag);
     }
-    if (query.type && query.type !== "all") {
+    if (filtered && query.type && query.type !== "all") {
       predicates.push("kind = 'file' AND category = ?");
       values.push(query.type);
     }
-    const where = predicates.length ? " WHERE " + predicates.join(" AND ") : "";
-    const total = Number(
-      this.database.prepare("SELECT count(*) AS n FROM resource_entries" + where).get(...values)
-        ?.n ?? 0,
+    return { where: predicates.length ? " WHERE " + predicates.join(" AND ") : "", values };
+  }
+  private ordering(sort: ResourceQuery["sort"]) {
+    return (
+      "kind ASC, " +
+      (sort === "modified" ? "modified DESC, name COLLATE NOCASE" : "name COLLATE NOCASE") +
+      ", id"
     );
-    const order =
-      query.sort === "modified" ? "modified DESC, name COLLATE NOCASE" : "name COLLATE NOCASE";
+  }
+  list(query: ResourceQuery): ResourcePage {
+    const { where, values } = this.conditions(query);
+    const scope = this.conditions(query, false);
+    const totals = this.database
+      .prepare(
+        "SELECT count(*) AS total, sum(kind = 'file') AS files, sum(kind = 'directory') AS directories FROM resource_entries" +
+          where,
+      )
+      .get(...values)!;
+    const scopeFiles = this.database
+      .prepare(
+        "SELECT count(*) AS n FROM resource_entries" +
+          scope.where +
+          (scope.where ? " AND " : " WHERE ") +
+          "kind = 'file'",
+      )
+      .get(...scope.values)?.n;
     const rows = this.database
       .prepare(
         "SELECT data FROM resource_entries" +
           where +
-          " ORDER BY kind ASC, " +
-          order +
-          ", id LIMIT 100 OFFSET ?",
+          " ORDER BY " +
+          this.ordering(query.sort) +
+          " LIMIT 100 OFFSET ?",
       )
       .all(...values, query.offset ?? 0);
-    return { entries: rows.map((row) => JSON.parse(String(row.data)) as ResourceEntry), total };
+    return {
+      entries: rows.map((row) => JSON.parse(String(row.data)) as ResourceEntry),
+      total: Number(totals.total),
+      revision: this.revision,
+      stats: {
+        scopeFiles: Number(scopeFiles ?? 0),
+        matchedFiles: Number(totals.files ?? 0),
+        matchedDirectories: Number(totals.directories ?? 0),
+      },
+    };
+  }
+  locate(entry: ResourceEntry, sort: ResourceQuery["sort"]) {
+    const parent = entry.path.split("/").slice(0, -1).join("/");
+    const row = this.database
+      .prepare(
+        "SELECT position FROM (SELECT id, row_number() OVER (ORDER BY " +
+          this.ordering(sort) +
+          ") - 1 AS position FROM resource_entries WHERE parent = ?) WHERE id = ?",
+      )
+      .get(parent, entry.id);
+    if (!row) throw new Error("Resource no longer exists. Refresh the library.");
+    return Math.floor(Number(row.position) / 100) * 100;
   }
   close() {
     this.database.close();

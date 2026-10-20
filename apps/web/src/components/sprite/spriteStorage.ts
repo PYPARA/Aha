@@ -242,29 +242,36 @@ export async function renameSpriteProject(id: string, name: string) {
 }
 export async function deleteSpriteProject(id: string) {
   blockedIds.add(id);
-  // Finish outstanding writes before persisting the deletion intent.
-  await tail;
-  if (bridge()) await bridge()!.request({ op: "beginDelete", id });
-  else
-    await transaction(["deleted", "summaries"], "readwrite", async (tx) => {
-      tx.objectStore("deleted").put(true, id);
-      const summary = (await awaitIdbRequest(
-        tx.objectStore("summaries").get(id),
-        "Could not read sprite project.",
-      )) as SpriteProjectSummary | undefined;
-      if (summary) tx.objectStore("summaries").put({ ...summary, deleting: true }, id);
-    });
-  await drawingApi().spriteCommand({ operation: "delete", projectId: id });
-  if (bridge()) await bridge()!.request({ op: "finishDelete", id });
-  else
-    await transaction(
-      ["projects", "summaries", "thumbnails", "migrationBackups"],
-      "readwrite",
-      async (tx) => {
-        for (const store of ["projects", "summaries", "thumbnails", "migrationBackups"])
-          tx.objectStore(store).delete(id);
-      },
-    );
+  let intentPersisted = false;
+  try {
+    // Finish outstanding writes before persisting the deletion intent.
+    await tail;
+    if (bridge()) await bridge()!.request({ op: "beginDelete", id });
+    else
+      await transaction(["deleted", "summaries"], "readwrite", async (tx) => {
+        tx.objectStore("deleted").put(true, id);
+        const summary = (await awaitIdbRequest(
+          tx.objectStore("summaries").get(id),
+          "Could not read sprite project.",
+        )) as SpriteProjectSummary | undefined;
+        if (summary) tx.objectStore("summaries").put({ ...summary, deleting: true }, id);
+      });
+    intentPersisted = true;
+    await drawingApi().spriteCommand({ operation: "delete", projectId: id });
+    if (bridge()) await bridge()!.request({ op: "finishDelete", id });
+    else
+      await transaction(
+        ["projects", "summaries", "thumbnails", "migrationBackups"],
+        "readwrite",
+        async (tx) => {
+          for (const store of ["projects", "summaries", "thumbnails", "migrationBackups"])
+            tx.objectStore(store).delete(id);
+        },
+      );
+  } catch (error) {
+    if (!intentPersisted) blockedIds.delete(id);
+    throw Object.assign(new Error(spriteErrorMessage(error)), { deletionStarted: intentPersisted });
+  }
 }
 export async function revealSpriteDirectory() {
   await bridge()?.request({ op: "reveal" });

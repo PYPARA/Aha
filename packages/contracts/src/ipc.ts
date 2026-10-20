@@ -1,5 +1,10 @@
 import type { SpriteLibraryBridge } from "./spriteLibrary";
-import type { SpriteCommand, SpriteState, SpritePlanConfirmInput } from "./spriteAnimation";
+import type {
+  SpriteCommand,
+  SpriteState,
+  SpritePlanConfirmInput,
+  SpriteRetryConfirmInput,
+} from "./spriteAnimation";
 import type { ResourceLibraryBridge } from "./resourceLibrary";
 import type { AhaAppearanceBridge } from "./ahaAppearance";
 import { Schema } from "effect";
@@ -1531,6 +1536,7 @@ export interface NativeApi {
   };
   imageGeneration: {
     spriteForThread: (input: { threadId: string }) => Promise<SpriteState | null>;
+    spriteRetryConfirm: (input: SpriteRetryConfirmInput) => Promise<SpriteState>;
     spriteConfirm: (input: SpritePlanConfirmInput) => Promise<SpriteState>;
     spriteCommand: (input: SpriteCommand) => Promise<SpriteState>;
     listProviders: () => Promise<ReadonlyArray<ImageProvider>>;

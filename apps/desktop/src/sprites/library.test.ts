@@ -64,6 +64,82 @@ async function fixture(id = "fox") {
   return { project, images: [{ file, bytes }], bytes, file };
 }
 describe("sprite filesystem persistence", () => {
+  it("round trips v2 reference history and task frame mappings through desktop metadata", async () => {
+    const f = await fixture();
+    const renderSpec = {
+      mode: "pixel" as const,
+      logicalWidth: 4,
+      logicalHeight: 4,
+      outputScale: 4,
+    };
+    const asset = {
+      id: "reference",
+      name: "fox.png",
+      mimeType: "image/png" as const,
+      width: 32,
+      height: 16,
+      bytes: f.bytes.length,
+      url: "/reference",
+      thumbnailUrl: "/reference",
+      createdAt: f.project.updatedAt,
+    };
+    const canonical = {
+      revision: "revision",
+      source: asset,
+      asset,
+      generationReference: { ...asset, id: "appearance", width: 1024, height: 1024 },
+      renderSpec,
+      registration: { scale: 1, offsetX: 0, offsetY: 0 },
+      pivotX: 2,
+      pivotY: 3.6,
+      confirmedAt: f.project.updatedAt,
+    };
+    const project: SpriteProjectData = {
+      ...f.project,
+      version: 2,
+      renderSpec,
+      canonical,
+      canonicalVersions: [canonical],
+      provenance: [
+        {
+          runId: "run",
+          actionId: "idle",
+          localActionId: "idle",
+          prompt: "idle",
+          action: "idle",
+          model: "model",
+          providerId: "provider",
+          segmentRunIds: ["run"],
+          taskSnapshots: [
+            {
+              runId: "run",
+              canonicalRevision: "revision",
+              renderSpec,
+              sourceAssetId: "original",
+              processingVersionId: "processing",
+              segment: {
+                actionId: "idle",
+                frameStart: 0,
+                frameCount: 1,
+                totalFrames: 1,
+                index: 0,
+                count: 1,
+              },
+              layout: {
+                width: 1024,
+                height: 1024,
+                columns: 1,
+                rows: 1,
+                cells: [{ actionId: "idle", frameIndex: 0, x: 0, y: 0, width: 1024, height: 1024 }],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    await lib.save(project, f.images, f.bytes);
+    expect(await new SpriteLibrary(lib.root).get(project.id)).toEqual(project);
+  });
   it("starts empty and restores editable metadata, pictures and thumbnails from disk alone", async () => {
     expect((await lib.list()).projects).toEqual([]);
     const f = await fixture();

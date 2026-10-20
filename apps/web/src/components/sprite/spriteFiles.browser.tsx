@@ -5,8 +5,15 @@ import {
   exportSpriteAssets,
   exportSpriteProject,
   importSpriteProject,
+  renderSpriteFrame,
+  renderSpriteAtlasPreview,
 } from "./spriteFiles";
 import { newSpriteProject, sliceFrames } from "./spriteModel";
+import {
+  snapshotSpriteActions,
+  spriteExportFileList,
+  spriteExportFingerprint,
+} from "./spriteWorkbenchModel";
 import {
   saveSpriteProject,
   listSpriteProjects,
@@ -28,6 +35,8 @@ async function fixture() {
   const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), "image/png"));
   const source = await decodeSpriteSource(blob, "test.png");
   const p = newSpriteProject();
+  p.version = 1;
+  p.renderSpec = undefined;
   p.width = 16;
   p.height = 16;
   p.sources = [source];
@@ -46,8 +55,170 @@ async function fixture() {
   return p;
 }
 describe("portable sprite exports in a real browser", () => {
+  it("preserves v2 logical masters and approved geometry through an archive and integer rescaling", async () => {
+    const logical = document.createElement("canvas");
+    logical.width = 8;
+    logical.height = 8;
+    logical.getContext("2d")!.fillStyle = "red";
+    logical.getContext("2d")!.fillRect(2, 2, 3, 4);
+    const blob = await new Promise<Blob>((r) => logical.toBlob((b) => r(b!), "image/png"));
+    const rendered = document.createElement("canvas");
+    rendered.width = 32;
+    rendered.height = 32;
+    rendered.getContext("2d")!.imageSmoothingEnabled = false;
+    rendered.getContext("2d")!.drawImage(logical, 0, 0, 32, 32);
+    const frameBlob = await new Promise<Blob>((r) => rendered.toBlob((b) => r(b!), "image/png"));
+    const p = newSpriteProject();
+    p.renderSpec = { mode: "pixel", logicalWidth: 8, logicalHeight: 8, outputScale: 4 };
+    p.width = 32;
+    p.height = 32;
+    const master = {
+      ...(await decodeSpriteSource(blob, "master.png")),
+      usage: "generated-master" as const,
+    };
+    const frame = {
+      ...(await decodeSpriteSource(frameBlob, "frame.png")),
+      masterSourceId: master.id,
+      usage: "generated-frame" as const,
+    };
+    p.sources = [master, frame];
+    p.actions[0]!.fps = 24;
+    p.actions[0]!.loop = false;
+    p.actions[0]!.frames = [
+      {
+        id: "frame",
+        sourceId: frame.id,
+        x: 0,
+        y: 0,
+        width: 32,
+        height: 32,
+        offsetX: 0,
+        offsetY: 0,
+      },
+    ];
+    const asset = {
+      id: "canonical",
+      name: "fox.png",
+      mimeType: "image/png" as const,
+      url: "/canonical",
+      thumbnailUrl: "/canonical",
+      bytes: frameBlob.size,
+      width: 32,
+      height: 32,
+      createdAt: new Date().toISOString(),
+    };
+    p.canonical = {
+      revision: "revision",
+      source: asset,
+      asset,
+      renderSpec: p.renderSpec,
+      registration: { scale: 1, offsetX: 0, offsetY: 0 },
+      pivotX: 4,
+      pivotY: 7,
+      confirmedAt: asset.createdAt,
+    };
+    p.canonicalVersions = [{ ...p.canonical, revision: "previous" }, p.canonical];
+    const actionId = p.actions[0]!.id;
+    p.provenance = [
+      {
+        runId: "run",
+        prompt: "jump",
+        action: "jump",
+        model: "model",
+        providerId: "provider",
+        localActionId: actionId,
+        taskSnapshots: [
+          {
+            runId: "run",
+            canonicalRevision: p.canonical.revision,
+            renderSpec: p.renderSpec,
+            segment: { actionId, frameStart: 0, frameCount: 1, totalFrames: 1, index: 0, count: 1 },
+            layout: {
+              width: 1024,
+              height: 1024,
+              columns: 1,
+              rows: 1,
+              cells: [{ actionId, frameIndex: 0, x: 0, y: 0, width: 1024, height: 1024 }],
+            },
+            sourceAssetId: "original",
+            processingVersionId: "processing",
+          },
+        ],
+      },
+    ];
+    const restored = await importSpriteProject(new File([await exportSpriteProject(p)], "v2.zip"));
+    expect(restored.canonical).toEqual(p.canonical);
+    expect(restored.canonicalVersions).toEqual(p.canonicalVersions);
+    expect(restored.provenance).toEqual(p.provenance);
+    expect(restored.sources[1]!.masterSourceId).toBe(master.id);
+    expect(restored.renderSpec).toEqual(p.renderSpec);
+    await saveSpriteProject(restored);
+    const reopened = await getSpriteProject(restored.id);
+    expect(reopened.sources[1]!.masterSourceId).toBe(master.id);
+    expect(reopened.canonicalVersions).toEqual(p.canonicalVersions);
+    expect(reopened.provenance).toEqual(p.provenance);
+    restored.renderSpec = { ...restored.renderSpec!, outputScale: 8 };
+    restored.width = 64;
+    restored.height = 64;
+    const output = await renderSpriteFrame(restored, restored.actions[0]!.frames[0]!);
+    const pixels = output.getContext("2d")!.getImageData(0, 0, 64, 64).data;
+    const trimmed = await renderSpriteFrame(restored, {
+      ...restored.actions[0]!.frames[0]!,
+      x: 4,
+      y: 4,
+      width: 24,
+      height: 24,
+    });
+    expect(trimmed.getContext("2d")!.getImageData(0, 0, 64, 64).data).toEqual(pixels);
+    for (let y = 0; y < 64; y++)
+      for (let x = 0; x < 64; x++)
+        expect(Array.from(pixels.slice((y * 64 + x) * 4, (y * 64 + x) * 4 + 4))).toEqual(
+          Array.from(
+            pixels.slice(
+              (Math.floor(y / 8) * 8 * 64 + Math.floor(x / 8) * 8) * 4,
+              (Math.floor(y / 8) * 8 * 64 + Math.floor(x / 8) * 8) * 4 + 4,
+            ),
+          ),
+        );
+    const preview = await renderSpriteAtlasPreview(
+      restored,
+      [restored.actions[0]!.id],
+      "combined",
+      8,
+      0,
+    );
+    expect(preview!.getContext("2d")!.getImageData(0, 0, 64, 64).data).toEqual(pixels);
+    const files = unzipSync(
+      new Uint8Array(
+        await (
+          await exportSpriteAssets(restored, [restored.actions[0]!.id], "combined", 8, 0)
+        ).arrayBuffer(),
+      ),
+    );
+    const metadata = JSON.parse(strFromU8(files["animation.json"]!));
+    expect(metadata).toMatchObject({
+      version: 2,
+      width: 64,
+      height: 64,
+      pivot: { x: 32, y: 56 },
+      actions: [{ fps: 24, loop: false }],
+    });
+    expect(metadata.actions[0].source.taskSnapshots).toEqual(p.provenance[0]!.taskSnapshots);
+    await deleteSpriteProject(restored.id);
+  });
   it("round trips editable projects without remote bindings and restores IndexedDB blobs", async () => {
     const p = await fixture();
+    p.actions[0]!.frames[0]!.durationMs = 240;
+    p.actionVersions = snapshotSpriteActions(p, [p.actions[0]!.id]);
+    p.lastExport = {
+      createdAt: new Date().toISOString(),
+      actionIds: [p.actions[0]!.id],
+      fingerprint: await spriteExportFingerprint(p, [p.actions[0]!.id]),
+      mode: "combined",
+      columns: 2,
+      gap: 2,
+      files: ["atlas.png", "animation.json"],
+    };
     const blob = await exportSpriteProject(p);
     const restored = await importSpriteProject(new File([blob], "sprite.zip"));
     expect(restored.id).not.toBe(p.id);
@@ -55,6 +226,8 @@ describe("portable sprite exports in a real browser", () => {
     expect(restored.activeThreadId).toBeNull();
     expect(restored.providerId).toBe("");
     expect(restored.actions).toEqual(p.actions);
+    expect(restored.actionVersions).toEqual(p.actionVersions);
+    expect(restored.lastExport).toEqual(p.lastExport);
     expect(new Uint8Array(await restored.sources[0]!.blob.arrayBuffer())).toEqual(
       new Uint8Array(await p.sources[0]!.blob.arrayBuffer()),
     );
@@ -66,12 +239,17 @@ describe("portable sprite exports in a real browser", () => {
   });
   it("exports atlas rectangles and sequence pixels with matching alpha and motion", async () => {
     const p = await fixture();
+    p.actions[0]!.frames[1]!.durationMs = 230;
     for (const mode of ["combined", "atlas", "sequence"] as const) {
       const blob = await exportSpriteAssets(p, [p.actions[0]!.id], mode, 2, 2);
       const files = unzipSync(new Uint8Array(await blob.arrayBuffer()));
+      expect(Object.keys(files).toSorted()).toEqual(
+        spriteExportFileList(p, [p.actions[0]!.id], mode).toSorted(),
+      );
       const metadata = JSON.parse(strFromU8(files["animation.json"]!));
       expect(metadata.actions[0].frames).toHaveLength(2);
       expect(metadata.actions[0].frames[0].durationMs).toBeCloseTo(1000 / 12);
+      expect(metadata.actions[0].frames[1].durationMs).toBe(230);
       const filename =
         mode !== "sequence" ? metadata.actions[0].image : metadata.actions[0].frames[1].file;
       const bitmap = await createImageBitmap(
@@ -83,6 +261,11 @@ describe("portable sprite exports in a real browser", () => {
       c.getContext("2d")!.drawImage(bitmap, 0, 0);
       bitmap.close();
       const ctx = c.getContext("2d")!;
+      const preview = await renderSpriteAtlasPreview(p, [p.actions[0]!.id], mode, 2, 2);
+      if (mode !== "sequence")
+        expect(
+          preview!.getContext("2d")!.getImageData(0, 0, preview!.width, preview!.height).data,
+        ).toEqual(ctx.getImageData(0, 0, c.width, c.height).data);
       const offset = mode !== "sequence" ? 18 : 0;
       expect([...ctx.getImageData(offset + 4, 2, 1, 1).data]).toEqual([0, 0, 255, 255]);
       expect(ctx.getImageData(offset, 0, 1, 1).data[3]).toBe(0);
@@ -334,5 +517,66 @@ it("keeps internal generated frames and their provenance through offline project
   const reopened = await getSpriteProject(restored.id);
   expect(reopened.sources.filter((s) => s.usage !== "generated-frame")).toHaveLength(0);
   expect(reopened.actions[0]!.frames).toHaveLength(2);
+  await deleteSpriteProject(restored.id);
+});
+
+it("round trips repair geometry, frame instances and timing through the project package and browser storage", async () => {
+  const { spriteGridSlice, spriteEditFromSlice, spriteSliceFromEdit } =
+    await import("@synara/contracts");
+  const p = await fixture(),
+    source = p.sources[0]!;
+  const action = {
+    id: p.actions[0]!.id,
+    name: "manual",
+    description: "",
+    enabled: true,
+    frameCount: 2,
+    fps: 12,
+    loop: true,
+  };
+  const edit = spriteEditFromSlice(spriteGridSlice(source.width, source.height, [action]));
+  const group = edit.actions[0]!;
+  const changed = {
+    ...edit,
+    actions: [
+      {
+        ...group,
+        frames: [{ ...group.frames[1]!, offsetX: 2, durationMs: 175 }, group.frames[0]!],
+      },
+    ],
+  };
+  p.sources[0] = { ...source, assetId: "original-source" };
+  p.provenance = [
+    {
+      runId: "run",
+      localActionId: p.actions[0]!.id,
+      prompt: "manual",
+      action: "manual",
+      model: "",
+      providerId: "",
+      processingSnapshots: [
+        {
+          version: 1,
+          runId: "run",
+          sourceAssetId: "original-source",
+          configuration: spriteSliceFromEdit(changed),
+          processingVersionId: "processed",
+        },
+      ],
+    },
+  ];
+  p.actionVersions = snapshotSpriteActions(p, [p.actions[0]!.id]);
+  const restored = await importSpriteProject(
+    new File([await exportSpriteProject(p)], "repair.zip"),
+  );
+  expect(restored.provenance[0]!.processingSnapshots).toEqual(p.provenance[0]!.processingSnapshots);
+  expect(restored.actionVersions![0]!.provenance[0]!.processingSnapshots).toEqual(
+    p.provenance[0]!.processingSnapshots,
+  );
+  expect(restored.sources[0]!.assetId).toBe("original-source");
+  await saveSpriteProject(restored);
+  expect((await getSpriteProject(restored.id)).provenance[0]!.processingSnapshots).toEqual(
+    p.provenance[0]!.processingSnapshots,
+  );
   await deleteSpriteProject(restored.id);
 });

@@ -1,5 +1,12 @@
 import { spriteBoundaries } from "@synara/contracts";
-import type { SpriteContext } from "@synara/contracts";
+import {
+  NEW_SPRITE_RENDER_SPEC,
+  type SpriteContext,
+  type SpriteRenderSpec,
+  type SpriteCanonicalReference,
+  type SpriteTaskSnapshot,
+  type SpriteProcessingSnapshot,
+} from "@synara/contracts";
 export interface SpriteSource {
   id: string;
   name: string;
@@ -7,7 +14,8 @@ export interface SpriteSource {
   height: number;
   blob: Blob;
   assetId?: string | undefined;
-  usage?: "material" | "generated-frame" | undefined;
+  masterSourceId?: string | undefined;
+  usage?: "material" | "generated-frame" | "generated-master" | undefined;
   origin?:
     | { runId: string; candidateId: string; processingVersionId?: string | undefined }
     | undefined;
@@ -21,8 +29,23 @@ export interface SpriteFrame {
   height: number;
   offsetX: number;
   offsetY: number;
+  durationMs?: number | undefined;
+}
+export const spriteFrameDuration = (action: Pick<SpriteAction, "fps">, frame: SpriteFrame) =>
+  frame.durationMs ?? 1000 / action.fps;
+export function spriteFrameAtTime(action: SpriteAction, timeMs: number) {
+  const total = action.frames.reduce((sum, f) => sum + spriteFrameDuration(action, f), 0);
+  let elapsed = action.loop && total ? timeMs % total : timeMs;
+  for (let i = 0; i < action.frames.length; i++) {
+    const duration = spriteFrameDuration(action, action.frames[i]!);
+    if (elapsed < duration || i === action.frames.length - 1) return i;
+    elapsed -= duration;
+  }
+  return 0;
 }
 export interface SpriteAction {
+  description?: string | undefined;
+  plannedFrameCount?: number | undefined;
   id: string;
   name: string;
   fps: number;
@@ -30,7 +53,10 @@ export interface SpriteAction {
   frames: SpriteFrame[];
 }
 export interface SpriteProject {
-  version: 1;
+  version: 1 | 2;
+  renderSpec?: SpriteRenderSpec | undefined;
+  canonical?: SpriteCanonicalReference | undefined;
+  canonicalVersions?: SpriteCanonicalReference[] | undefined;
   id: string;
   name: string;
   updatedAt: string;
@@ -48,7 +74,12 @@ export interface SpriteProject {
   chromaKey: string;
   generationFrameCount: number;
   adoptedCandidateIds: string[];
+  actionVersions?: SpriteActionVersion[] | undefined;
+  lastExport?: SpriteExportRecord | undefined;
   provenance: {
+    segmentRunIds?: string[] | undefined;
+    taskSnapshots?: SpriteTaskSnapshot[] | undefined;
+    processingSnapshots?: SpriteProcessingSnapshot[] | undefined;
     runId: string;
     candidateId?: string | undefined;
     localActionId?: string | undefined;
@@ -61,11 +92,33 @@ export interface SpriteProject {
     providerId: string;
   }[];
 }
+export interface SpriteActionVersion {
+  id: string;
+  createdAt: string;
+  action: SpriteAction;
+  width: number;
+  height: number;
+  renderSpec?: SpriteRenderSpec | undefined;
+  canonical?: SpriteCanonicalReference | undefined;
+  provenance: SpriteProject["provenance"];
+}
+export interface SpriteExportRecord {
+  createdAt: string;
+  actionIds: string[];
+  actionVersionIds?: string[] | undefined;
+  outputScale?: number | undefined;
+  fingerprint: string;
+  mode: "combined" | "atlas" | "sequence";
+  columns: number;
+  gap: number;
+  files: string[];
+}
 export const uuid = () => crypto.randomUUID();
 export function newSpriteProject(): SpriteProject {
   const action: SpriteAction = { id: uuid(), name: "idle", fps: 12, loop: true, frames: [] };
   return {
-    version: 1,
+    version: 2,
+    renderSpec: { ...NEW_SPRITE_RENDER_SPEC },
     id: uuid(),
     name: "Untitled sprite",
     updatedAt: new Date().toISOString(),
@@ -101,6 +154,7 @@ export function sliceFrames(source: SpriteSource, settings: SliceSettings): Spri
     throw new Error("Margins and spacing must be non-negative integers.");
   const usableW = source.width - 2 * margin,
     usableH = source.height - 2 * margin;
+  if (usableW < 1 || usableH < 1) throw new Error("Margins leave no usable image area.");
   if (settings.mode === "grid") {
     const xs = spriteBoundaries(usableW - (settings.columns - 1) * gap, settings.columns, margin);
     const ys = spriteBoundaries(usableH - (settings.rows - 1) * gap, settings.rows, margin);
@@ -127,7 +181,7 @@ export function sliceFrames(source: SpriteSource, settings: SliceSettings): Spri
     throw new Error("Frame dimensions must be positive integers.");
   const columns = Math.floor((usableW + gap) / (width + gap)),
     rows = Math.floor((usableH + gap) / (height + gap));
-  if (columns * rows < 1 || columns * rows > 1024)
+  if (columns < 1 || rows < 1 || columns * rows > 1024)
     throw new Error("Choose a layout with 1–1024 complete frames.");
   return Array.from({ length: columns * rows }, (_, i) => ({
     id: uuid(),
@@ -150,6 +204,13 @@ export function spriteContext(project: SpriteProject): SpriteContext {
   const action =
     project.actions.find((a) => a.id === project.selectedActionId) ?? project.actions[0]!;
   return {
+    ...(project.version === 2
+      ? {
+          workflowVersion: 2 as const,
+          renderSpec: project.renderSpec,
+          canonical: project.canonical,
+        }
+      : {}),
     projectId: project.id,
     threadId: project.activeThreadId,
     name: project.name,
@@ -157,7 +218,7 @@ export function spriteContext(project: SpriteProject): SpriteContext {
     model: project.model,
     referenceAssetId: null,
     action: action.name,
-    frameCount: project.generationFrameCount,
+    frameCount: action.plannedFrameCount ?? project.generationFrameCount,
     fps: action.fps,
     loop: action.loop,
     existingFrameCount: action.frames.length,
@@ -165,6 +226,49 @@ export function spriteContext(project: SpriteProject): SpriteContext {
     height: project.height,
     background: project.background,
     chromaKey: project.chromaKey,
+  };
+}
+/** Geometry for preview and export, always sampling the logical master when available. */
+export function spriteFrameGeometry(project: SpriteProject, frame: SpriteFrame) {
+  const source = project.sources.find((s) => s.id === frame.sourceId)!;
+  const master = source?.masterSourceId
+    ? project.sources.find((s) => s.id === source.masterSourceId)
+    : undefined;
+  if (master && project.version === 2 && project.renderSpec) {
+    const factor = source.width / master.width,
+      spec = project.renderSpec,
+      output = spec.outputScale;
+    const logical = (n: number) => (spec.mode === "pixel" ? Math.round(n) : n);
+    const sx = logical(frame.x / factor),
+      sy = logical(frame.y / factor);
+    const width = Math.max(1, logical((frame.x + frame.width) / factor) - sx),
+      height = Math.max(1, logical((frame.y + frame.height) / factor) - sy);
+    return {
+      source: master,
+      sx,
+      sy,
+      sw: width,
+      sh: height,
+      x:
+        (Math.floor((spec.logicalWidth - master.width) / 2) +
+          sx +
+          logical(frame.offsetX / factor)) *
+        output,
+      y: (spec.logicalHeight - master.height + sy + logical(frame.offsetY / factor)) * output,
+      width: width * output,
+      height: height * output,
+    };
+  }
+  const p = framePlacement(frame, project.width, project.height);
+  return {
+    source,
+    sx: frame.x,
+    sy: frame.y,
+    sw: frame.width,
+    sh: frame.height,
+    ...p,
+    width: frame.width,
+    height: frame.height,
   };
 }
 export function safeFilename(value: string) {
@@ -255,24 +359,58 @@ export function adoptSpriteSheetRows(
   const actions = chosen.map((row) => ({
     id: uuid(),
     name: row.name.trim(),
-    fps: 12,
-    loop: true,
+    fps: project.actions.find((a) => a.id === project.selectedActionId)?.fps ?? 12,
+    loop: project.actions.find((a) => a.id === project.selectedActionId)?.loop ?? true,
     frames: row.frames.map((f) => ({ ...f, id: uuid() })),
   }));
   return {
     ...project,
-    width: actions[0]!.frames[0]!.width,
-    height: actions[0]!.frames[0]!.height,
+    width: project.version === 2 ? project.width : actions[0]!.frames[0]!.width,
+    height: project.version === 2 ? project.height : actions[0]!.frames[0]!.height,
     actions: [...existing, ...actions],
     selectedActionId: actions[0]!.id,
   };
 }
 
+/** Character revisions own all three images, including references used by saved actions. */
+export function spriteCharacterSourceIds(project: SpriteProject): Set<string> {
+  const assets = new Set<string>();
+  for (const reference of [
+    project.canonical,
+    ...(project.canonicalVersions ?? []),
+    ...(project.actionVersions ?? []).map((v) => v.canonical),
+  ]) {
+    if (!reference) continue;
+    assets.add(reference.source.id);
+    assets.add(reference.asset.id);
+    if (reference.generationReference) assets.add(reference.generationReference.id);
+  }
+  for (const origin of [
+    ...project.provenance,
+    ...(project.actionVersions ?? []).flatMap((v) => v.provenance),
+  ])
+    for (const snapshot of origin.processingSnapshots ?? []) assets.add(snapshot.sourceAssetId);
+  return new Set(
+    project.sources
+      .filter((source) => source.assetId && assets.has(source.assetId))
+      .map((source) => source.id),
+  );
+}
+
 export function removeSpriteSource(project: SpriteProject, id: string): SpriteProject {
+  if (spriteCharacterSourceIds(project).has(id))
+    throw new Error("This image is retained by a character reference or saved action version.");
   return {
     ...project,
-    sources: project.sources.filter((s) => s.id !== id),
+    sources: project.sources
+      .filter((s) => s.id !== id)
+      .map((s) =>
+        s.masterSourceId === id ? Object.assign({}, s, { masterSourceId: undefined }) : s,
+      ),
     referenceSourceId: project.referenceSourceId === id ? null : project.referenceSourceId,
+    actionVersions: project.actionVersions?.filter(
+      (v) => !v.action.frames.some((f) => f.sourceId === id),
+    ),
     actions: project.actions.map((a) => ({
       ...a,
       frames: a.frames.filter((f) => f.sourceId !== id),

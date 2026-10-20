@@ -1,3 +1,14 @@
+import { SpriteNumberField } from "./SpriteNumberField";
+import { RouteSurfaceHeader } from "../RouteSurface";
+import { Input } from "../ui/input";
+import { SpriteSelect } from "./SpriteSelect";
+import { Menu, MenuTrigger, MenuItem, MenuSeparator } from "../ui/menu";
+import { ComposerPickerMenuPopup } from "../chat/ComposerPickerMenuPopup";
+import { StatusChip } from "../ui/status-chip";
+import { drawingApi } from "../drawing/useDrawing";
+import { spriteLatestAttempts } from "./spriteGenerationAttempts";
+import { spriteActionCandidates } from "./spriteWorkbenchModel";
+import { spriteAdoption } from "./spriteAdoption";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type { SpriteLibrarySnapshot, SpriteProjectSummary } from "@synara/contracts/spriteLibrary";
@@ -58,6 +69,9 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
     [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [dialog, setDialog] = useState<{ id: string | null; name: string } | null>(null);
+  const [renderMode, setRenderMode] = useState<"pixel" | "illustration">("illustration");
+  const [frameWidth, setFrameWidth] = useState(256),
+    [frameHeight, setFrameHeight] = useState(256);
   const importRef = useRef<HTMLInputElement>(null);
   const refresh = useCallback(async () => setSnapshot(await listSpriteProjects()), []);
   useEffect(() => {
@@ -120,13 +134,23 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
       }
     });
   };
-  if (loading) return <div className="p-6">{tr("Loading…")}</div>;
+  if (loading)
+    return (
+      <>
+        <RouteSurfaceHeader>
+          <h1 className="text-ui font-medium">{tr("Sprite animation")}</h1>
+        </RouteSurfaceHeader>
+        <div role="status" className="p-6">
+          {tr("Loading…")}
+        </div>
+      </>
+    );
   if (projectId && project)
     return <SpriteWorkbench key={project.id} initialProject={project} onBack={back} />;
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-auto p-6" data-testid="sprite-library">
-      <header className="mb-5 flex flex-wrap items-center gap-3">
-        <h1 className="mr-auto text-lg font-semibold">{tr("Sprite animation")}</h1>
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="sprite-library">
+      <RouteSurfaceHeader rowClassName="flex-wrap">
+        <h1 className="mr-auto text-ui font-medium">{tr("Sprite animation")}</h1>
         {projectId && (
           <Button variant="outline" onClick={() => void back()}>
             {tr("Back to projects")}
@@ -138,102 +162,126 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
         <Button variant="outline" disabled={busy} onClick={() => importRef.current?.click()}>
           {tr("Import project package")}
         </Button>
-      </header>
-      <p className="mb-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-        <span>
-          {snapshot?.root
-            ? `${tr("Save location")}: ${snapshot.root}`
-            : window.desktopBridge
-              ? tr("Sprite projects are saved in your Documents folder.")
-              : tr("Projects are saved in this browser. Clearing browser data removes them.")}
-        </span>
-        {snapshot?.root && (
-          <Button size="sm" variant="ghost" onClick={() => void run(revealSpriteDirectory)}>
-            {tr("Open in Finder")}
-          </Button>
-        )}
-      </p>
-      {error && (
-        <div
-          role="alert"
-          className="mb-4 rounded border border-destructive p-3 text-sm text-destructive"
-        >
-          {tr(error)}{" "}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              void run(async () => {
-                if (projectId) setProject(await getSpriteProject(projectId));
-                else await refresh();
-              })
-            }
-          >
-            {tr("Retry")}
-          </Button>
-        </div>
-      )}
-      {!projectId && (
-        <>
-          <input
-            className="mb-5 h-9 max-w-sm rounded border bg-background px-3 text-sm"
-            aria-label={tr("Search sprite projects")}
-            placeholder={tr("Search sprite projects")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          {!snapshot?.projects.length && !error && (
-            <p className="py-12 text-center text-muted-foreground">
-              {tr("No sprite projects yet. Create a project or import a project package.")}
-            </p>
+      </RouteSurfaceHeader>
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto p-5 bg-[var(--color-background-surface)]">
+        <p className="mb-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          <span>
+            {snapshot?.root
+              ? `${tr("Save location")}: ${snapshot.root}`
+              : window.desktopBridge
+                ? tr("Sprite projects are saved in your Documents folder.")
+                : tr("Projects are saved in this browser. Clearing browser data removes them.")}
+          </span>
+          {snapshot?.root && (
+            <Button size="sm" variant="ghost" onClick={() => void run(revealSpriteDirectory)}>
+              {tr("Open in Finder")}
+            </Button>
           )}
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
-            {snapshot?.projects
-              .filter((p) => p.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
-              .map((p) => (
-                <article key={`${p.id}-${p.updatedAt}`} className="rounded-lg border p-3">
-                  <button
-                    className="w-full text-left disabled:opacity-60"
-                    disabled={busy || p.deleting || !!p.error}
-                    onClick={() => void open(p.id)}
-                    aria-label={`${tr("Open project")}: ${p.name}`}
-                  >
-                    <ProjectThumbnail id={p.id} />
-                    <h2 className="mt-3 truncate font-medium">{p.name}</h2>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {p.actionCount} {tr("Actions")} ·{" "}
-                      {p.updatedAt ? new Date(p.updatedAt).toLocaleString() : "—"}
-                    </p>
-                  </button>
-                  {p.error && <p className="mt-2 text-xs text-destructive">{p.error}</p>}
-                  {p.deleting && (
-                    <p className="mt-2 text-xs text-destructive">
-                      {tr("Deletion incomplete. Retry to finish removing this project.")}
-                    </p>
-                  )}
-                  <div className="mt-3 flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy || p.deleting || !!p.error}
-                      onClick={() => setDialog({ id: p.id, name: p.name })}
-                    >
-                      {tr("Rename")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => void remove(p)}
-                    >
-                      {tr(p.deleting ? "Retry deletion" : "Delete")}
-                    </Button>
-                  </div>
-                </article>
-              ))}
+        </p>
+        {error && (
+          <div
+            role="alert"
+            className="mb-4 rounded border border-destructive p-3 text-sm text-destructive"
+          >
+            {tr(error)}{" "}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                void run(async () => {
+                  if (projectId) setProject(await getSpriteProject(projectId));
+                  else await refresh();
+                })
+              }
+            >
+              {tr("Retry")}
+            </Button>
           </div>
-        </>
-      )}
+        )}
+        {!projectId && (
+          <>
+            <Input
+              type="search"
+              className="mb-5 max-w-sm"
+              aria-label={tr("Search sprite projects")}
+              placeholder={tr("Search sprite projects")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {!snapshot?.projects.length && !error && (
+              <p className="py-12 text-center text-muted-foreground">
+                {tr("No sprite projects yet. Create a project or import a project package.")}
+              </p>
+            )}
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+              {snapshot?.projects
+                .filter((p) =>
+                  p.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
+                )
+                .map((p) => (
+                  <article
+                    key={`${p.id}-${p.updatedAt}`}
+                    className="min-w-0 rounded-lg border bg-background p-3"
+                  >
+                    <button
+                      className="w-full text-left disabled:opacity-60"
+                      disabled={busy || p.deleting || !!p.error}
+                      onClick={() => void open(p.id)}
+                      aria-label={`${tr("Open project")}: ${p.name}`}
+                    >
+                      <ProjectThumbnail id={p.id} />
+                      <h2 className="mt-3 truncate font-medium">{p.name}</h2>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {p.actionCount} {tr("Actions")} ·{" "}
+                        {p.updatedAt ? new Date(p.updatedAt).toLocaleString() : "—"}
+                      </p>
+                    </button>
+                    {!p.error && !p.deleting && <ProjectReviewStatus id={p.id} />}
+                    {p.error && <p className="mt-2 text-xs text-destructive">{p.error}</p>}
+                    {p.deleting && (
+                      <p className="mt-2 text-xs text-destructive">
+                        {tr("Deletion incomplete. Retry to finish removing this project.")}
+                      </p>
+                    )}
+                    <div className="mt-3 flex justify-end">
+                      <Menu>
+                        <MenuTrigger
+                          render={
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              aria-label={`${tr("Project options")}: ${p.name}`}
+                            />
+                          }
+                        >
+                          ⋯
+                        </MenuTrigger>
+                        <ComposerPickerMenuPopup align="end">
+                          <MenuItem
+                            disabled={busy || p.deleting || !!p.error}
+                            onClick={() => setDialog({ id: p.id, name: p.name })}
+                          >
+                            {tr("Rename")}
+                          </MenuItem>
+                          <MenuItem
+                            disabled={busy || p.deleting || !!p.error}
+                            onClick={() => void open(p.id)}
+                          >
+                            {tr("Open project")}
+                          </MenuItem>
+                          <MenuSeparator />
+                          <MenuItem disabled={busy} onClick={() => void remove(p)}>
+                            {tr(p.deleting ? "Retry deletion" : "Delete")}
+                          </MenuItem>
+                        </ComposerPickerMenuPopup>
+                      </Menu>
+                    </div>
+                  </article>
+                ))}
+            </div>
+          </>
+        )}
+      </div>
       <Dialog
         open={!!dialog}
         onOpenChange={(value) => {
@@ -246,14 +294,55 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
               {tr(dialog?.id ? "Rename sprite project" : "New sprite project")}
             </DialogTitle>
           </DialogHeader>
-          <input
-            autoFocus
-            className="mx-4 my-3 h-9 rounded border bg-background px-3 text-sm"
-            aria-label={tr("Project name")}
-            maxLength={200}
-            value={dialog?.name ?? ""}
-            onChange={(e) => setDialog((d) => (d ? { ...d, name: e.target.value } : null))}
-          />
+          <label className="mx-4 mt-3 flex flex-col gap-1.5 text-ui-sm">
+            <span>{tr("Project name")}</span>
+            <Input
+              autoFocus
+              className="w-full"
+              aria-label={tr("Project name")}
+              maxLength={200}
+              value={dialog?.name ?? ""}
+              onChange={(e) => setDialog((d) => (d ? { ...d, name: e.target.value } : null))}
+            />
+          </label>
+          {!dialog?.id && (
+            <div className="space-y-4 px-4 py-4">
+              <SpriteSelect
+                label={tr("Art style")}
+                value={renderMode}
+                options={[
+                  { value: "illustration", label: tr("Illustration") },
+                  { value: "pixel", label: tr("Pixel art") },
+                ]}
+                onChange={setRenderMode}
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <SpriteNumberField
+                  label={tr("Action frame width")}
+                  value={frameWidth}
+                  step={renderMode === "pixel" ? 4 : 1}
+                  onChange={setFrameWidth}
+                />
+                <SpriteNumberField
+                  label={tr("Action frame height")}
+                  value={frameHeight}
+                  step={renderMode === "pixel" ? 4 : 1}
+                  onChange={setFrameHeight}
+                />
+              </div>
+              <p className="text-ui-sm text-muted-foreground">
+                {tr(
+                  "Character reference requests stay at 1024×1024. Sheet size follows action frames and count.",
+                )}
+              </p>
+              {renderMode === "pixel" && (
+                <p className="text-ui-sm text-muted-foreground">
+                  {tr("Pixel art")}: {frameWidth / 4}×{frameHeight / 4} → {frameWidth}×{frameHeight}{" "}
+                  · 4×
+                </p>
+              )}
+            </div>
+          )}
           {error && (
             <p role="alert" className="px-4 text-sm text-destructive">
               {tr(error)}
@@ -264,7 +353,13 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
               {tr("Cancel")}
             </Button>
             <Button
-              disabled={busy || !dialog?.name.trim()}
+              disabled={
+                busy ||
+                !dialog?.name.trim() ||
+                (!dialog?.id &&
+                  renderMode === "pixel" &&
+                  (frameWidth % 4 !== 0 || frameHeight % 4 !== 0))
+              }
               onClick={() =>
                 void run(async () => {
                   if (!dialog) return;
@@ -273,7 +368,29 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
                     await refresh();
                     setDialog(null);
                   } else {
-                    const p = { ...newSpriteProject(), name: dialog.name.trim() };
+                    const p = {
+                      ...newSpriteProject(),
+                      name: dialog.name.trim(),
+                      width: frameWidth,
+                      height: frameHeight,
+                      ...(renderMode === "illustration"
+                        ? {
+                            renderSpec: {
+                              mode: "illustration" as const,
+                              logicalWidth: frameWidth,
+                              logicalHeight: frameHeight,
+                              outputScale: 1,
+                            },
+                          }
+                        : {
+                            renderSpec: {
+                              mode: "pixel" as const,
+                              logicalWidth: frameWidth / 4,
+                              logicalHeight: frameHeight / 4,
+                              outputScale: 4,
+                            },
+                          }),
+                    };
                     await saveSpriteProject(p);
                     setDialog(null);
                     await open(p.id);
@@ -281,7 +398,7 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
                 })
               }
             >
-              {tr(dialog?.id ? "Save" : "Create")}
+              {tr(dialog?.id ? "Save" : "Create sprite project")}
             </Button>
           </DialogFooter>
         </DialogPopup>
@@ -302,6 +419,54 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
             });
         }}
       />
+    </div>
+  );
+}
+
+function ProjectReviewStatus({ id }: { id: string }) {
+  const tr = useAhaTranslation();
+  const ref = useRef<HTMLDivElement>(null);
+  const [counts, setCounts] = useState<{ running: number; review: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      observer.disconnect();
+      void Promise.all([
+        drawingApi().spriteCommand({ operation: "get", projectId: id }),
+        getSpriteProject(id),
+      ])
+        .then(([state, project]) => {
+          const runs = spriteLatestAttempts(state.runs).filter((r) => !r.removedAt);
+          if (alive)
+            setCounts({
+              running: runs.filter((r) => ["queued", "running", "processing"].includes(r.status))
+                .length,
+              review: spriteActionCandidates(project, state).filter(
+                (c) => spriteAdoption(c.run, c.actionId, project).status !== "current",
+              ).length,
+            });
+        })
+        .catch(() => {});
+    });
+    if (ref.current) observer.observe(ref.current);
+    return () => {
+      alive = false;
+      observer.disconnect();
+    };
+  }, [id]);
+  return (
+    <div ref={ref} className="mt-2 flex min-h-5 flex-wrap gap-3 text-ui-sm text-muted-foreground">
+      {counts && (
+        <>
+          <StatusChip>
+            {counts.running} {tr("running")}
+          </StatusChip>
+          <StatusChip>
+            {counts.review} {tr("results to check")}
+          </StatusChip>
+        </>
+      )}
     </div>
   );
 }

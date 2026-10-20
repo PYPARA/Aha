@@ -10,6 +10,7 @@ import {
   reorderSelectedFrames,
   actionFromSelectedFrames,
   removeSpriteSource,
+  spriteCharacterSourceIds,
 } from "./spriteModel";
 const source = { id: "source", name: "sheet.png", width: 34, height: 18, blob: new Blob() };
 it("slices row-major with margins and gaps without including partial cells", () => {
@@ -55,6 +56,8 @@ it("aligns to a common bottom center and moves selected frames as a group", () =
 });
 it("exports generation context without blobs or credentials", () => {
   const p = newSpriteProject();
+  p.version = 1;
+  p.renderSpec = undefined;
   expect(spriteContext(p)).toMatchObject({ action: "idle", frameCount: 8, fps: 12 });
   expect(safeFilename("../a:b")).toBe("___a_b");
 });
@@ -62,6 +65,8 @@ it("exports generation context without blobs or credentials", () => {
 it("splits a multi-row sheet into named actions and preserves edited animations", async () => {
   const { groupSpriteSheetRows, adoptSpriteSheetRows } = await import("./spriteModel");
   const p = newSpriteProject();
+  p.version = 1;
+  p.renderSpec = undefined;
   const sheet = { id: "sheet", name: "sheet.webp", width: 32, height: 24, blob: new Blob() };
   p.sources = [sheet];
   p.actions[0]!.frames = [
@@ -105,6 +110,8 @@ it("splits a multi-row sheet into named actions and preserves edited animations"
 
 it("selects continuous ranges, copies five of fifty frames and preserves original order/parameters", () => {
   const p = newSpriteProject();
+  p.version = 1;
+  p.renderSpec = undefined;
   p.sources = [{ ...source, width: 400, height: 8 }];
   const frames = sliceFrames(p.sources[0]!, {
     mode: "grid",
@@ -136,4 +143,71 @@ it("selects continuous ranges, copies five of fifty frames and preserves origina
   expect(removed.actions.map((a) => a.frames.length)).toEqual([0, 0]);
   expect(copied.sources).toHaveLength(1);
   expect(copied.actions[1]!.frames).toHaveLength(5);
+});
+
+it("creates illustration projects at 256 while keeping the legacy pixel fallback separate", () => {
+  const p = newSpriteProject();
+  expect(p.renderSpec).toEqual({
+    mode: "illustration",
+    logicalWidth: 256,
+    logicalHeight: 256,
+    outputScale: 1,
+  });
+  expect([p.width, p.height]).toEqual([256, 256]);
+});
+
+it("retains original, alignment and high-resolution images across character and action history", () => {
+  const p = newSpriteProject();
+  const asset = {
+    id: "original-asset",
+    name: "character.png",
+    mimeType: "image/png" as const,
+    width: 1024,
+    height: 1024,
+    bytes: 10,
+    url: "/original",
+    thumbnailUrl: "/thumbnail",
+    createdAt: p.updatedAt,
+  };
+  const canonical = {
+    revision: "r1",
+    source: asset,
+    asset: { ...asset, id: "alignment-asset", width: 256, height: 256 },
+    generationReference: { ...asset, id: "appearance-asset" },
+    renderSpec: p.renderSpec!,
+    registration: { scale: 1, offsetX: 0, offsetY: 0 },
+    pivotX: 128,
+    pivotY: 230,
+    confirmedAt: p.updatedAt,
+  };
+  p.sources = ["original", "alignment", "appearance", "unreferenced"].map((id) => ({
+    id,
+    assetId: `${id}-asset`,
+    name: `${id}.png`,
+    width: id === "alignment" ? 256 : 1024,
+    height: id === "alignment" ? 256 : 1024,
+    blob: new Blob(),
+    usage: "generated-master" as const,
+  }));
+  p.canonical = canonical;
+  expect([...spriteCharacterSourceIds(p)]).toEqual(["original", "alignment", "appearance"]);
+  expect(() => removeSpriteSource(p, "appearance")).toThrow("retained");
+  p.canonical = undefined;
+  p.actionVersions = [
+    {
+      id: "v1",
+      createdAt: p.updatedAt,
+      action: p.actions[0]!,
+      width: 256,
+      height: 256,
+      renderSpec: p.renderSpec,
+      canonical,
+      provenance: [],
+    },
+  ];
+  expect(spriteCharacterSourceIds(p).has("appearance")).toBe(true);
+  expect(spriteCharacterSourceIds(p).has("unreferenced")).toBe(false);
+  p.actionVersions = [];
+  p.canonicalVersions = [canonical];
+  expect(spriteCharacterSourceIds(p).has("original")).toBe(true);
 });

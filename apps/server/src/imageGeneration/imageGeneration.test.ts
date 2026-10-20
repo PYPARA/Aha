@@ -113,6 +113,36 @@ async function waitFor(id: string, status: string) {
 }
 
 describe("image provider and Images API contracts", () => {
+  it("preserves model sprite limits when saving settings and recording a model test", async () => {
+    const original = providerInput();
+    const spriteCapabilities = {
+      kind: "custom" as const,
+      referenceImages: true,
+      minPixels: 655360,
+      maxPixels: 8294400,
+      maxEdge: 3840,
+      maxAspectRatio: 3,
+      multiple: 16,
+    };
+    const p = await f.engine.upsertProvider({
+      ...original,
+      models: [{ ...original.models[0]!, spriteCapabilities }],
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => f.response()),
+    );
+    const job = await f.engine.testModel({
+      id: p.id,
+      model: p.defaultModel,
+      clientRequestId: randomUUID(),
+    });
+    await f.engine.tick();
+    await waitFor(job.id, "succeeded");
+    const saved = (await f.engine.listProviders()).find((provider) => provider.id === p.id)!;
+    expect(saved.models[0]!.spriteCapabilities).toEqual(spriteCapabilities);
+    expect(saved.models[0]!.lastTestStatus).toBe("succeeded");
+  });
   it("preserves explicitly configured root paths and omits default fields", () => {
     expect(imageEndpoint("https://example.com/custom/v2/", "images/generations")).toBe(
       "https://example.com/custom/v2/images/generations",
@@ -871,4 +901,99 @@ describe("sprite workbench generation through Drawing", () => {
       (await restored.command({ operation: "get", projectId: context.projectId })).runs[2]!.status,
     ).toBe("cancelled");
   });
+});
+
+it("retries sprite generation through the real drawing queue with the original snapshot and no duplicate request", async () => {
+  const { SpriteEngine } = await import("../spriteAnimation/spriteEngine");
+  const provider = await f.engine.upsertProvider(providerInput());
+  const sprites = new SpriteEngine(path.join(f.root, "sprites"), f.engine, async () => {});
+  await sprites.initialize();
+  const context = {
+    projectId: "sprite-project",
+    threadId: "sprite-thread",
+    name: "Sprite",
+    providerId: provider.id,
+    model: provider.defaultModel,
+    referenceAssetId: null,
+    action: "static",
+    frameCount: 1,
+    fps: 12,
+    width: 16,
+    height: 16,
+    background: "transparent" as const,
+    chromaKey: "#00ff00",
+  };
+  await sprites.command({ operation: "sync", projectId: context.projectId, context });
+  const proposed = await sprites.command({
+    operation: "propose",
+    projectId: context.projectId,
+    configuration: {
+      kind: "character",
+      mode: "combined",
+      prompt: "A blue sprite",
+      providerId: provider.id,
+      model: provider.defaultModel,
+      width: 16,
+      height: 16,
+      background: "transparent",
+      chromaKey: "#00ff00",
+      parameters: { n: 1, size: "auto", outputFormat: "png" },
+      references: [],
+      actions: [
+        {
+          id: "static",
+          name: "static",
+          enabled: true,
+          description: "",
+          frameCount: 1,
+          fps: 12,
+          loop: true,
+        },
+      ],
+    },
+  });
+  const plan = proposed.plans![0]!;
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(new Response("upstream timed out", { status: 524 }))
+    .mockImplementation(async () => f.response());
+  vi.stubGlobal("fetch", fetcher);
+  expect(fetcher).not.toHaveBeenCalled();
+  const confirmed = await sprites.confirm({
+    projectId: context.projectId,
+    threadId: context.threadId,
+    planId: plan.id,
+    version: plan.version,
+  });
+  const original = confirmed.runs[0]!;
+  await f.engine.tick();
+  const failure = await waitFor(original.jobId!, "failed");
+  await sprites.tick();
+  const failed = await sprites.command({ operation: "get", projectId: context.projectId });
+  expect(failed.runs[0]!.status).toBe("failed");
+  const retry = {
+    projectId: context.projectId,
+    threadId: context.threadId,
+    runIds: [original.id],
+    requestId: "retry-once",
+  };
+  const [next] = await Promise.all([sprites.retryConfirm(retry), sprites.retryConfirm(retry)]);
+  expect(next.runs).toHaveLength(2);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  const replacement = next.runs[1]!;
+  const queued = await f.engine.getJob(replacement.jobId!);
+  expect(queued).toMatchObject({
+    prompt: failure.prompt,
+    parameters: failure.parameters,
+    inputs: failure.inputs,
+    sourceJobId: failure.id,
+  });
+  await f.engine.tick();
+  await waitFor(queued.id, "succeeded");
+  await sprites.tick();
+  const complete = await sprites.command({ operation: "get", projectId: context.projectId });
+  expect(complete.runs[0]!.status).toBe("failed");
+  expect(complete.runs[1]!.imageStatus).toBe("succeeded");
+  expect(complete.runs[1]!.candidates).toHaveLength(1);
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });

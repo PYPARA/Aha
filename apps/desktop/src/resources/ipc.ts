@@ -25,14 +25,17 @@ const Command = z.discriminatedUnion("op", [
     op: z.literal("list"),
     query: z.object({
       path: text,
+      kind: z.enum(["file", "directory"]).optional(),
       recursive: z.boolean().optional(),
       query: text.optional(),
+      searchIn: z.enum(["name", "nameAndPath"]).optional(),
       tag: text.optional(),
       type: z.enum(["all", "image", "audio", "video", "document", "other"]).optional(),
       sort: z.enum(["name", "modified"]).optional(),
       offset: z.number().int().nonnegative().optional(),
     }),
   }),
+  z.object({ op: z.literal("locate"), id: text, sort: z.enum(["name", "modified"]).optional() }),
   z.object({ op: z.literal("createDirectory"), parent: text, name: text }),
   z.object({ op: z.literal("rename"), ids, name: text }),
   z.object({ op: z.literal("move"), ids, target: text }),
@@ -41,7 +44,16 @@ const Command = z.discriminatedUnion("op", [
     ids,
     tags: z.array(z.string().max(100)).max(100).optional(),
     notes: z.string().max(32000).optional(),
+    tagMode: z.enum(["add", "remove", "replace"]).optional(),
   }),
+  z.object({
+    op: z.literal("prepareBatch"),
+    action: z.enum(["rename", "move", "trash", "export"]),
+    ids,
+    name: text.optional(),
+    target: text.optional(),
+  }),
+  z.object({ op: z.literal("executeBatch"), planId: text, retryFailed: z.boolean().optional() }),
   z.object({ op: z.literal("trash"), ids }),
   z.object({ op: z.literal("export"), ids }),
   z.object({ op: z.literal("reveal"), id: text.optional() }),
@@ -100,14 +112,21 @@ export function registerResourceLibrary(
     )
       throw new Error("IPC_FORBIDDEN");
     const input = Command.parse(raw) satisfies ResourceCommand;
-    await ready;
     if (input.op === "cancelImport") {
       library.cancelImport();
       return;
     }
     if (input.op === "snapshot") return library.snapshot();
     if (input.op === "list") return library.list(input.query);
+    if (input.op === "locate") return library.locate(input.id, input.sort);
+    if (input.op === "read") return library.read(input.id, input.thumbnail);
+    if (input.op === "reveal")
+      return shell.showItemInFolder(
+        await library.resolve(input.id ? library.entry(input.id).path : ""),
+      );
+    await ready;
     return library.serial(async () => {
+      if (input.op !== "refresh" && input.op !== "chooseRoot") library.assertWritable();
       switch (input.op) {
         case "refresh":
           return library.scan();
@@ -127,24 +146,65 @@ export function registerResourceLibrary(
         case "move":
           return library.relocate(input.ids, input.target);
         case "metadata":
-          return library.metadata(input.ids, input.tags, input.notes);
-        case "read":
-          return library.read(input.id, input.thumbnail);
-        case "reveal":
-          return shell.showItemInFolder(
-            await library.resolve(input.id ? library.entry(input.id).path : ""),
+          return library.metadata(input.ids, input.tags, input.notes, input.tagMode);
+        case "prepareBatch": {
+          let target = input.target;
+          if (input.action === "export") {
+            const picked = await dialog.showOpenDialog(window, {
+              title: "导出资源 / Export resources",
+              properties: ["openDirectory", "createDirectory"],
+            });
+            if (picked.canceled || !picked.filePaths[0]) return null;
+            target = picked.filePaths[0];
+          }
+          return library.prepareBatch(input.action, input.ids, target, input.name);
+        }
+        case "executeBatch": {
+          const plan = library.batchPlan(input.planId);
+          const pending = library.batchPendingItems(input.planId, input.retryFailed);
+          if (plan.action === "trash" && pending.length) {
+            const affected = library.entries.filter(
+              (entry) =>
+                !entry.deleted &&
+                pending.some(
+                  (item) => entry.path === item.source || entry.path.startsWith(item.source + "/"),
+                ),
+            ).length;
+            const response = await dialog.showMessageBox(window, {
+              type: "warning",
+              message: `将 ${affected} 个文件或文件夹移入系统废纸篓？ / Move ${affected} items to the system trash?`,
+              detail: pending
+                .slice(0, 10)
+                .map((item) => item.source)
+                .join("\n"),
+              buttons: ["取消 / Cancel", "移入废纸篓 / Move to trash"],
+              defaultId: 0,
+              cancelId: 0,
+            });
+            if (response.response !== 1)
+              return {
+                planId: plan.id,
+                items: plan.items.map((item) =>
+                  Object.assign({}, item, { status: "cancelled" as const }),
+                ),
+              };
+          }
+          return library.executeBatch(input.planId, input.retryFailed, (file) =>
+            shell.trashItem(file),
           );
+        }
         case "importPaths": {
-          const paths =
-            input.paths ??
-            (
-              await dialog.showOpenDialog(window, {
-                title: "导入资源 / Import resources",
-                properties: input.directories
-                  ? ["openDirectory", "multiSelections"]
-                  : ["openFile", "multiSelections"],
-              })
-            ).filePaths;
+          let paths = input.paths;
+          if (!paths) {
+            const picked = await dialog.showOpenDialog(window, {
+              title: "导入资源 / Import resources",
+              properties: input.directories
+                ? ["openDirectory", "multiSelections"]
+                : ["openFile", "multiSelections"],
+            });
+            if (picked.canceled) return { added: 0, skipped: 0, failed: [], cancelled: true };
+            paths = picked.filePaths;
+          }
           return library.importPaths(input.target, paths, input.origin);
         }
         case "importBytes":

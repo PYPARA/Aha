@@ -10,9 +10,17 @@ import {
   type ResourceEntry,
   type ResourceOrigin,
   type ResourceSnapshot,
+  type ResourceScanState,
+  type ResourceDirectoryStats,
+  type ResourceLocateResult,
   type ResourcePage,
   type ResourceQuery,
   type ResourceImportResult,
+  type ResourceTagMode,
+  type ResourceBatchAction,
+  type ResourceBatchPlan,
+  type ResourceBatchItemResult,
+  type ResourceBatchResult,
 } from "@synara/contracts/resourceLibrary";
 
 const CONTROL = ".aha-resources";
@@ -66,6 +74,51 @@ export function safeName(value: string) {
   return name;
 }
 const under = (child: string, parent: string) => child === parent || child.startsWith(parent + "/");
+const parentPath = (relative: string) => relative.split("/").slice(0, -1).join("/");
+async function copyResourceExclusive(source: string, destination: string) {
+  const stat = await fs.lstat(source);
+  if (stat.isSymbolicLink()) throw new Error("Symbolic links cannot be exported.");
+  if (stat.isDirectory()) {
+    await fs.mkdir(destination);
+    try {
+      for (const name of await fs.readdir(source))
+        if (name !== CONTROL && name !== ".DS_Store" && !name.startsWith(".aha-import-"))
+          await copyResourceExclusive(path.join(source, name), path.join(destination, name));
+    } catch (error) {
+      await fs.rm(destination, { recursive: true, force: true });
+      throw error;
+    }
+  } else if (stat.isFile()) await fs.copyFile(source, destination, 1);
+  else throw new Error("Choose a file or folder.");
+}
+async function moveResourceExclusive(
+  source: string,
+  destination: string,
+  kind: ResourceEntry["kind"],
+) {
+  if (kind === "file") {
+    // link() reserves the exact destination without replacing anything, and preserves identity.
+    await fs.link(source, destination);
+    try {
+      await fs.unlink(source);
+    } catch (error) {
+      await fs.unlink(destination);
+      throw error;
+    }
+  } else {
+    // Reserve an empty directory. rename cannot replace one that another process populated.
+    await fs.mkdir(destination);
+    const reservation = await fs.lstat(destination);
+    try {
+      await fs.rename(source, destination);
+    } catch (error) {
+      const current = await fs.lstat(destination).catch(() => null);
+      if (current?.ino === reservation.ino && current.dev === reservation.dev)
+        await fs.rmdir(destination).catch(() => {});
+      throw error;
+    }
+  }
+}
 async function hashFile(file: string) {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(file)) hash.update(chunk);
@@ -101,6 +154,63 @@ export class ResourceLibrary {
   private cancelled = false;
   private closed = false;
   private index: ResourceIndex | undefined;
+  private revision = 0;
+  private published: ResourceEntry[] = [];
+  private directoryStats: ResourceDirectoryStats[] = [];
+  private scanState: ResourceScanState = {
+    phase: "loading",
+    lastCompletedAt: null,
+    failedPath: null,
+    skipped: { system: 0, temporary: 0, symbolicLinks: 0, unsupported: 0 },
+  };
+  assertWritable() {
+    if (this.error || this.scanState.phase !== "ready")
+      throw new Error("The library is not ready for changes. Rescan it first.");
+  }
+  private fail(error: unknown, failedPath: string | null = this.scanState.failedPath) {
+    this.error = message(error);
+    this.scanState = { ...this.scanState, phase: "failed", failedPath };
+    this.changed();
+  }
+  private updateStats() {
+    const active = this.published.filter((e) => !e.deleted);
+    const stats = new Map<string, ResourceDirectoryStats>([
+      ["", { id: null, path: "", directFiles: 0, directDirectories: 0, recursiveFiles: 0 }],
+    ]);
+    for (const e of active)
+      if (e.kind === "directory")
+        stats.set(e.path, {
+          id: e.id,
+          path: e.path,
+          directFiles: 0,
+          directDirectories: 0,
+          recursiveFiles: 0,
+        });
+    for (const e of active) {
+      const parent = parentPath(e.path),
+        direct = stats.get(parent);
+      if (e.kind === "directory") {
+        if (direct) direct.directDirectories++;
+        continue;
+      }
+      if (direct) direct.directFiles++;
+      let current = parent;
+      for (;;) {
+        const value = stats.get(current);
+        if (value) value.recursiveFiles++;
+        if (!current) break;
+        current = parentPath(current);
+      }
+    }
+    this.directoryStats = [...stats.values()];
+  }
+  private batch: {
+    plan: ResourceBatchPlan;
+    sources: Map<string, Pick<ResourceEntry, "path" | "fileKey" | "hash">>;
+    trees: Map<string, string>;
+    parents: Map<string, { path: string; fileKey: string }>;
+    results: Map<string, ResourceBatchItemResult>;
+  } | null = null;
   constructor(
     readonly configFile: string,
     readonly changed: () => void = () => {},
@@ -119,16 +229,20 @@ export class ResourceLibrary {
         .parse(JSON.parse(await fs.readFile(this.configFile, "utf8"))).root;
     } catch (e) {
       if (!missing(e)) {
-        this.error = message(e);
+        this.fail(e);
         return;
       }
-      if (!defaultRoot) return;
+      if (!defaultRoot) {
+        this.scanState = { ...this.scanState, phase: "ready" };
+        this.changed();
+        return;
+      }
       try {
         await fs.mkdir(defaultRoot, { recursive: true });
         await this.open(defaultRoot);
       } catch (failure) {
         this.root = defaultRoot;
-        this.error = message(failure);
+        this.fail(failure);
       }
       return;
     }
@@ -136,16 +250,19 @@ export class ResourceLibrary {
     try {
       await this.open(configured);
     } catch (e) {
-      this.error = message(e);
+      this.fail(e);
     }
   }
   snapshot(): ResourceSnapshot {
     return {
       root: this.root,
       libraryId: this.libraryId,
-      directories: this.entries.filter((e) => !e.deleted && e.kind === "directory"),
-      count: this.entries.filter((e) => !e.deleted && e.kind === "file").length,
+      directories: this.published.filter((e) => !e.deleted && e.kind === "directory"),
+      count: this.published.filter((e) => !e.deleted && e.kind === "file").length,
       error: this.error,
+      revision: this.revision,
+      directoryStats: this.directoryStats,
+      scan: this.scanState,
     };
   }
   // Every ancestor is checked: directory symlinks must never escape the selected library.
@@ -183,6 +300,7 @@ export class ResourceLibrary {
     return dir;
   }
   async open(directory: string) {
+    this.batch = null;
     const next = await fs.realpath(directory);
     if (!(await fs.stat(next)).isDirectory()) throw new Error("Select a folder.");
     const managed = path.join(next, CONTROL);
@@ -197,11 +315,6 @@ export class ResourceLibrary {
       if ((await fs.lstat(manifest)).isSymbolicLink()) throw new Error("Invalid metadata file.");
       data = Metadata.parse(JSON.parse(await fs.readFile(manifest, "utf8")));
     } else {
-      const loose = (await fs.readdir(next, { withFileTypes: true })).filter(
-        (e) => e.isFile() && !e.name.startsWith("."),
-      );
-      if (loose.length)
-        throw new Error("Move files at the library root into project folders before opening it.");
       await fs.mkdir(managed, { recursive: true });
       data = { version: 1, libraryId: randomUUID(), entries: [] };
       await atomicJson(manifest, data);
@@ -209,26 +322,54 @@ export class ResourceLibrary {
     this.stopWatching();
     this.root = next;
     this.libraryId = data.libraryId;
-    this.entries = data.entries;
-    await fs.mkdir(path.dirname(this.configFile), { recursive: true });
-    await atomicJson(this.configFile, { root: next });
-    await this.scan();
-    this.rebuildIndex();
-    this.startWatching();
+    this.closed = false;
+    this.entries = structuredClone(data.entries);
+    this.published = structuredClone(data.entries);
+    this.error = null;
+    this.scanState = {
+      phase: "loading",
+      lastCompletedAt: null,
+      failedPath: null,
+      skipped: { system: 0, temporary: 0, symbolicLinks: 0, unsupported: 0 },
+    };
+    try {
+      await fs.mkdir(path.dirname(this.configFile), { recursive: true });
+      this.rebuildIndex();
+      this.changed();
+      await atomicJson(this.configFile, { root: next });
+      this.startWatching();
+      await this.scan();
+    } catch (error) {
+      if (this.scanState.phase !== "failed") this.fail(error, this.configFile);
+      throw error;
+    }
     return this.snapshot();
   }
   private rebuildIndex() {
     if (!this.index) this.index = new ResourceIndex(this.configFile + ".index.sqlite");
-    this.index.replace(this.entries);
+    this.index.replace(this.published);
+    this.index.revision = ++this.revision;
+    this.updateStats();
   }
-  private async persist() {
-    const directory = await this.controlRoot();
-    await atomicJson(path.join(directory, "library.json"), {
-      version: 1,
-      libraryId: this.libraryId,
-      entries: this.entries,
-    });
-    this.rebuildIndex();
+  private async persist(next = this.entries) {
+    try {
+      const directory = await this.controlRoot();
+      await atomicJson(path.join(directory, "library.json"), {
+        version: 1,
+        libraryId: this.libraryId,
+        entries: next,
+      });
+      if (!this.index) this.index = new ResourceIndex(this.configFile + ".index.sqlite");
+      this.index.replace(next);
+      this.entries = next;
+      this.published = structuredClone(next);
+      this.index.revision = ++this.revision;
+      this.updateStats();
+    } catch (error) {
+      this.entries = structuredClone(this.published);
+      this.fail(error, CONTROL + "/library.json");
+      throw error;
+    }
   }
   private stopWatching() {
     this.watcher?.close();
@@ -237,6 +378,7 @@ export class ResourceLibrary {
     clearInterval(this.poll);
   }
   close() {
+    this.batch = null;
     this.closed = true;
     this.stopWatching();
     this.index?.close();
@@ -272,6 +414,10 @@ export class ResourceLibrary {
   async scan() {
     if (!this.root) return this.snapshot();
     if (!this.libraryId) return this.open(this.root);
+    this.scanState = { ...this.scanState, phase: "scanning", failedPath: null };
+    this.changed();
+    let scanningPath = "";
+    const skipped = { system: 0, temporary: 0, symbolicLinks: 0, unsupported: 0 };
     try {
       await this.controlRoot();
       const found: ResourceEntry[] = [];
@@ -283,17 +429,27 @@ export class ResourceLibrary {
       const oldKey = new Map<string, ResourceEntry[]>();
       for (const e of this.entries) oldKey.set(e.fileKey, [...(oldKey.get(e.fileKey) ?? []), e]);
       const visit = async (relative: string) => {
+        scanningPath = relative;
         const directory = await this.resolve(relative);
         for (const item of await fs.readdir(directory, { withFileTypes: true })) {
-          if (
-            item.name === CONTROL ||
-            item.name.startsWith(".aha-import-") ||
-            item.name === ".DS_Store"
-          )
+          if (item.name === CONTROL || item.name === ".DS_Store") {
+            skipped.system++;
             continue;
-          if (item.isSymbolicLink() || (!item.isDirectory() && !item.isFile())) continue;
-          if (!relative && !item.isDirectory()) continue;
+          }
+          if (item.name.startsWith(".aha-import-")) {
+            skipped.temporary++;
+            continue;
+          }
+          if (item.isSymbolicLink()) {
+            skipped.symbolicLinks++;
+            continue;
+          }
+          if (!item.isDirectory() && !item.isFile()) {
+            skipped.unsupported++;
+            continue;
+          }
           const rel = relative ? `${relative}/${item.name}` : item.name;
+          scanningPath = rel;
           const full = await this.resolve(rel);
           let st;
           try {
@@ -369,15 +525,12 @@ export class ResourceLibrary {
           .map((e) => Object.assign({}, e, { deleted: true })),
       ];
       const changed = JSON.stringify(next) !== JSON.stringify(this.entries) || this.error !== null;
-      this.entries = next;
+      if (changed) await this.persist(next);
       this.error = null;
-      if (changed) {
-        await this.persist();
-        this.changed();
-      }
-    } catch (e) {
-      this.error = message(e);
+      this.scanState = { phase: "ready", lastCompletedAt: Date.now(), failedPath: null, skipped };
       this.changed();
+    } catch (e) {
+      this.fail(e, this.scanState.failedPath ?? scanningPath);
       throw e;
     }
     return this.snapshot();
@@ -387,12 +540,30 @@ export class ResourceLibrary {
     if (!this.index) this.rebuildIndex();
     return this.index!.list(query);
   }
+  async locate(id: string, sort: ResourceQuery["sort"]): Promise<ResourceLocateResult> {
+    const entry = this.published.find((entry) => entry.id === id && !entry.deleted);
+    if (!entry || !this.index) throw new Error("Resource no longer exists. Refresh the library.");
+    const stat = await fs.lstat(await this.resolve(entry.path));
+    if (`${stat.dev}:${stat.ino}` !== entry.fileKey || stat.isSymbolicLink())
+      throw new Error("The resource changed while locating it. Try again.");
+    const parent = parentPath(entry.path);
+    return {
+      entry: structuredClone(entry),
+      parentId:
+        this.published.find((e) => !e.deleted && e.kind === "directory" && e.path === parent)?.id ??
+        null,
+      parentPath: parent,
+      offset: this.index!.locate(entry, sort),
+      revision: this.revision,
+    };
+  }
   entry(id: string) {
     const value = this.entries.find((e) => e.id === id && !e.deleted);
     if (!value) throw new Error("Resource no longer exists. Refresh the library.");
     return value;
   }
   async createDirectory(parent: string, name: string) {
+    this.assertWritable();
     const rel = [parent, safeName(name)].filter(Boolean).join("/");
     await fs.mkdir(await this.resolve(rel, true));
     await this.scan();
@@ -423,11 +594,11 @@ export class ResourceLibrary {
     throw new Error("Too many files with this name.");
   }
   async relocate(ids: string[], target: string | null, name?: string) {
+    this.assertWritable();
     const selected = this.selected(ids);
     if (name) safeName(name);
     for (const [i, entry] of selected.entries()) {
       const parent = target ?? entry.path.split("/").slice(0, -1).join("/");
-      if (!parent && entry.kind === "file") throw new Error("Files must belong to a project.");
       if (entry.kind === "directory" && parent && under(parent, entry.path))
         throw new Error("A folder cannot be moved into itself.");
       const ext = entry.kind === "file" ? path.extname(entry.name) : "";
@@ -449,16 +620,277 @@ export class ResourceLibrary {
     }
     return this.scan();
   }
-  async metadata(ids: string[], tags?: string[], notes?: string) {
-    for (const id of ids) {
-      const entry = this.entry(id);
-      if (tags !== undefined) entry.tags = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
-      if (notes !== undefined) entry.notes = notes;
+  async metadata(
+    ids: string[],
+    tags?: string[],
+    notes?: string,
+    mode: ResourceTagMode = "replace",
+  ) {
+    this.assertWritable();
+    const before = this.entries;
+    // Build the next manifest separately: a failed write must not mutate the live index.
+    const wanted = new Set(ids);
+    for (const id of wanted) this.entry(id);
+    const normalized = [...new Set(tags?.map((t) => t.trim()).filter(Boolean) ?? [])];
+    this.entries = before.map((entry) => {
+      if (!wanted.has(entry.id)) return entry;
+      const nextTags =
+        tags === undefined
+          ? entry.tags
+          : mode === "add"
+            ? [...new Set([...entry.tags, ...normalized])]
+            : mode === "remove"
+              ? entry.tags.filter((tag) => !normalized.includes(tag))
+              : normalized;
+      if (nextTags.length > 100) throw new Error("A resource can have at most 100 tags.");
+      return { ...entry, tags: nextTags, ...(notes === undefined ? {} : { notes }) };
+    });
+    try {
+      await this.persist();
+    } catch (error) {
+      this.entries = before;
+      throw error;
     }
-    await this.persist();
     this.changed();
   }
+  async prepareBatch(
+    action: ResourceBatchAction,
+    ids: string[],
+    target?: string,
+    name?: string,
+  ): Promise<ResourceBatchPlan> {
+    if (!this.libraryId || !this.root) throw new Error("Choose a project or folder.");
+    this.batch = null;
+    await this.scan();
+    this.assertWritable();
+    if (action === "move" && target === undefined) throw new Error("Choose a destination folder.");
+    const ordered = [...new Set(ids)];
+    const entries = ordered.flatMap((id) => {
+      const entry = this.entries.find((e) => e.id === id && !e.deleted);
+      return entry ? [entry] : [];
+    });
+    const roots = entries.filter(
+      (entry) =>
+        !entries.some(
+          (parent) =>
+            parent.id !== entry.id && parent.kind === "directory" && under(entry.path, parent.path),
+        ),
+    );
+    const rootIds = new Set(roots.map((entry) => entry.id));
+    const sources = new Map<string, Pick<ResourceEntry, "path" | "fileKey" | "hash">>();
+    const reserved = new Set<string>();
+    const trees = new Map<string, string>();
+    const parents = new Map<string, { path: string; fileKey: string }>();
+    const plan: ResourceBatchPlan = {
+      id: randomUUID(),
+      libraryId: this.libraryId,
+      action,
+      items: [],
+      affectedCount: this.entries.filter(
+        (entry) => !entry.deleted && roots.some((parent) => under(entry.path, parent.path)),
+      ).length,
+    };
+    let exportRoot: string | undefined;
+    if (action === "export") {
+      if (!target) throw new Error("Choose an export folder outside the resource library.");
+      exportRoot = await fs.realpath(target);
+      if (under(exportRoot, this.root))
+        throw new Error("Choose an export folder outside the resource library.");
+    }
+    for (const id of ordered) {
+      const entry = entries.find((e) => e.id === id);
+      const item: ResourceBatchPlan["items"][number] = {
+        id,
+        source: entry?.path ?? id,
+        status: "ready",
+      };
+      plan.items.push(item);
+      if (!entry) {
+        item.status = "failed";
+        item.error = "Resource no longer exists. Refresh the library.";
+        continue;
+      }
+      if (!rootIds.has(id)) {
+        item.status = "skipped";
+        continue;
+      }
+      sources.set(id, { path: entry.path, fileKey: entry.fileKey, hash: entry.hash });
+      if (entry.kind === "directory") trees.set(id, this.batchTree(entry.path));
+      try {
+        if (action === "trash") continue;
+        const parent = action === "rename" ? parentPath(entry.path) : (target ?? "");
+        let proposed = entry.name;
+        if (action === "rename") {
+          safeName(name ?? "");
+          proposed =
+            roots.length > 1
+              ? `${name}-${String(roots.findIndex((e) => e.id === id) + 1).padStart(3, "0")}${entry.kind === "file" ? path.extname(entry.name) : ""}`
+              : name!;
+        }
+        safeName(proposed);
+        if (action !== "export") {
+          if (entry.kind === "directory" && parent && under(parent, entry.path))
+            throw new Error("A folder cannot be moved into itself.");
+          const destinationParent = await this.resolve(parent);
+          if (!(await fs.stat(destinationParent)).isDirectory())
+            throw new Error("Choose a folder.");
+          if ([parent, proposed].filter(Boolean).join("/") === entry.path) {
+            item.target = entry.path;
+            item.status = "skipped";
+            continue;
+          }
+        }
+        for (let suffix = 0; suffix < 10000; suffix++) {
+          const ext = entry.kind === "file" ? path.extname(proposed) : "";
+          const candidate = suffix
+            ? `${proposed.slice(0, proposed.length - ext.length)} (${suffix})${ext}`
+            : proposed;
+          const destination =
+            action === "export"
+              ? path.join(exportRoot!, candidate)
+              : [parent, candidate].filter(Boolean).join("/");
+          const full = action === "export" ? destination : await this.resolve(destination, true);
+          if (!reserved.has(destination) && !(await exists(full))) {
+            const directory = await fs.realpath(path.dirname(full));
+            const stat = await fs.stat(directory);
+            item.target = destination;
+            reserved.add(destination);
+            parents.set(id, { path: directory, fileKey: `${stat.dev}:${stat.ino}` });
+            break;
+          }
+        }
+        if (!item.target) throw new Error("Too many files with this name.");
+      } catch (error) {
+        item.status = "failed";
+        item.error = message(error);
+      }
+    }
+    this.batch = { plan, sources, trees, parents, results: new Map() };
+    return structuredClone(plan);
+  }
+  batchPlan(id: string): ResourceBatchPlan {
+    if (!this.batch || this.batch.plan.id !== id || this.batch.plan.libraryId !== this.libraryId)
+      throw new Error("This operation preview has expired. Prepare it again.");
+    return structuredClone(this.batch.plan);
+  }
+  private batchTree(relative: string) {
+    return JSON.stringify(
+      this.entries
+        .filter((entry) => !entry.deleted && under(entry.path, relative))
+        .map((entry) => [entry.id, entry.path, entry.fileKey, entry.hash])
+        .toSorted((a, b) => String(a[1]).localeCompare(String(b[1]))),
+    );
+  }
+  batchPendingItems(id: string, retryFailed = false) {
+    const plan = this.batchPlan(id);
+    return plan.items.filter(
+      (item) =>
+        item.status === "ready" &&
+        (!this.batch!.results.has(item.id) ||
+          (retryFailed && this.batch!.results.get(item.id)?.status === "failed")),
+    );
+  }
+  async executeBatch(
+    id: string,
+    retryFailed = false,
+    trash?: (file: string) => Promise<void>,
+  ): Promise<ResourceBatchResult> {
+    this.assertWritable();
+    const plan = this.batchPlan(id),
+      batch = this.batch!;
+    let halted: string | null = null;
+    try {
+      try {
+        await this.scan();
+      } catch (cause) {
+        halted = message(cause);
+      }
+      for (const item of plan.items) {
+        const previous = batch.results.get(item.id);
+        if (previous && (previous.status !== "failed" || !retryFailed)) continue;
+        if (item.status !== "ready") {
+          batch.results.set(item.id, { ...item, status: item.status });
+          continue;
+        }
+        const result: ResourceBatchItemResult = { ...item, status: "failed" };
+        batch.results.set(item.id, result);
+        if (halted) {
+          result.error = halted;
+          continue;
+        }
+        let changed = false;
+        try {
+          await this.controlRoot();
+          const entry = this.entry(item.id),
+            expected = batch.sources.get(item.id)!;
+          const source = await this.resolve(entry.path),
+            stat = await fs.lstat(source);
+          if (
+            entry.path !== expected.path ||
+            `${stat.dev}:${stat.ino}` !== expected.fileKey ||
+            (entry.kind === "file" && (await hashFile(source)) !== expected.hash)
+          )
+            throw new Error("The resource changed after the preview. Prepare it again.");
+          if (entry.kind === "directory" && batch.trees.get(item.id) !== this.batchTree(entry.path))
+            throw new Error("The resource changed after the preview. Prepare it again.");
+          const parent = batch.parents.get(item.id);
+          if (parent && item.target) {
+            const destination =
+              plan.action === "export" ? item.target : await this.resolve(item.target, true);
+            const realParent = await fs.realpath(path.dirname(destination)),
+              parentStat = await fs.stat(realParent);
+            if (
+              realParent !== parent.path ||
+              `${parentStat.dev}:${parentStat.ino}` !== parent.fileKey ||
+              (plan.action === "export" && under(realParent, this.root!))
+            )
+              throw new Error("The resource changed after the preview. Prepare it again.");
+          }
+          if (plan.action === "export") {
+            await copyResourceExclusive(source, item.target!);
+          } else if (plan.action === "trash") {
+            if (!trash) throw new Error("System trash is unavailable.");
+            await trash(source);
+            changed = true;
+            for (const child of this.entries)
+              if (under(child.path, entry.path)) child.deleted = true;
+          } else {
+            const destination = await this.resolve(item.target!, true);
+            await moveResourceExclusive(source, destination, entry.kind);
+            changed = true;
+            const old = entry.path;
+            for (const child of this.entries)
+              if (!child.deleted && under(child.path, old)) {
+                child.path = item.target! + child.path.slice(old.length);
+                child.name = path.posix.basename(child.path);
+              }
+          }
+          result.status = "succeeded";
+          if (changed) await this.persist();
+          delete result.error;
+        } catch (error) {
+          result.error = message(error);
+          // A completed filesystem change must never be replayed after a manifest failure.
+          if (changed) {
+            result.status = "succeeded";
+            halted = result.error;
+          } else if (this.error) halted = result.error;
+        }
+      }
+    } finally {
+      if (plan.action !== "export") {
+        try {
+          await this.scan();
+        } catch (error) {
+          for (const result of batch.results.values()) result.error ??= message(error);
+        }
+      }
+      this.changed();
+    }
+    return { planId: plan.id, items: structuredClone([...batch.results.values()]) };
+  }
   async trash(ids: string[], remove: (file: string) => Promise<void>) {
+    this.assertWritable();
     try {
       for (const entry of this.selected(ids)) {
         await remove(await this.resolve(entry.path));
@@ -478,7 +910,7 @@ export class ResourceLibrary {
     name: string,
     origin?: ResourceOrigin,
   ) {
-    if (!target) throw new Error("Choose a project or folder.");
+    this.assertWritable();
     const parent = await this.resolve(target);
     if (!(await fs.stat(parent)).isDirectory()) throw new Error("Choose a folder.");
     const temp = path.join(parent, `.aha-import-${randomUUID()}`);
@@ -521,7 +953,7 @@ export class ResourceLibrary {
     } satisfies ResourceImportResult;
   }
   async importPaths(target: string, sources: string[], origin?: ResourceOrigin) {
-    if (!target) throw new Error("Choose a project or folder.");
+    this.assertWritable();
     await this.resolve(target);
     this.cancelled = false;
     const result: ResourceImportResult = { added: 0, skipped: 0, failed: [], cancelled: false };
@@ -558,6 +990,10 @@ export class ResourceLibrary {
       }
     };
     for (const source of sources) {
+      if (this.error) {
+        result.failed.push({ name: path.basename(source), path: source, error: this.error });
+        continue;
+      }
       await visit(source, target);
       if (this.cancelled) break;
     }

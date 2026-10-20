@@ -270,3 +270,152 @@ describe("resource library filesystem lifecycle", () => {
     expect(lib.error).toBeNull();
   });
 });
+
+describe("resource batch previews", () => {
+  async function fixture() {
+    const lib = await make();
+    await lib.createDirectory("", "Game");
+    await lib.createDirectory("Game", "Nested");
+    await lib.importBytes("Game", "a.txt", bytes("a"));
+    await lib.importBytes("Game/Nested", "b.txt", bytes("b"));
+    return lib;
+  }
+  it("counts only files in aggregated queries, preserving mixed legacy queries", async () => {
+    const lib = await fixture();
+    expect(lib.list({ path: "Game", recursive: true, kind: "file" }).total).toBe(2);
+    expect(lib.list({ path: "Game", recursive: true }).total).toBe(3);
+    expect(lib.list({ path: "Game", kind: "directory" }).entries[0]?.name).toBe("Nested");
+  });
+  it("uses the same file predicate for SQLite totals and both sides of the 100-item page boundary", async () => {
+    const lib = await fixture();
+    await Promise.all(
+      Array.from({ length: 105 }, async (_, index) => {
+        await fs.writeFile(
+          path.join(lib.root!, `Game/Nested/file-${String(index).padStart(3, "0")}.txt`),
+          String(index),
+        );
+      }),
+    );
+    await lib.scan();
+    const query = { path: "Game", recursive: true, kind: "file", sort: "name" } as const;
+    const first = lib.list(query),
+      second = lib.list({ ...query, offset: 100 });
+    expect(first.total).toBe(107);
+    expect(first.entries).toHaveLength(100);
+    expect(second.entries).toHaveLength(7);
+    expect(second.total).toBe(107);
+    expect(new Set([...first.entries, ...second.entries].map((entry) => entry.id)).size).toBe(107);
+    expect(lib.list({ ...query, query: "file-" }).total).toBe(105);
+  });
+  it("adds and removes tags without replacing unrelated per-file tags", async () => {
+    const lib = await fixture();
+    const [a, b] = lib.list({ path: "Game", recursive: true, kind: "file", sort: "name" }).entries;
+    await lib.metadata([a!.id], ["a"]);
+    await lib.metadata([b!.id], ["b"]);
+    await lib.metadata([a!.id, b!.id], ["common"], undefined, "add");
+    expect(lib.entry(a!.id).tags).toEqual(["a", "common"]);
+    expect(lib.entry(b!.id).tags).toEqual(["b", "common"]);
+    await lib.metadata([a!.id, b!.id], ["common"], undefined, "remove");
+    expect(lib.entry(a!.id).tags).toEqual(["a"]);
+    expect(lib.entry(b!.id).tags).toEqual(["b"]);
+  });
+  it("freezes numbering and destinations across partial failures and retries", async () => {
+    const lib = await fixture();
+    const entries = lib.list({ path: "Game", recursive: true, kind: "file", sort: "name" }).entries;
+    const plan = await lib.prepareBatch(
+      "rename",
+      entries.map((entry) => entry.id),
+      undefined,
+      "frame",
+    );
+    expect(plan.items.map((item) => item.target)).toEqual([
+      "Game/frame-001.txt",
+      "Game/Nested/frame-002.txt",
+    ]);
+    await fs.writeFile(path.join(lib.root!, "Game/Nested/frame-002.txt"), "external");
+    const first = await lib.executeBatch(plan.id);
+    expect(first.items.map((item) => item.status)).toEqual(["succeeded", "failed"]);
+    expect(await fs.readFile(path.join(lib.root!, "Game/Nested/frame-002.txt"), "utf8")).toBe(
+      "external",
+    );
+    await fs.unlink(path.join(lib.root!, "Game/Nested/frame-002.txt"));
+    const retry = await lib.executeBatch(plan.id, true);
+    expect(retry.items.map((item) => item.status)).toEqual(["succeeded", "succeeded"]);
+    expect(lib.entry(entries[1]!.id).path).toBe("Game/Nested/frame-002.txt");
+    expect((await lib.executeBatch(plan.id)).items).toEqual(retry.items);
+  });
+  it("rejects changed sources and expires older previews", async () => {
+    const lib = await fixture();
+    const entry = lib.list({ path: "Game", kind: "file" }).entries[0]!;
+    const plan = await lib.prepareBatch("rename", [entry.id], undefined, "renamed.txt");
+    await fs.writeFile(path.join(lib.root!, entry.path), "changed");
+    expect((await lib.executeBatch(plan.id)).items[0]?.error).toContain(
+      "changed after the preview",
+    );
+    await lib.prepareBatch("trash", [entry.id]);
+    await expect(lib.executeBatch(plan.id)).rejects.toThrow("expired");
+  });
+  it("deduplicates child selections and rejects recursive directory moves", async () => {
+    const lib = await fixture();
+    const folder = lib.list({ path: "Game", kind: "directory" }).entries[0]!;
+    const child = lib.list({ path: folder.path }).entries[0]!;
+    const plan = await lib.prepareBatch("move", [folder.id, child.id], "Game/Nested");
+    expect(plan.items.map((item) => item.status)).toEqual(["failed", "skipped"]);
+  });
+  it("moves directories with stable identities and exports without overwriting", async () => {
+    const lib = await fixture();
+    const folder = lib.list({ path: "Game", kind: "directory" }).entries[0]!;
+    const child = lib.list({ path: folder.path }).entries[0]!;
+    await lib.createDirectory("", "Second");
+    const move = await lib.prepareBatch("move", [folder.id], "Second");
+    expect((await lib.executeBatch(move.id)).items[0]?.status).toBe("succeeded");
+    expect(lib.entry(child.id).path).toBe("Second/Nested/b.txt");
+    const output = path.join(directory, "output");
+    await fs.mkdir(output);
+    const plan = await lib.prepareBatch("export", [child.id], output);
+    await fs.writeFile(plan.items[0]!.target!, "occupied");
+    expect((await lib.executeBatch(plan.id)).items[0]?.status).toBe("failed");
+    expect(await fs.readFile(plan.items[0]!.target!, "utf8")).toBe("occupied");
+  });
+  it("stops after metadata persistence fails without replaying the completed filesystem move", async () => {
+    const lib = await fixture();
+    const entries = lib.list({ path: "Game", recursive: true, kind: "file", sort: "name" }).entries;
+    const plan = await lib.prepareBatch(
+      "rename",
+      entries.map((entry) => entry.id),
+      undefined,
+      "frame",
+    );
+    const writable = lib as unknown as { persist: () => Promise<void> };
+    const persist = writable.persist.bind(lib);
+    let failed = false;
+    const spy = vi.spyOn(writable, "persist").mockImplementation(async () => {
+      if (!failed && lib.entry(entries[0]!.id).path === "Game/frame-001.txt") {
+        failed = true;
+        throw new Error("Manifest disk is full");
+      }
+      await persist();
+    });
+    const result = await lib.executeBatch(plan.id);
+    expect(result.items.map((item) => item.status)).toEqual(["succeeded", "failed"]);
+    expect(result.items[0]?.error).toContain("disk is full");
+    expect(await fs.readFile(path.join(lib.root!, "Game/frame-001.txt"), "utf8")).toBe("a");
+    expect(await fs.readFile(path.join(lib.root!, "Game/Nested/b.txt"), "utf8")).toBe("b");
+    spy.mockRestore();
+    const retried = await lib.executeBatch(plan.id, true);
+    expect(retried.items.map((item) => item.status)).toEqual(["succeeded", "succeeded"]);
+    expect(lib.entry(entries[1]!.id).path).toBe("Game/Nested/frame-002.txt");
+  });
+  it("rejects a destination directory replaced after its preview", async () => {
+    const lib = await fixture();
+    const file = lib.list({ path: "Game", kind: "file" }).entries[0]!;
+    await lib.createDirectory("", "Second");
+    const plan = await lib.prepareBatch("move", [file.id], "Second");
+    await fs.rename(path.join(lib.root!, "Second"), path.join(lib.root!, "OriginalSecond"));
+    await fs.mkdir(path.join(lib.root!, "Second"));
+    const result = await lib.executeBatch(plan.id);
+    expect(result.items[0]?.status).toBe("failed");
+    expect(result.items[0]?.error).toContain("changed after the preview");
+    expect(await fs.readFile(path.join(lib.root!, file.path), "utf8")).toBe("a");
+  });
+});

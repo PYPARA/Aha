@@ -3184,6 +3184,8 @@ const makeWsRpcHandlersLayer = () =>
             ),
             "Sprite conversation lookup failed",
           ),
+        [WS_METHODS.spriteRetryConfirm]: (input) =>
+          rpcEffect(imageGenerationService.spriteRetryConfirm(input), "Sprite retry failed"),
         [WS_METHODS.spriteConfirm]: (input) =>
           rpcEffect(imageGenerationService.spriteConfirm(input), "Sprite confirmation failed"),
         [WS_METHODS.spriteCommand]: (input) =>

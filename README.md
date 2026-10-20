@@ -40,6 +40,10 @@ bun run lint
 
 正式应用默认使用 `~/.aha-next`，`aha:dev` 使用仓库内 `.aha-dev`。独立服务支持 `AHA_HOME` 或 `--home-dir` 指定数据目录。Aha 使用独立应用身份与 `aha-next:` 协议，关闭官方 Synara 自动更新、渠道安装和诊断上传。
 
+## 文档
+
+功能使用说明与开发约定统一放在 [docs](docs/README.md)，包括 [精灵动画工作台](docs/guides/SPRITE_WORKFLOW.md)、[资源中心](docs/guides/RESOURCE_CENTER.md) 和 [UI 实现规则](docs/UI_GUIDELINES.md)。上游版本及精简边界见 [UPSTREAM.md](UPSTREAM.md)。
+
 ## 来源与许可
 
 保留上游内部包名及兼容标识。项目采用 [MIT License](LICENSE)，原生 CUA 组件遵循 [CUA 许可证](licenses/CUA-LICENSE.txt)，绘图组件的第三方声明见 [gpt-image-playground](third-party-licenses/gpt-image-playground.txt)。

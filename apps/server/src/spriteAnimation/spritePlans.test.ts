@@ -12,6 +12,7 @@ import {
   type SpritePlanConfiguration,
   type ImageJobCreateInput,
 } from "@synara/contracts";
+import { ImageApiError } from "../imageGeneration/imageApi";
 import { SpriteEngine } from "./spriteEngine";
 import { processSprite } from "./processSprite";
 import type { ImageGenerationEngine } from "../imageGeneration/imageGenerationEngine";
@@ -206,7 +207,9 @@ describe("confirmed sprite generation plans", () => {
     const c: SpritePlanConfiguration = { ...config(), mode: "separate" };
     const { engine, images } = fixture(await sheet({ ...c, actions: [c.actions[0]!] }));
     const plan = await prepare(engine, c);
-    images.createJob.mockRejectedValueOnce(new Error("Provider unavailable"));
+    images.createJob.mockRejectedValueOnce(
+      new ImageApiError("provider_disabled", "Provider unavailable"),
+    );
     await engine.confirm(confirmInput(plan));
     await engine.tick();
     const state = await engine.command({ operation: "get", projectId: "project" });
@@ -656,7 +659,7 @@ it("saves corrected candidate versions atomically, rejects stale edits and resto
     ...spriteGridSlice(
       192,
       48,
-      config().actions.map((a) => ({ ...a, frameCount: 2 })),
+      config().actions.map((a) => Object.assign({}, a, { frameCount: 2 })),
     ),
     reviewedActionIds: config().actions.map((a) => a.id),
   };
@@ -682,7 +685,22 @@ it("saves corrected candidate versions atomically, rejects stale edits and resto
   });
   const revised = saved.runs[0]!.candidates![0]!;
   expect(revised.frames).toHaveLength(6);
-  expect(revised.status).toBe("ready");
+  expect(revised.status).toBe("needs-adjustment");
+  expect(revised.slice!.reviewedActionIds).toEqual([]);
+  await expect(
+    engine.command({
+      operation: "review-candidate",
+      projectId: "project",
+      runId: run.id,
+      candidateId: candidate.id,
+      version: revised.version ?? 0,
+      processingVersionId: revised.processingVersionId,
+      analysisRevision: revised.analysisRevision ?? 0,
+      actionId: revised.actions[0]!.action.id,
+    }),
+  ).rejects.toThrow("structural frame errors");
+  const checked = await engine.command({ operation: "get", projectId: "project" });
+  expect(checked.runs[0]!.candidates![0]!.reviews ?? []).toEqual([]);
   expect(saved.plans![0]!.configuration).toEqual(plan.configuration);
   await expect(
     engine.command({
@@ -721,4 +739,97 @@ it("saves corrected candidate versions atomically, rejects stale edits and resto
   expect(
     (await engine.command({ operation: "get", projectId: "project" })).runs[0]!.frames,
   ).toHaveLength(26);
+});
+
+it("retries only failed tasks with the frozen inputs and deduplicates confirmations across restarts", async () => {
+  const { engine, images, jobs } = fixture();
+  const plan = await prepare(engine, { ...config(), mode: "separate" });
+  await engine.confirm(confirmInput(plan));
+  const originals = [...jobs.values()];
+  originals[0]!.status = "failed";
+  originals[0]!.outputs = [];
+  originals[1]!.status = "queued";
+  originals[2]!.status = "queued";
+  await engine.tick();
+  const state = await engine.command({ operation: "get", projectId: "project" });
+  const first = state.runs[0]!;
+  const input = {
+    projectId: "project",
+    threadId: "thread",
+    runIds: [first.id],
+    requestId: "retry-click",
+  };
+  const before = images.createJob.mock.calls[0]![0];
+  const [retried] = await Promise.all([engine.retryConfirm(input), engine.retryConfirm(input)]);
+  expect(images.createJob).toHaveBeenCalledTimes(4);
+  const after = images.createJob.mock.calls[3]![0];
+  expect(after).toMatchObject({
+    prompt: before.prompt,
+    parameters: before.parameters,
+    inputAssetIds: before.inputAssetIds,
+  });
+  expect(after.clientRequestId).not.toBe(before.clientRequestId);
+  expect(retried.runs).toHaveLength(4);
+  expect(retried.runs[3]!.retryOfRunId).toBe(first.id);
+  const restored = new SpriteEngine(
+    root,
+    images as unknown as ImageGenerationEngine,
+    async () => {},
+  );
+  await restored.initialize();
+  await restored.retryConfirm(input);
+  expect(images.createJob).toHaveBeenCalledTimes(4);
+  await expect(restored.retryConfirm({ ...input, requestId: "second-click" })).rejects.toThrow(
+    "already has a retry",
+  );
+  const retryJob = [...jobs.values()][3]!;
+  retryJob.status = "failed";
+  retryJob.outputs = [];
+  await restored.tick();
+  await restored.retryConfirm({
+    ...input,
+    runIds: [retried.runs[3]!.id],
+    requestId: "next-attempt",
+  });
+  expect(images.createJob).toHaveBeenCalledTimes(5);
+  await expect(
+    restored.retryConfirm({ ...input, threadId: "other", requestId: "wrong-owner" }),
+  ).rejects.toThrow("unavailable");
+});
+
+it("does not regenerate candidates or uncertain submissions", async () => {
+  const { engine, images } = fixture(await sheet());
+  const plan = await prepare(engine);
+  await engine.confirm(confirmInput(plan));
+  await engine.tick();
+  const state = await engine.command({ operation: "get", projectId: "project" });
+  await expect(
+    engine.retryConfirm({
+      projectId: "project",
+      threadId: "thread",
+      runIds: [state.runs[0]!.id],
+      requestId: "no-paid-reprocess",
+    }),
+  ).rejects.toThrow("Images already exist");
+  expect(images.createJob).toHaveBeenCalledTimes(1);
+});
+
+it("blocks uncertain submissions instead of issuing another request", async () => {
+  const { engine, images } = fixture();
+  const plan = await prepare(engine);
+  images.createJob.mockRejectedValueOnce(new Error("Disconnected while submitting"));
+  const interrupted = await engine.confirm(confirmInput(plan));
+  expect(interrupted.runs[0]!).toMatchObject({
+    status: "interrupted",
+    submissionPhase: "uncertain",
+  });
+  await expect(
+    engine.retryConfirm({
+      projectId: "project",
+      threadId: "thread",
+      runIds: [interrupted.runs[0]!.id],
+      requestId: "uncertain",
+    }),
+  ).rejects.toThrow("verified");
+  expect(images.createJob).toHaveBeenCalledTimes(1);
 });

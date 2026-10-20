@@ -1,4 +1,9 @@
-import type { SpriteGenerationPlan, SpriteCommand, SpriteState } from "@synara/contracts";
+import {
+  spritePlanTarget,
+  type SpriteGenerationPlan,
+  type SpriteCommand,
+  type SpriteState,
+} from "@synara/contracts";
 import { drawingApi } from "../drawing/useDrawing";
 
 export const SPRITE_PLAN_FOCUS = "aha-sprite-plan-focus";
@@ -14,9 +19,29 @@ export async function reviseSpritePlan(input: SpriteCommand): Promise<SpriteStat
   const source = state.plans?.find((p) => p.id === input.planId);
   const run = state.runs.find((r) => r.id === input.runId);
   const threadId = source?.threadId ?? run?.context.threadId ?? input.context?.threadId;
-  const current = state.plans?.find((p) => p.threadId === threadId && p.status === "draft");
+  const configuration = input.configuration ?? source?.configuration ?? run?.configuration;
+  const targetKey = configuration
+    ? spritePlanTarget({
+        ...configuration,
+        ...(input.actionId
+          ? { actions: configuration.actions.filter((a) => a.id === input.actionId) }
+          : {}),
+      })
+    : undefined;
+  const current = state.plans?.find(
+    (p) =>
+      p.status === "draft" &&
+      (targetKey
+        ? (p.targetKey ?? spritePlanTarget(p.configuration)) === targetKey
+        : p.threadId === threadId),
+  );
   const sourceKey = `${run ? `run:${run.id}` : `plan:${source?.id}`}:${input.actionId ?? "all"}`;
-  if (current && (current.id === input.planId || current.sourceKey === sourceKey))
+  if (
+    current &&
+    (input.operation === "propose" ||
+      current.id === input.planId ||
+      current.sourceKey === sourceKey)
+  )
     return { ...state, resultPlanId: current.id };
   if (current) throw Object.assign(new Error("A draft already exists."), { currentPlan: current });
   try {

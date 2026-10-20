@@ -191,7 +191,7 @@ it("requires confirmation and freezes the selected drawing settings across edito
   expect(images.createJob).toHaveBeenCalledTimes(1);
 });
 
-it("keeps repeated request ids independent between conversations and deduplicates within each", async () => {
+it("restores the same character target across conversations without creating a duplicate draft", async () => {
   const images = {
     spriteAssetIds: new Set<string>(),
     createJob: vi.fn(async (_input: unknown) => ({ id: "job" })),
@@ -217,8 +217,8 @@ it("keeps repeated request ids independent between conversations and deduplicate
     });
   expect(images.createJob).not.toHaveBeenCalled();
   const plans = (await sprites.command({ operation: "get", projectId: "a" })).plans!;
-  expect(plans).toHaveLength(2);
-  expect(plans.map((p) => p.threadId)).toEqual(["thread-a", "thread-b"]);
+  expect(plans).toHaveLength(1);
+  expect(plans[0]!.threadId).toBe("thread-a");
 });
 
 it("detaches a deleted conversation, cancels only its active jobs and preserves completed shared artwork", async () => {

@@ -34,11 +34,29 @@ export interface ResourceSnapshot {
   directories: ResourceEntry[];
   count: number;
   error: string | null;
+  revision?: number;
+  scan?: ResourceScanState;
+  directoryStats?: ResourceDirectoryStats[];
+}
+export interface ResourceDirectoryStats {
+  id: string | null;
+  path: string;
+  directFiles: number;
+  directDirectories: number;
+  recursiveFiles: number;
+}
+export interface ResourceScanState {
+  phase: "loading" | "scanning" | "ready" | "failed";
+  lastCompletedAt: number | null;
+  failedPath: string | null;
+  skipped: { system: number; temporary: number; symbolicLinks: number; unsupported: number };
 }
 export interface ResourceQuery {
   path: string;
+  kind?: "file" | "directory" | undefined;
   recursive?: boolean | undefined;
   query?: string | undefined;
+  searchIn?: "name" | "nameAndPath" | undefined;
   tag?: string | undefined;
   type?: "all" | "image" | "audio" | "video" | "document" | "other" | undefined;
   sort?: "name" | "modified" | undefined;
@@ -47,6 +65,15 @@ export interface ResourceQuery {
 export interface ResourcePage {
   entries: ResourceEntry[];
   total: number;
+  revision?: number;
+  stats?: { scopeFiles: number; matchedFiles: number; matchedDirectories: number };
+}
+export interface ResourceLocateResult {
+  entry: ResourceEntry;
+  parentId: string | null;
+  parentPath: string;
+  offset: number;
+  revision: number;
 }
 export interface ResourceImportResult {
   added: number;
@@ -58,13 +85,73 @@ export interface ResourceProgress {
   name: string;
   completed: number;
 }
+export type ResourceTagMode = "add" | "remove" | "replace";
+export type ResourceBatchAction = "rename" | "move" | "trash" | "export";
+export interface ResourceBatchItem {
+  id: string;
+  source: string;
+  target?: string | undefined;
+  status: "ready" | "skipped" | "failed";
+  error?: string | undefined;
+}
+export interface ResourceBatchPlan {
+  id: string;
+  libraryId: string;
+  action: ResourceBatchAction;
+  items: ResourceBatchItem[];
+  affectedCount: number;
+}
+export interface ResourceBatchItemResult extends Omit<ResourceBatchItem, "status"> {
+  status: "succeeded" | "skipped" | "failed" | "cancelled";
+}
+export interface ResourceBatchResult {
+  planId: string;
+  items: ResourceBatchItemResult[];
+}
+export const DRAWING_RESOURCE_LIMITS = {
+  mimeTypes: ["image/png", "image/jpeg", "image/webp"] as readonly string[],
+  fileBytes: 20 * 1024 * 1024,
+  totalBytes: 80 * 1024 * 1024,
+  count: 16,
+} as const;
+export function drawingResourceError(
+  file: { type: string; size: number },
+  existing: { count: number; bytes: number },
+): string | null {
+  if (
+    !DRAWING_RESOURCE_LIMITS.mimeTypes.includes(file.type) ||
+    file.size > DRAWING_RESOURCE_LIMITS.fileBytes
+  )
+    return "Choose PNG, JPEG or WebP images up to 20 MiB each.";
+  if (
+    existing.count >= DRAWING_RESOURCE_LIMITS.count ||
+    existing.bytes + file.size > DRAWING_RESOURCE_LIMITS.totalBytes
+  )
+    return "Reference image limit exceeded (16 images / 80 MiB).";
+  return null;
+}
 export type ResourceCommand =
   | { op: "snapshot" | "refresh" | "chooseRoot" | "cancelImport" }
   | { op: "list"; query: ResourceQuery }
+  | { op: "locate"; id: string; sort?: ResourceQuery["sort"] }
   | { op: "createDirectory"; parent: string; name: string }
   | { op: "rename"; ids: string[]; name: string }
   | { op: "move"; ids: string[]; target: string }
-  | { op: "metadata"; ids: string[]; tags?: string[] | undefined; notes?: string | undefined }
+  | {
+      op: "metadata";
+      ids: string[];
+      tags?: string[] | undefined;
+      tagMode?: ResourceTagMode | undefined;
+      notes?: string | undefined;
+    }
+  | {
+      op: "prepareBatch";
+      action: ResourceBatchAction;
+      ids: string[];
+      name?: string | undefined;
+      target?: string | undefined;
+    }
+  | { op: "executeBatch"; planId: string; retryFailed?: boolean | undefined }
   | { op: "trash" | "export"; ids: string[] }
   | { op: "reveal"; id?: string | undefined }
   | { op: "read"; id: string; thumbnail?: boolean | undefined }

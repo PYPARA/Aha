@@ -55,6 +55,75 @@ it("accepts explicit attachment/candidate reference ids in generation requests",
     ).toBe(referenceId);
   }
 });
+it.each([1, 2])(
+  "preserves optional frame timing and history in v%i while rejecting invalid durations",
+  (version) => {
+    const source = {
+      id: "image",
+      name: "image.png",
+      width: 16,
+      height: 16,
+      mimeType: "image/png",
+      file: `images/${"a".repeat(64)}.png`,
+    };
+    const action = {
+      ...base.actions[0]!,
+      frames: [
+        {
+          id: "frame",
+          sourceId: "image",
+          x: 0,
+          y: 0,
+          width: 16,
+          height: 16,
+          offsetX: 0,
+          offsetY: 0,
+          durationMs: 250,
+        },
+      ],
+    };
+    const data = {
+      ...base,
+      version,
+      ...(version === 2
+        ? { renderSpec: { mode: "pixel", logicalWidth: 16, logicalHeight: 16, outputScale: 1 } }
+        : {}),
+      sources: [source],
+      actions: [action],
+      actionVersions: [
+        {
+          id: "history",
+          createdAt: new Date().toISOString(),
+          action,
+          width: 16,
+          height: 16,
+          provenance: [],
+        },
+      ],
+    };
+    expect(
+      SpriteProjectDataSchema.parse(data).actionVersions![0]!.action.frames[0]!.durationMs,
+    ).toBe(250);
+    for (const durationMs of [0, -1, Infinity, NaN])
+      expect(() =>
+        SpriteProjectDataSchema.parse({
+          ...data,
+          actions: [{ ...action, frames: [{ ...action.frames[0], durationMs }] }],
+        }),
+      ).toThrow();
+    expect(() =>
+      SpriteProjectDataSchema.parse({
+        ...data,
+        actionVersions: [
+          {
+            ...data.actionVersions[0],
+            action: { ...action, frames: [{ ...action.frames[0], sourceId: "missing" }] },
+          },
+        ],
+      }),
+    ).toThrow();
+  },
+);
 
 it("persists per-action adoption keys and provenance alongside legacy candidates", () => {
   const p = SpriteProjectDataSchema.parse({

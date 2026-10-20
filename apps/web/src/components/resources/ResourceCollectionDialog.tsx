@@ -11,6 +11,8 @@ import type {
 } from "@synara/contracts/resourceLibrary";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
+import { ResourceDestinationSelect } from "./ResourceDestinationSelect";
 import {
   Dialog,
   DialogPopup,
@@ -120,7 +122,6 @@ export function drawingResourceSource(
   };
   return { name: asset.name, url, origin };
 }
-const inputClass = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm";
 export function ResourceCollectionDialog() {
   useEffect(() => {
     if (window.desktopBridge?.resourceLibrary)
@@ -131,7 +132,7 @@ export function ResourceCollectionDialog() {
   const isOpen = !!sources;
   const library = useResourceLibrary(isOpen);
   const client = useQueryClient();
-  const [target, setTarget] = useState("");
+  const [target, setTarget] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,17 +148,23 @@ export function ResourceCollectionDialog() {
     initialized.current = key;
     setError(null);
     try {
-      const last = JSON.parse(localStorage.getItem("aha:resource-destination") ?? "null") as {
+      const last = JSON.parse(
+        localStorage.getItem(`aha:resource-destination:${key}`) ??
+          localStorage.getItem("aha:resource-destination") ??
+          "null",
+      ) as {
         libraryId: string;
-        id: string;
+        id: string | null;
       } | null;
       const dir =
         last?.libraryId === library.data.libraryId
           ? library.data.directories.find((e) => e.id === last.id)
           : undefined;
-      setTarget(dir?.path ?? "");
+      setTarget(
+        last?.libraryId === library.data.libraryId && last.id === null ? "" : (dir?.path ?? null),
+      );
     } catch {
-      setTarget("");
+      setTarget(null);
     }
   }, [isOpen, library.data]);
   const run = async (fn: () => Promise<void>) => {
@@ -177,7 +184,12 @@ export function ResourceCollectionDialog() {
   };
   const collect = () =>
     run(async () => {
-      if (!sources || !library.data?.directories.some((e) => e.path === target))
+      if (
+        !sources ||
+        target === null ||
+        !library.data?.root ||
+        (target !== "" && !library.data.directories.some((e) => e.path === target))
+      )
         throw new Error("Choose a project or folder.");
       let added = 0,
         skipped = 0;
@@ -209,10 +221,10 @@ export function ResourceCollectionDialog() {
           failures.push(e instanceof Error ? e.message : String(e));
         }
       }
-      const id = library.data.directories.find((e) => e.path === target)!.id;
+      const id = target === "" ? null : library.data.directories.find((e) => e.path === target)!.id;
       try {
         localStorage.setItem(
-          "aha:resource-destination",
+          `aha:resource-destination:${library.data.libraryId}`,
           JSON.stringify({ libraryId: library.data.libraryId, id }),
         );
       } catch {
@@ -239,11 +251,11 @@ export function ResourceCollectionDialog() {
         <DialogHeader>
           <DialogTitle>{tr("Add to resource center")}</DialogTitle>
           <DialogDescription>
-            {tr("Keep an independent copy in a project folder.")}
+            {tr("Keep an independent copy in the resource library.")}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 p-4">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-ui text-muted-foreground">
             {sources?.length} {tr("resources")}
           </p>
           {!library.data?.root ? (
@@ -259,39 +271,34 @@ export function ResourceCollectionDialog() {
             </Button>
           ) : (
             <>
-              <label className="block space-y-2 text-sm">
+              <label className="block space-y-2 text-ui">
                 {tr("Destination")}
-                <select
-                  aria-label={tr("Destination")}
-                  className={inputClass}
+                <ResourceDestinationSelect
                   value={target}
-                  onChange={(e) => setTarget(e.target.value)}
+                  onChange={setTarget}
                   disabled={busy}
-                >
-                  <option value="">{tr("Choose a project or folder.")}</option>
-                  {library.data.directories.map((d) => (
-                    <option key={d.id} value={d.path}>
-                      {d.path}
-                    </option>
-                  ))}
-                </select>
+                  directories={library.data.directories}
+                />
               </label>
               <div className="flex gap-2">
-                <input
+                <Input
                   aria-label={tr("Folder name")}
                   placeholder={tr("Folder name")}
-                  className={inputClass}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
                 <Button
-                  disabled={busy || !name.trim()}
+                  disabled={
+                    busy ||
+                    !name.trim() ||
+                    (!!library.data?.scan && library.data.scan.phase !== "ready")
+                  }
                   variant="outline"
                   onClick={() =>
                     void run(async () => {
                       const created = await resourceApi<ResourceEntry>({
                         op: "createDirectory",
-                        parent: target,
+                        parent: target ?? "",
                         name,
                       });
                       setTarget(created.path);
@@ -305,7 +312,7 @@ export function ResourceCollectionDialog() {
             </>
           )}
           {error || library.data?.error || library.error ? (
-            <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">
+            <p role="alert" className="whitespace-pre-wrap text-ui text-destructive">
               {tr(error ?? library.data?.error ?? library.error?.message ?? "")}
             </p>
           ) : null}
@@ -318,7 +325,12 @@ export function ResourceCollectionDialog() {
               {tr("Cancel")}
             </Button>
             <Button
-              disabled={busy || !target || !!library.data?.error}
+              disabled={
+                busy ||
+                target === null ||
+                !!library.data?.error ||
+                (!!library.data?.scan && library.data.scan.phase !== "ready")
+              }
               onClick={() => void collect()}
             >
               {tr(busy ? "Saving..." : "Add to resource center")}

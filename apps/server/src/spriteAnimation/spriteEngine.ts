@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Effect, Schema } from "effect";
 import {
   SpriteState,
+  DEFAULT_SPRITE_SIZING,
   SpritePlanConfiguration,
   compileSpritePlan,
   spritePlanActions,
@@ -16,8 +17,15 @@ import {
   spritePlanForRevision,
   spritePlanPrompt,
   spriteTaskConfiguration,
+  spritePlanTasks,
+  spriteTaskGuideSvg,
+  spriteOutputSize,
+  spriteGenerationReference,
+  spritePlanTarget,
+  spriteBlockedActions,
   type SpriteGenerationPlan,
   type SpritePlanConfirmInput,
+  type SpriteRetryConfirmInput,
   type ImageAsset,
   type SpriteCommand,
   type SpriteRun,
@@ -26,10 +34,19 @@ import {
 } from "@synara/contracts";
 import type { ImageGenerationEngine } from "../imageGeneration/imageGenerationEngine";
 import { writeFileStringAtomically } from "../atomicWrite";
-import { analyzeSprite, processSprite, spriteLayoutGuide } from "./processSprite";
+import { ImageApiError } from "../imageGeneration/imageApi";
+import {
+  analyzeSprite,
+  processSprite,
+  spriteLayoutGuide,
+  normalizeSpriteCharacter,
+} from "./processSprite";
+import sharp from "sharp";
+import { recoverSpriteState, spriteImportOrigin, spriteRawAssetIds } from "./spriteRecovery";
 
 export class SpriteEngine {
   private states = new Map<string, SpriteState>();
+  private recoveryReferences = new Map<string, Set<string>>();
   private deleted = new Set<string>();
   private removedThreads = new Set<string>();
   private pendingThreadRemovals = new Set<string>();
@@ -80,6 +97,8 @@ export class SpriteEngine {
   private rebuildReferences() {
     this.images.spriteAssetIds.clear();
     for (const [id, state] of this.states) if (!this.deleted.has(id)) this.retain(state);
+    for (const ids of this.recoveryReferences.values())
+      for (const id of ids) this.images.spriteAssetIds.add(id);
   }
   private async removeProject(id: string): Promise<SpriteState> {
     if (!/^[\w-]{1,128}$/.test(id)) throw new Error("Invalid sprite project.");
@@ -94,6 +113,10 @@ export class SpriteEngine {
         state = { context: null, runs: [] };
       }
     }
+    if (state.recovery?.readOnly)
+      throw new Error(
+        "Task data is partially recovered. Retry reading or resolve the diagnostics before modifying generation state.",
+      );
     await Effect.runPromise(
       writeFileStringAtomically({
         filePath: path.join(this.root, `deleted-${id}.txt`),
@@ -134,6 +157,7 @@ export class SpriteEngine {
     this.pendingThreadRemovals.add(threadId);
     for (const [id, state] of this.states) {
       if (this.deleted.has(id)) continue;
+      if (state.recovery?.readOnly) continue;
       const runs = [...state.runs];
       for (const [index, run] of runs.entries()) {
         if (
@@ -180,23 +204,95 @@ export class SpriteEngine {
     const cached = this.states.get(id);
     if (cached) return cached;
     let state: SpriteState = { context: null, runs: [] };
+    let rawText: string | undefined;
+    let needsBackup = false;
     try {
-      state = Schema.decodeUnknownSync(SpriteState)(
-        JSON.parse(await readFile(path.join(this.root, `${id}.json`), "utf8")),
-      );
+      rawText = await readFile(path.join(this.root, `${id}.json`), "utf8");
+      const raw: unknown = JSON.parse(rawText);
+      const verified = new Set<string>();
+      for (const assetId of spriteRawAssetIds(raw)) {
+        try {
+          if ((await this.images.getAsset(assetId))?.id === assetId) verified.add(assetId);
+        } catch {
+          /* Missing assets are never treated as verified imports. */
+        }
+      }
+      const recovered = recoverSpriteState(id, raw, verified);
+      state = recovered.state;
+      needsBackup = recovered.migrated || recovered.diagnostics.length > 0;
+      if (recovered.diagnostics.length) {
+        this.recoveryReferences.set(id, spriteRawAssetIds(raw));
+        state = {
+          ...state,
+          recovery: {
+            version: 1,
+            status: "partial",
+            readOnly: true,
+            diagnostics: recovered.diagnostics,
+          },
+        };
+      } else if (recovered.migrated)
+        state = {
+          ...state,
+          recovery: { version: 1, status: "recovered", readOnly: false, diagnostics: [] },
+        };
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+        needsBackup = true;
+        state = {
+          context: null,
+          runs: [],
+          recovery: {
+            version: 1,
+            status: "failed",
+            readOnly: true,
+            diagnostics: [{ path: "$", message: e instanceof Error ? e.message : String(e) }],
+          },
+        };
+      }
+    }
+    if (state.recovery?.readOnly) (this.images.spriteRecoveryProjects ??= new Set()).add(id);
+    else {
+      this.images.spriteRecoveryProjects?.delete(id);
+      this.recoveryReferences.delete(id);
+    }
+    if (needsBackup && rawText !== undefined) {
+      const backupFile = `${id}.recovery-${createHash("sha256").update(rawText).digest("hex").slice(0, 16)}.json.bak`;
+      try {
+        await writeFile(path.join(this.root, backupFile), rawText, { flag: "wx" });
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") {
+          state = {
+            ...state,
+            recovery: {
+              version: 1,
+              status: "partial",
+              readOnly: true,
+              diagnostics: [
+                ...(state.recovery?.diagnostics ?? []),
+                { path: "backup", message: e instanceof Error ? e.message : String(e) },
+              ],
+            },
+          };
+          (this.images.spriteRecoveryProjects ??= new Set()).add(id);
+        }
+      }
+      if (state.recovery) state = { ...state, recovery: { ...state.recovery, backupFile } };
     }
     const latest = new Map<string, string>();
     for (const plan of (state.plans ?? [])
       .toReversed()
       .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt)))
-      if (plan.status === "draft" && !latest.has(plan.threadId)) latest.set(plan.threadId, plan.id);
+      if (
+        plan.status === "draft" &&
+        !latest.has(plan.targetKey ?? spritePlanTarget(plan.configuration))
+      )
+        latest.set(plan.targetKey ?? spritePlanTarget(plan.configuration), plan.id);
     let migrated = false;
     state = {
       ...state,
       plans: state.plans?.map((plan) => {
-        const current = latest.get(plan.threadId);
+        const current = latest.get(plan.targetKey ?? spritePlanTarget(plan.configuration));
         if (plan.status === "draft" && current !== plan.id) {
           migrated = true;
           return {
@@ -226,10 +322,21 @@ export class SpriteEngine {
     };
     this.retain(state);
     this.states.set(id, state);
-    if (migrated) await this.save(id, state);
+    if ((migrated || needsBackup) && !state.recovery?.readOnly) await this.save(id, state);
     return state;
   }
   private retain(state: SpriteState) {
+    for (const reference of [
+      state.canonical,
+      state.characterPreview,
+      ...(state.canonicalVersions ?? []),
+    ])
+      if (reference) {
+        this.images.spriteAssetIds.add(reference.source.id);
+        this.images.spriteAssetIds.add(reference.asset.id);
+        if (reference.generationReference)
+          this.images.spriteAssetIds.add(reference.generationReference.id);
+      }
     if (state.context?.referenceAssetId)
       this.images.spriteAssetIds.add(state.context.referenceAssetId);
     for (const entry of state.referencePool ?? [])
@@ -239,6 +346,7 @@ export class SpriteEngine {
     for (const plan of state.plans ?? [])
       for (const r of plan.configuration.references) this.images.spriteAssetIds.add(r.asset.id);
     for (const run of state.runs) {
+      for (const assetId of run.submissionInputs ?? []) this.images.spriteAssetIds.add(assetId);
       if (run.context.referenceAssetId)
         this.images.spriteAssetIds.add(run.context.referenceAssetId);
       for (const reference of run.configuration?.references ?? [])
@@ -248,6 +356,10 @@ export class SpriteEngine {
         for (const frame of [
           ...candidate.frames,
           ...(candidate.processingVersions ?? []).flatMap((v) => v.frames),
+          ...candidate.actions.flatMap((a) => a.masters ?? []),
+          ...(candidate.processingVersions ?? []).flatMap((v) =>
+            v.actions.flatMap((a) => a.masters ?? []),
+          ),
         ])
           this.images.spriteAssetIds.add(frame.id);
       }
@@ -256,6 +368,11 @@ export class SpriteEngine {
     }
   }
   private async save(id: string, state: SpriteState) {
+    if (this.states.get(id)?.recovery?.readOnly || state.recovery?.readOnly)
+      throw new Error(
+        "Task data is partially recovered. Retry reading or resolve the diagnostics before modifying generation state.",
+      );
+    state = Schema.decodeUnknownSync(SpriteState)({ ...state, resultPlanId: undefined });
     await mkdir(this.root, { recursive: true });
     await Effect.runPromise(
       writeFileStringAtomically({
@@ -276,6 +393,7 @@ export class SpriteEngine {
         const id = await readFile(path.join(this.root, `thread-${threadId}.txt`), "utf8");
         if (this.deleted.has(id)) return null;
         let state = await this.state(id);
+        if (state.recovery?.readOnly) return state;
         const ids = state.threadIds ?? (state.context?.threadId ? [state.context.threadId] : []);
         if (!ids.includes(threadId) || !state.context) return null;
         let context = { ...state.context, threadId, referenceAssetId: null };
@@ -302,7 +420,105 @@ export class SpriteEngine {
   command(command: SpriteCommand, trustedReferences = false): Promise<SpriteState> {
     return this.locked(async () => {
       if (command.operation === "delete") return this.removeProject(command.projectId);
-      const state = await this.state(command.projectId);
+      const previous =
+        command.operation === "get" && command.reload
+          ? this.states.get(command.projectId)
+          : undefined;
+      if (command.operation === "get" && command.reload) this.states.delete(command.projectId);
+      let state = await this.state(command.projectId);
+      if (previous && state.recovery?.status === "failed") {
+        state = { ...previous, recovery: state.recovery };
+        this.states.set(command.projectId, state);
+        this.rebuildReferences();
+      }
+      if (state.recovery?.readOnly) {
+        if (command.operation === "get") return state;
+        throw new Error(
+          "Task data is partially recovered. Retry reading or resolve the diagnostics before modifying generation state.",
+        );
+      }
+      if (command.operation === "preview-character" || command.operation === "confirm-character") {
+        if (
+          trustedReferences ||
+          !command.context ||
+          command.context.projectId !== command.projectId ||
+          !command.references?.[0] ||
+          !command.renderSpec
+        )
+          throw new Error("Matching character context and source are required.");
+        const source = await this.images.getAsset(command.references[0].asset.id);
+        const registration = command.registration ?? { scale: 1, offsetX: 0, offsetY: 0 };
+        const normalized = await normalizeSpriteCharacter(
+          await this.images.assets.read(source, "edit"),
+          command.context,
+          command.renderSpec,
+          registration,
+        );
+        const asset = await this.images.upload(normalized.bytes, "character-reference.png");
+        const generationReference = normalized.generationReference
+          ? await this.images.upload(
+              normalized.generationReference,
+              "character-appearance-reference.png",
+            )
+          : undefined;
+        const preview = {
+          generationReference,
+          source,
+          asset,
+          renderSpec: command.renderSpec,
+          registration,
+          pivotX: normalized.pivotX,
+          pivotY: normalized.pivotY,
+          background: command.context.background,
+          chromaKey: command.context.chromaKey,
+        };
+        let next: SpriteState = { ...state, characterPreview: preview };
+        if (command.operation === "confirm-character") {
+          const canonical = {
+            ...preview,
+            revision: randomUUID(),
+            confirmedAt: new Date().toISOString(),
+          };
+          const ids = state.threadIds ?? [];
+          next = {
+            ...next,
+            canonical,
+            canonicalVersions: [
+              ...(state.canonicalVersions ?? (state.canonical ? [state.canonical] : [])),
+              canonical,
+            ],
+            context: state.context
+              ? {
+                  ...state.context,
+                  workflowVersion: 2,
+                  renderSpec: command.renderSpec,
+                  ...spriteOutputSize(command.renderSpec),
+                  canonical,
+                }
+              : state.context,
+            plans: state.plans?.map((p) =>
+              p.status === "draft"
+                ? { ...p, status: "dismissed" as const, version: p.version + 1 }
+                : p,
+            ),
+            referencePool: [
+              ...(state.referencePool ?? []),
+              ...ids.map((threadId) => ({
+                threadId,
+                reference: {
+                  referenceId: `canonical:${canonical.revision}`,
+                  asset: spriteGenerationReference(canonical),
+                  role: "character" as const,
+                  actionId: null,
+                  source: "project" as const,
+                },
+              })),
+            ],
+          };
+        }
+        await this.save(command.projectId, next);
+        return next;
+      }
       if (command.operation === "inspect-source") {
         if (
           trustedReferences ||
@@ -312,16 +528,18 @@ export class SpriteEngine {
         )
           throw new Error("Matching source context is required.");
         const source = await this.images.getAsset(command.references[0].asset.id);
-        const existing = state.runs.find((r) => r.input.requestId === `source:${source.id}`);
+        const imported = spriteImportOrigin(command.projectId, source.id, command);
+        const existing = state.runs.find((r) => r.input.requestId === imported.requestId);
         if (existing) return state;
         const configuration = command.configuration;
         const run: SpriteRun = {
           id: randomUUID(),
+          importOrigin: imported.origin,
           context: command.context,
           input: {
             kind: "animation",
             prompt: "Imported source slicing",
-            requestId: `source:${source.id}`,
+            requestId: imported.requestId,
           },
           jobId: null,
           imageStatus: "imported",
@@ -333,7 +551,30 @@ export class SpriteEngine {
           createdAt: new Date().toISOString(),
           ...(configuration ? { configuration } : {}),
         };
-        const candidate = await this.processCandidate(run, source);
+        const analysis = await analyzeSprite(
+          await this.images.assets.read(source, "edit"),
+          command.context,
+          configuration?.actions ?? [
+            {
+              id: command.context.selection?.actionId ?? "imported",
+              name: command.context.action,
+              description: "",
+              enabled: true,
+              frameCount: command.context.frameCount,
+              fps: command.context.fps,
+              loop: command.context.loop ?? true,
+            },
+          ],
+          source.id,
+          configuration?.layout,
+          configuration?.parameters.size,
+          true,
+        );
+        const candidate = await this.processCandidate(
+          run,
+          source,
+          command.slice ?? analysis.suggestion,
+        );
         const next = {
           ...state,
           runs: [
@@ -396,27 +637,102 @@ export class SpriteEngine {
         await this.save(command.projectId, next);
         return next;
       }
-      if (
-        ["analyze-candidate", "preview-slicing", "save-slicing", "restore-slicing"].includes(
-          command.operation,
+      if (command.operation === "review-candidate") {
+        const run = state.runs.find((r) => r.id === command.runId);
+        const candidate: SpriteCandidate | undefined =
+          run?.candidates?.find((c) => c.id === command.candidateId) ??
+          (run && run.source && run.source.id === command.candidateId && !run.candidates?.length
+            ? {
+                id: run.source.id,
+                source: run.source,
+                status: run.status === "ready" ? ("ready" as const) : ("needs-adjustment" as const),
+                frames: run.frames,
+                actions: run.actions ?? [],
+                warnings: run.warnings,
+                error: run.error,
+              }
+            : undefined);
+        if (
+          !run ||
+          !candidate ||
+          !command.actionId ||
+          !candidate.actions.some((a) => a.action.id === command.actionId)
         )
+          throw new Error("Animation candidate not found.");
+        if (
+          command.version !== (candidate.version ?? 0) ||
+          command.processingVersionId !== candidate.processingVersionId ||
+          command.analysisRevision !== (candidate.analysisRevision ?? 0)
+        )
+          throw new Error("Candidate changed. Refresh before confirming the review.");
+        // Confirming a review never runs the image provider or the frame processor.
+        const reviewed = {
+          ...candidate,
+          reviews: [
+            ...(candidate.reviews ?? []).filter((r) => r.actionId !== command.actionId),
+            {
+              actionId: command.actionId,
+              processingVersionId: candidate.processingVersionId,
+              analysisRevision: candidate.analysisRevision ?? 0,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        };
+        if (spriteBlockedActions(reviewed).has(command.actionId))
+          throw new Error("Fix structural frame errors before adopting this action.");
+        await this.selectProcessed(
+          command.projectId,
+          { ...run, candidates: run.candidates?.length ? run.candidates : [candidate] },
+          reviewed.actions.every((a) =>
+            reviewed.reviews.some(
+              (r) =>
+                r.actionId === a.action.id &&
+                r.processingVersionId === reviewed.processingVersionId &&
+                r.analysisRevision === (reviewed.analysisRevision ?? 0),
+            ),
+          )
+            ? { ...reviewed, status: "ready" }
+            : reviewed,
+        );
+        return this.state(command.projectId);
+      }
+      if (
+        [
+          "analyze-candidate",
+          "preview-slicing",
+          "save-slicing",
+          "restore-slicing",
+          "reprocess-candidate",
+          "fork-slicing",
+        ].includes(command.operation)
       ) {
         const run = state.runs.find((r) => r.id === command.runId);
         const candidate = run?.candidates?.find((c) => c.id === command.candidateId);
         if (!run || !candidate || run.input.kind !== "animation")
           throw new Error("Animation candidate not found.");
-        if (command.version !== (candidate.version ?? 0))
+        if (
+          !["analyze-candidate", "fork-slicing"].includes(command.operation) &&
+          command.version !== (candidate.version ?? 0)
+        )
           throw new Error("Candidate changed. Refresh before editing.");
         const descriptors = run.configuration
           ? spritePlanActions(run.configuration)
           : (run.actions?.map((a) => a.action) ?? []);
         const bytes = await this.images.assets.read(candidate.source, "edit");
         if (command.operation === "analyze-candidate") {
-          const analysis = await analyzeSprite(bytes, run.context, descriptors, candidate.id);
+          const analysis = await analyzeSprite(
+            bytes,
+            run.context,
+            descriptors,
+            candidate.id,
+            run.configuration?.layout,
+            run.configuration?.parameters.size,
+            !!run.importOrigin,
+          );
           const updated = {
             ...candidate,
-            ...(candidate.slice ? { slice: { ...candidate.slice, reviewedActionIds: [] } } : {}),
             analysis,
+            slice: candidate.slice ? { ...candidate.slice, reviewedActionIds: [] } : undefined,
             issues: [
               ...(candidate.issues ?? []).filter(
                 (issue) =>
@@ -429,7 +745,7 @@ export class SpriteEngine {
               ),
               ...analysis.issues,
             ],
-            version: (candidate.version ?? 0) + 1,
+            analysisRevision: (candidate.analysisRevision ?? 0) + 1,
           };
           await this.selectProcessed(command.projectId, run, updated);
         } else {
@@ -437,10 +753,19 @@ export class SpriteEngine {
             (v) => v.id === command.processingVersionId,
           );
           const slice =
-            command.operation === "restore-slicing" ? restored?.configuration : command.slice;
-          if (!slice) throw new Error("Slicing configuration is required.");
-          const updated = await this.processCandidate(run, candidate.source, slice, candidate);
-          if (updated.status === "failed")
+            command.operation === "restore-slicing"
+              ? restored?.configuration
+              : (command.slice ??
+                (command.operation === "reprocess-candidate" ? candidate.slice : undefined));
+          if (!slice && command.operation !== "reprocess-candidate")
+            throw new Error("Slicing configuration is required.");
+          const updated = await this.processCandidate(
+            run,
+            candidate.source,
+            slice ? { ...slice, reviewedActionIds: [] } : undefined,
+            candidate,
+          );
+          if (updated.status === "failed" && command.operation !== "reprocess-candidate")
             throw new Error(updated.error ?? "Frame processing failed.");
           if (command.operation === "preview-slicing")
             return {
@@ -513,6 +838,40 @@ export class SpriteEngine {
       if (command.operation === "sync") {
         if (!command.context || command.context.projectId !== command.projectId)
           throw new Error("Matching context is required.");
+        let canonical = state.canonical;
+        if (!canonical && command.context.canonical && !trustedReferences) {
+          try {
+            const asset = await this.images.getAsset(command.context.canonical.asset.id),
+              source = await this.images.getAsset(command.context.canonical.source.id);
+            const appearance = command.context.canonical.generationReference;
+            const verifiedAppearance = appearance
+              ? await this.images.getAsset(appearance.id)
+              : undefined;
+            if (
+              asset.width === command.context.canonical.asset.width &&
+              asset.height === command.context.canonical.asset.height &&
+              asset.bytes === command.context.canonical.asset.bytes &&
+              source.bytes === command.context.canonical.source.bytes &&
+              (!appearance ||
+                (verifiedAppearance &&
+                  verifiedAppearance.id === appearance.id &&
+                  verifiedAppearance.width === appearance.width &&
+                  verifiedAppearance.height === appearance.height &&
+                  verifiedAppearance.bytes === appearance.bytes &&
+                  verifiedAppearance.mimeType === appearance.mimeType))
+            )
+              canonical = command.context.canonical;
+          } catch {
+            /* Imported projects keep their local reference; unknown remote assets need approval again. */
+          }
+        }
+        const changedSpec =
+          canonical &&
+          command.context.renderSpec &&
+          (canonical.renderSpec.mode !== command.context.renderSpec.mode ||
+            canonical.renderSpec.logicalWidth !== command.context.renderSpec.logicalWidth ||
+            canonical.renderSpec.logicalHeight !== command.context.renderSpec.logicalHeight);
+        if (changedSpec) canonical = undefined;
         const ids = (
           command.threadIds ?? [
             ...new Set([
@@ -554,8 +913,17 @@ export class SpriteEngine {
           }
         const next = {
           ...state,
+          canonical,
+          plans: changedSpec
+            ? state.plans?.map((p) =>
+                p.status === "draft"
+                  ? { ...p, status: "dismissed" as const, version: p.version + 1 }
+                  : p,
+              )
+            : state.plans,
           context: {
             ...command.context,
+            canonical,
             referenceAssetId: null,
             threadId:
               command.context.threadId && this.removedThreads.has(command.context.threadId)
@@ -563,6 +931,30 @@ export class SpriteEngine {
                 : command.context.threadId,
           },
           threadIds: ids,
+          referencePool: canonical
+            ? [
+                ...(state.referencePool ?? []),
+                ...ids
+                  .filter(
+                    (threadId) =>
+                      !state.referencePool?.some(
+                        (r) =>
+                          r.threadId === threadId &&
+                          r.reference.asset.id === spriteGenerationReference(canonical!).id,
+                      ),
+                  )
+                  .map((threadId) => ({
+                    threadId,
+                    reference: {
+                      referenceId: `canonical:${canonical!.revision}`,
+                      asset: spriteGenerationReference(canonical!),
+                      role: "character" as const,
+                      actionId: null,
+                      source: "project" as const,
+                    },
+                  })),
+              ]
+            : state.referencePool,
         };
         await this.save(command.projectId, next);
         return next;
@@ -599,7 +991,11 @@ export class SpriteEngine {
           throw new Error("Plan belongs to another conversation.");
         if (this.removedThreads.has(plan.threadId))
           throw new Error("This conversation has been deleted.");
-        let configuration = spritePlanForRevision(command.configuration ?? plan.configuration);
+        let configuration = this.workflowConfiguration(
+          state,
+          spritePlanForRevision(command.configuration ?? plan.configuration),
+        );
+        configuration = { ...configuration, sizePolicy: undefined };
         if (configuration.sizeSource === "recommended")
           configuration = {
             ...configuration,
@@ -607,8 +1003,19 @@ export class SpriteEngine {
           };
         // Clients may choose only references captured and owned by this conversation.
         if (!trustedReferences) this.validateReferences(state, plan.threadId, configuration);
+        const targetKey = spritePlanTarget(configuration);
+        if (
+          state.plans?.some(
+            (p) =>
+              p.id !== plan.id &&
+              p.status === "draft" &&
+              (p.targetKey ?? spritePlanTarget(p.configuration)) === targetKey,
+          )
+        )
+          throw new Error("This target already has a draft. Open it before changing the target.");
         const updated = {
           ...plan,
+          targetKey,
           configuration,
           compiled: compileSpritePlan(configuration),
           version: plan.version + 1,
@@ -703,14 +1110,33 @@ export class SpriteEngine {
       if (command.actionId) {
         const action = configuration.actions.find((a) => a.id === command.actionId);
         if (!action) throw new Error("Action not found.");
-        configuration = { ...spriteTaskConfiguration(configuration, [action]), mode: "separate" };
+        configuration = {
+          ...spriteTaskConfiguration(configuration, [
+            { ...action, frameCount: configuration.segment?.totalFrames ?? action.frameCount },
+          ]),
+          mode: "separate",
+          segment: undefined,
+          layout: undefined,
+          sequenceId: undefined,
+        };
       }
+      configuration = this.workflowConfiguration(state, configuration, base);
+      configuration = { ...configuration, sizePolicy: undefined };
       const sourceKey = `${original ? `run:${original.id}` : oldPlan ? `plan:${oldPlan.id}` : `request:${requestId}`}:${command.actionId ?? "all"}`;
-      const active = state.plans?.find((p) => p.threadId === base.threadId && p.status === "draft");
+      const targetKey = spritePlanTarget(configuration);
+      const active = state.plans?.find(
+        (p) =>
+          p.status === "draft" && (p.targetKey ?? spritePlanTarget(p.configuration)) === targetKey,
+      );
       if (command.replacePlanId && command.replacePlanId !== active?.id)
         throw new Error("Current draft changed. Refresh before replacing it.");
       if (active) {
-        if (active.sourceKey === sourceKey || active.id === oldPlan?.id)
+        if (
+          !command.replacePlanId &&
+          (command.operation === "propose" ||
+            active.sourceKey === sourceKey ||
+            active.id === oldPlan?.id)
+        )
           return { ...state, resultPlanId: active.id };
         if (command.replacePlanId !== active.id || command.version !== active.version)
           throw new Error(
@@ -725,18 +1151,27 @@ export class SpriteEngine {
         !original &&
         !oldPlan &&
         configuration.kind === "animation" &&
+        !configuration.sizing &&
+        configuration.workflowVersion === 2 &&
         !configuration.sizeSource &&
         (!configuration.parameters.size || configuration.parameters.size === "auto")
       )
         configuration = {
           ...configuration,
+          sizing: DEFAULT_SPRITE_SIZING,
           sizeSource: "recommended",
-          parameters: { ...configuration.parameters, size: spriteRecommendedSize(configuration) },
         };
       if (!trustedReferences) this.validateReferences(state, base.threadId, configuration);
       // The gateway has resolved sent attachments into assets before proposal creation.
+      const planId = randomUUID();
+      if (
+        configuration.workflowVersion === 2 &&
+        configuration.kind === "animation" &&
+        !configuration.segment
+      )
+        configuration = { ...configuration, sequenceId: planId };
       const plan: SpriteGenerationPlan = {
-        id: randomUUID(),
+        id: planId,
         projectId: command.projectId,
         threadId: base.threadId,
         turnId: command.turnId ?? null,
@@ -748,6 +1183,7 @@ export class SpriteEngine {
         createdAt: new Date().toISOString(),
         confirmedAt: null,
         sourceKey,
+        targetKey,
         ...(command.displayAfter ? { displayAfter: command.displayAfter } : {}),
       };
       const next = {
@@ -780,6 +1216,10 @@ export class SpriteEngine {
         .filter((p) => p.threadId === threadId)
         .flatMap((p) => p.configuration.references.map((r) => r.asset.id)),
     );
+    if (state.canonical) {
+      owned.add(state.canonical.asset.id);
+      owned.add(spriteGenerationReference(state.canonical).id);
+    }
     for (const entry of state.referencePool ?? [])
       if (entry.threadId === threadId) owned.add(entry.reference.asset.id);
     for (const run of state.runs.filter((r) => r.context.threadId === threadId)) {
@@ -795,9 +1235,56 @@ export class SpriteEngine {
     if (c.references.some((r) => !owned.has(r.asset.id)))
       throw new Error("Reference image does not belong to this conversation.");
   }
+  private workflowConfiguration(
+    state: SpriteState,
+    c: SpritePlanConfiguration,
+    context = state.context,
+  ) {
+    if (
+      c.workflowVersion !== 2 &&
+      context?.workflowVersion !== 2 &&
+      state.context?.workflowVersion !== 2
+    )
+      return c;
+    const renderSpec = c.renderSpec ?? context?.renderSpec ?? state.context?.renderSpec;
+    const canonical = state.canonical;
+    if (c.segment && c.canonical?.revision !== canonical?.revision)
+      c = {
+        ...c,
+        segment: undefined,
+        layout: undefined,
+        sequenceId: undefined,
+        actions: c.actions.map((a) => ({ ...a, frameCount: c.segment!.totalFrames })),
+      };
+    return {
+      ...c,
+      workflowVersion: 2 as const,
+      mode: "separate" as const,
+      ...(renderSpec ? { renderSpec, ...spriteOutputSize(renderSpec) } : {}),
+      canonical,
+      references:
+        c.kind === "animation" && canonical
+          ? [
+              {
+                referenceId: `canonical:${canonical.revision}`,
+                asset: spriteGenerationReference(canonical),
+                role: "character" as const,
+                actionId: null,
+                source: "project" as const,
+              },
+              ...c.references.filter(
+                (r) =>
+                  r.asset.id !== canonical.asset.id &&
+                  r.asset.id !== spriteGenerationReference(canonical).id,
+              ),
+            ]
+          : c.references,
+    };
+  }
   confirm(input: SpritePlanConfirmInput): Promise<SpriteState> {
     return this.locked(async () => {
       const state = await this.state(input.projectId);
+      if (state.recovery?.readOnly) throw new Error("Task data is partially recovered.");
       const plan = state.plans?.find((p) => p.id === input.planId);
       if (
         !plan ||
@@ -812,6 +1299,12 @@ export class SpriteEngine {
       if (plan.status !== "draft") throw new Error("Plan was dismissed.");
       const c = plan.configuration,
         issues = spritePlanIssues(c);
+      if (
+        c.workflowVersion === 2 &&
+        c.kind === "animation" &&
+        c.canonical?.revision !== state.canonical?.revision
+      )
+        throw new Error("Character reference changed. Prepare a new plan.");
       if (issues.length) throw new Error(issues.join("\n"));
       this.validateReferences(state, plan.threadId, c);
       const providers = await this.images.listProviders();
@@ -828,12 +1321,8 @@ export class SpriteEngine {
         )
           throw new Error("Reference metadata changed. Refresh the plan.");
       }
-      const actions = spritePlanActions(c);
-      const groups =
-        c.kind === "character" || c.mode === "combined" ? [actions] : actions.map((a) => [a]);
-      const runs: SpriteRun[] = groups.map((group, i) => {
-        const configuration = spriteTaskConfiguration(c, group);
-        const first = group[0]!;
+      const runs: SpriteRun[] = spritePlanTasks(c).map((configuration, i) => {
+        const first = spritePlanActions(configuration)[0]!;
         return {
           id: randomUUID(),
           planId: plan.id,
@@ -841,6 +1330,9 @@ export class SpriteEngine {
           configuration,
           requestPrompt: plan.compiled?.[i]?.prompt ?? spritePlanPrompt(configuration),
           context: {
+            workflowVersion: configuration.workflowVersion,
+            renderSpec: configuration.renderSpec,
+            canonical: configuration.canonical,
             projectId: input.projectId,
             threadId: plan.threadId,
             name: state.context?.name ?? "Sprite",
@@ -849,6 +1341,7 @@ export class SpriteEngine {
             referenceAssetId: configuration.references[0]?.asset.id ?? null,
             action: first.name,
             fps: first.fps,
+            loop: first.loop,
             frameCount: first.frameCount,
             width: c.width,
             height: c.height,
@@ -862,6 +1355,7 @@ export class SpriteEngine {
             loop: first.loop,
           },
           jobId: null,
+          submissionPhase: "prepared",
           status: "queued",
           source: null,
           frames: [],
@@ -871,6 +1365,23 @@ export class SpriteEngine {
           createdAt: new Date().toISOString(),
         };
       });
+      for (let i = 0; i < runs.length; i++) {
+        const segment = runs[i]!.configuration?.segment;
+        if (segment && segment.index > 0)
+          runs[i] = {
+            ...runs[i]!,
+            dependsOnRunId:
+              runs
+                .slice(0, i)
+                .findLast((r) => r.configuration?.segment?.actionId === segment.actionId)?.id ??
+              state.runs.findLast(
+                (r) =>
+                  r.configuration?.sequenceId === runs[i]!.configuration?.sequenceId &&
+                  r.configuration?.segment?.actionId === segment.actionId &&
+                  r.configuration?.segment?.index === segment.index - 1,
+              )?.id,
+          };
+      }
       await this.save(input.projectId, {
         ...state,
         plans: state.plans!.map((p) =>
@@ -883,8 +1394,104 @@ export class SpriteEngine {
         ),
         runs: [...state.runs, ...runs],
       });
-      for (const run of runs)
-        await this.submit(input.projectId, await this.state(input.projectId), run);
+      await this.dispatchPrepared(input.projectId);
+      return this.state(input.projectId);
+    });
+  }
+  retryConfirm(input: SpriteRetryConfirmInput): Promise<SpriteState> {
+    return this.locked(async () => {
+      let state = await this.state(input.projectId);
+      if (state.recovery?.readOnly) throw new Error("Task data is partially recovered.");
+      if (
+        !(state.threadIds ?? [state.context?.threadId]).includes(input.threadId) ||
+        this.removedThreads.has(input.threadId)
+      )
+        throw new Error("Plan conversation is unavailable.");
+      const ids = [...new Set(input.runIds)];
+      const prior = state.runs.filter((r) => r.retryRequestId === input.requestId);
+      if (prior.length) {
+        if (
+          prior.length !== ids.length ||
+          prior.some((r) => r.context.threadId !== input.threadId || !ids.includes(r.retryOfRunId!))
+        )
+          throw new Error("Retry request does not match the original selection.");
+        return state;
+      }
+      const providers = await this.images.listProviders();
+      const attempts: SpriteRun[] = [];
+      for (const id of ids) {
+        const original = state.runs.find((r) => r.id === id);
+        if (
+          !original ||
+          original.context.threadId !== input.threadId ||
+          original.context.projectId !== input.projectId ||
+          original.removedAt
+        )
+          throw new Error("Generation not found.");
+        if (state.runs.some((r) => r.retryOfRunId === id))
+          throw new Error("This task already has a retry. Open its latest attempt.");
+        const recorded = original.jobId
+          ? await this.images.getJob(original.jobId)
+          : await this.submittedJob(input.projectId, original);
+        if (
+          original.source ||
+          original.candidates?.length ||
+          original.frames.length ||
+          recorded?.outputs.length
+        )
+          throw new Error("Images already exist. Correct or reprocess the candidate instead.");
+        if (
+          recorded
+            ? recorded.status !== "failed"
+            : original.status !== "failed" ||
+              original.submissionPhase === "uncertain" ||
+              original.submissionPhase === "submitting"
+        )
+          throw new Error("Submission status must be verified before retrying.");
+        if (
+          !providers.some(
+            (p) =>
+              p.id === original.context.providerId &&
+              p.enabled &&
+              p.models.some((m) => m.id === original.context.model),
+          )
+        )
+          throw new Error("Select an enabled Drawing model.");
+        const inputs = original.submissionInputs ?? recorded?.inputs?.map((a) => a.id);
+        const parameters = original.submissionParameters ?? recorded?.parameters;
+        if (!inputs || !parameters)
+          throw new Error(
+            "The original request snapshot is unavailable. Modify the plan before retrying.",
+          );
+        for (const assetId of inputs) await this.images.getAsset(assetId);
+        attempts.push({
+          ...original,
+          id: randomUUID(),
+          retryOfRunId: original.id,
+          retryRequestId: input.requestId,
+          submissionProviderName: original.submissionProviderName ?? recorded?.providerName,
+          input: { ...original.input, requestId: randomUUID() },
+          submissionInputs: inputs,
+          submissionParameters: parameters,
+          submissionPhase: "prepared",
+          requestPrompt: original.requestPrompt ?? recorded?.prompt,
+          status: "queued",
+          jobId: null,
+          imageStatus: undefined,
+          error: null,
+          candidates: undefined,
+          selectedCandidateId: undefined,
+          source: null,
+          frames: [],
+          actions: [],
+          warnings: [],
+          createdAt: new Date().toISOString(),
+          removedAt: null,
+        });
+      }
+      state = { ...state, runs: [...state.runs, ...attempts] };
+      await this.save(input.projectId, state);
+      await this.dispatchPrepared(input.projectId);
       return this.state(input.projectId);
     });
   }
@@ -900,32 +1507,53 @@ export class SpriteEngine {
   }
   private async submit(id: string, state: SpriteState, run: SpriteRun) {
     let recordedJobId: string | null = null;
+    let submitting = false;
     try {
       const c = run.context,
         animation = run.input.kind === "animation";
       const configuration = run.configuration;
-      const inputs: string[] = configuration
-        ? configuration.references.map((r) => r.asset.id)
-        : c.referenceAssetId
-          ? [c.referenceAssetId]
-          : [];
-      if (animation) {
+      const inputs: string[] = run.submissionInputs
+        ? [...run.submissionInputs]
+        : configuration
+          ? configuration.references.map((r) => r.asset.id)
+          : c.referenceAssetId
+            ? [c.referenceAssetId]
+            : [];
+      if (animation && !run.submissionInputs) {
+        if (run.dependsOnRunId) {
+          const dependency = this.latestDependency(state, run.dependsOnRunId);
+          inputs.push(...dependency!.frames.slice(-2).map((frame) => frame.id));
+        }
         const layout = configuration
           ? spritePlanLayout(configuration)
           : { columns: c.frameCount, rows: 1 };
         inputs.push(
           (
             await this.images.upload(
-              await spriteLayoutGuide(
-                layout.columns,
-                layout.rows,
-                configuration?.parameters.size,
-                c.width,
-                c.height,
-                configuration
-                  ? spritePlanActions(configuration).map((a) => a.frameCount)
-                  : undefined,
-              ),
+              configuration?.layout
+                ? await sharp(
+                    Buffer.from(
+                      spriteTaskGuideSvg(
+                        configuration.layout,
+                        configuration.canonical
+                          ? configuration.canonical.pivotY /
+                              configuration.canonical.renderSpec.logicalHeight
+                          : 0.9,
+                      ),
+                    ),
+                  )
+                    .png()
+                    .toBuffer()
+                : await spriteLayoutGuide(
+                    layout.columns,
+                    layout.rows,
+                    configuration?.parameters.size,
+                    c.width,
+                    c.height,
+                    configuration
+                      ? spritePlanActions(configuration).map((a) => a.frameCount)
+                      : undefined,
+                  ),
               "sprite-layout.png",
             )
           ).id,
@@ -933,29 +1561,52 @@ export class SpriteEngine {
       }
       const prompt =
         run.requestPrompt ?? (configuration ? spritePlanPrompt(configuration) : run.input.prompt);
+      const parameters = run.submissionParameters ?? {
+        ...configuration?.parameters,
+        n: 1,
+        outputFormat: configuration?.parameters.outputFormat ?? "png",
+        background: c.background === "transparent" ? ("transparent" as const) : ("opaque" as const),
+      };
+      await this.replace(id, run, {
+        submissionInputs: inputs,
+        submissionParameters: parameters,
+        requestPrompt: prompt,
+        submissionPhase: "submitting",
+      });
+      state = await this.state(id);
+      submitting = true;
       const job = await this.images.createJob({
         clientRequestId: this.requestKey(id, run),
         providerId: c.providerId,
         model: c.model,
         prompt,
-        parameters: {
-          ...configuration?.parameters,
-          n: 1,
-          outputFormat: configuration?.parameters.outputFormat ?? "png",
-          background: c.background === "transparent" ? "transparent" : "opaque",
-        },
+        parameters,
         inputAssetIds: inputs,
         maskAssetId: null,
-        sourceJobId: null,
+        sourceJobId: run.retryOfRunId
+          ? (state.runs.find((r) => r.id === run.retryOfRunId)?.jobId ?? null)
+          : null,
       });
       recordedJobId = job.id;
       await this.save(id, {
         ...state,
         runs: state.runs.map((r) =>
-          r.id === run.id ? { ...r, jobId: job.id, status: "running" } : r,
+          r.id === run.id
+            ? {
+                ...r,
+                jobId: job.id,
+                status: "running",
+                submissionPhase: "submitted" as const,
+                submissionProviderName: job.providerName,
+              }
+            : r,
         ),
       });
     } catch (e) {
+      const existing = submitting ? await this.submittedJob(id, run).catch(() => null) : null;
+      recordedJobId ??= existing?.id ?? null;
+      const uncertain = submitting && !recordedJobId && !(e instanceof ImageApiError);
+      state = await this.state(id);
       await this.save(id, {
         ...state,
         runs: state.runs.map((r) =>
@@ -963,8 +1614,11 @@ export class SpriteEngine {
             ? {
                 ...r,
                 jobId: recordedJobId,
-                status: recordedJobId ? "running" : "failed",
-                error: String(e instanceof Error ? e.message : e),
+                status: recordedJobId ? "running" : uncertain ? "interrupted" : "failed",
+                submissionPhase: recordedJobId ? "submitted" : uncertain ? "uncertain" : "rejected",
+                error: uncertain
+                  ? "Submission status must be verified before retrying."
+                  : String(e instanceof Error ? e.message : e),
               }
             : r,
         ),
@@ -978,40 +1632,127 @@ export class SpriteEngine {
     previous?: SpriteCandidate,
   ): Promise<SpriteCandidate> {
     try {
+      const processingContext = {
+        ...run.context,
+        background: slice?.background ?? run.context.background,
+        chromaKey: slice?.chromaKey ?? run.context.chromaKey,
+      };
       const processed = await processSprite(
         await this.images.assets.read(source, "edit"),
-        run.context,
+        processingContext,
         run.configuration ? spritePlanActions(run.configuration) : undefined,
         slice,
+        run.configuration?.layout,
       );
       const analysis =
-        (previous?.analysis?.algorithmVersion === SPRITE_ANALYSIS_VERSION
+        (previous?.analysis?.algorithmVersion === SPRITE_ANALYSIS_VERSION &&
+        slice?.background === previous.slice?.background &&
+        slice?.chromaKey === previous.slice?.chromaKey
           ? previous.analysis
           : undefined) ??
         (run.input.kind === "animation"
           ? await analyzeSprite(
               await this.images.assets.read(source, "edit"),
-              run.context,
+              processingContext,
               run.configuration
                 ? spritePlanActions(run.configuration)
                 : processed.actions.map((a) => a.action),
               source.id,
+              run.configuration?.layout,
+              run.configuration?.parameters.size,
             )
           : undefined);
       const frames: ImageAsset[] = [];
+      const masters: ImageAsset[] = [];
       for (const [i, bytes] of processed.frames.entries())
         frames.push(await this.images.upload(bytes, `${run.context.action}-${i + 1}.png`));
+      if (run.context.renderSpec)
+        for (const [i, bytes] of processed.masters.entries())
+          masters.push(
+            await this.images.upload(bytes, `${run.context.action}-${i + 1}-master.png`),
+          );
       let offset = 0;
       const actions = processed.actions.map((o) => {
         const output = {
           action: o.action,
+          frameMetadata: o.frameMetadata,
           warnings: o.warnings,
           frames: frames.slice(offset, offset + o.frames.length),
+          ...(masters.length ? { masters: masters.slice(offset, offset + o.frames.length) } : {}),
         };
         offset += o.frames.length;
         return output;
       });
       const issues = [...processed.issues, ...(analysis?.issues ?? [])];
+      if (
+        run.context.workflowVersion === 2 &&
+        run.input.kind === "animation" &&
+        processed.frames.length
+      ) {
+        const compare = async (a: Uint8Array, b: Uint8Array) => {
+          const thumbnail = (bytes: Uint8Array) =>
+            sharp(bytes).resize(24, 24, { fit: "fill" }).ensureAlpha().raw().toBuffer();
+          const [left, right] = await Promise.all([thumbnail(a), thumbnail(b)]);
+          let delta = 0;
+          for (let i = 0; i < left.length; i++) delta += Math.abs(left[i]! - right[i]!);
+          return delta / left.length;
+        };
+        const state = await this.state(run.context.projectId),
+          segment = run.configuration?.segment;
+        const adjacent =
+          processed.frames.length > 1
+            ? await compare(processed.frames[0]!, processed.frames[1]!)
+            : 0;
+        if (run.dependsOnRunId) {
+          const previous = this.latestDependency(state, run.dependsOnRunId)?.frames.at(-1);
+          if (
+            previous &&
+            (await compare(await this.images.assets.read(previous, "edit"), processed.frames[0]!)) >
+              Math.max(12, adjacent * 2.5)
+          )
+            issues.push({
+              code: "continuity",
+              severity: "warning",
+              actionId: segment?.actionId ?? actions[0]?.action.id ?? null,
+              frameIndex: 0,
+              message:
+                "The start of this segment may not continue the preceding pose. Review the complete animation.",
+            });
+        }
+        if (
+          run.configuration?.actions[0]?.loop &&
+          (!segment || segment.index === segment.count - 1)
+        ) {
+          const first = segment?.index
+            ? state.runs.find(
+                (r) =>
+                  r.configuration?.sequenceId === run.configuration?.sequenceId &&
+                  r.configuration?.segment?.actionId === segment.actionId &&
+                  r.configuration?.segment?.index === 0,
+              )
+            : undefined;
+          const asset = first ? this.latestDependency(state, first.id)?.frames[0] : undefined;
+          const start = asset ? await this.images.assets.read(asset, "edit") : processed.frames[0]!;
+          if ((await compare(start, processed.frames.at(-1)!)) > Math.max(12, adjacent * 2.5))
+            issues.push({
+              code: "loop-seam",
+              severity: "warning",
+              actionId: segment?.actionId ?? actions[0]?.action.id ?? null,
+              frameIndex: processed.frames.length - 1,
+              message: "The last pose may not connect to the first. Review the loop transition.",
+            });
+        }
+      }
+      if (run.configuration?.segment && !processed.configuration.edit)
+        for (const output of actions)
+          if (output.frames.length !== run.configuration.segment.frameCount)
+            issues.push({
+              code: "missing-frames",
+              message: "The action segment is missing planned frames.",
+              actionId: output.action.id,
+              frameIndex: null,
+              severity: "error",
+            });
       const reviewed = new Set(processed.configuration.reviewedActionIds);
       const actionIds = new Set(actions.map((output) => output.action.id));
       const hasUnreviewedErrors = issues.some(
@@ -1068,16 +1809,37 @@ export class SpriteEngine {
         frames,
         actions,
         warnings: processed.warnings,
-        status: hasUnreviewedErrors ? "needs-adjustment" : "ready",
+        status:
+          hasUnreviewedErrors ||
+          analysis?.reliable === false ||
+          issues.some((i) => i.severity === "error" && ["empty", "missing-frames"].includes(i.code))
+            ? "needs-adjustment"
+            : "ready",
         error: null,
       };
     } catch (e) {
+      if (
+        ["EIO", "ETIMEDOUT", "EBUSY", "EAGAIN"].includes((e as NodeJS.ErrnoException).code ?? "") &&
+        (previous?.processingAttempts ?? 0) < 2
+      )
+        return this.processCandidate(run, source, slice, {
+          ...previous,
+          id: source.id,
+          source,
+          frames: previous?.frames ?? [],
+          actions: previous?.actions ?? [],
+          warnings: previous?.warnings ?? [],
+          status: "processing",
+          error: null,
+          processingAttempts: (previous?.processingAttempts ?? 0) + 1,
+        });
       return {
+        ...previous,
         id: source.id,
         source,
-        frames: [],
-        actions: [],
-        warnings: [],
+        frames: previous?.frames ?? [],
+        actions: previous?.actions ?? [],
+        warnings: previous?.warnings ?? [],
         status: "failed",
         error: e instanceof Error ? e.message : String(e),
       };
@@ -1096,19 +1858,26 @@ export class SpriteEngine {
     });
   }
   private async refresh(id: string, state: SpriteState) {
+    if (state.recovery?.readOnly) return;
     for (const run of state.runs) {
       if (run.context.threadId && this.removedThreads.has(run.context.threadId)) continue;
       const active = ["queued", "running", "processing"].includes(run.status);
       if (!active && run.candidates) continue;
       if (!run.jobId) {
-        if (!active) continue;
+        if (!active && run.submissionPhase !== "uncertain") continue;
         const existing = await this.submittedJob(id, run);
+        if (!existing && run.submissionPhase === "prepared") continue;
+        if (!existing && !active) continue;
         await this.replace(
           id,
           run,
           existing
-            ? { jobId: existing.id, status: "running" }
-            : { status: "interrupted", error: "Submission was interrupted. Retry explicitly." },
+            ? { jobId: existing.id, status: "running", submissionPhase: "submitted" }
+            : {
+                status: "interrupted",
+                submissionPhase: "uncertain",
+                error: "Submission status must be verified before retrying.",
+              },
         );
         continue;
       }
@@ -1173,6 +1942,69 @@ export class SpriteEngine {
             error: e instanceof Error ? e.message : String(e),
           });
       }
+    }
+    await this.dispatchPrepared(id);
+  }
+  private latestDependency(state: SpriteState, id: string): SpriteRun | undefined {
+    const run = state.runs.find((r) => r.id === id);
+    if (run?.configuration?.sequenceId && run.configuration.segment) {
+      const latest = state.runs.findLast(
+        (r) =>
+          !r.removedAt &&
+          r.configuration?.sequenceId === run.configuration!.sequenceId &&
+          r.configuration?.segment?.actionId === run.configuration!.segment!.actionId &&
+          r.configuration?.segment?.index === run.configuration!.segment!.index,
+      );
+      if (latest && latest.id !== id) return latest;
+    }
+    const retry = state.runs.findLast((r) => r.retryOfRunId === id);
+    return retry ? this.latestDependency(state, retry.id) : run;
+  }
+  private async dispatchPrepared(id: string) {
+    let state = await this.state(id);
+    const providers = state.runs.some(
+      (r) => r.status === "queued" && r.submissionPhase === "prepared",
+    )
+      ? await this.images.listProviders()
+      : [];
+    for (const pending of state.runs.filter(
+      (r) => r.status === "queued" && r.submissionPhase === "prepared" && !r.jobId,
+    )) {
+      state = await this.state(id);
+      if (pending.context.threadId && this.removedThreads.has(pending.context.threadId)) continue;
+      if (pending.context.workflowVersion === 2) {
+        const limit = Math.min(
+          2,
+          providers.find((p) => p.id === pending.context.providerId)?.concurrency ?? 2,
+        );
+        if (
+          state.runs.filter(
+            (r) => r.context.workflowVersion === 2 && ["running", "processing"].includes(r.status),
+          ).length >= limit
+        )
+          continue;
+      }
+      if (pending.dependsOnRunId) {
+        const dependency = this.latestDependency(state, pending.dependsOnRunId);
+        const candidate = dependency?.candidates?.find(
+          (c) => c.id === dependency.selectedCandidateId,
+        );
+        if (
+          !dependency ||
+          !["ready", "needs-adjustment"].includes(dependency.status) ||
+          !candidate ||
+          spriteBlockedActions(candidate).size
+        )
+          continue;
+      }
+      const existing = await this.submittedJob(id, pending);
+      if (existing)
+        await this.replace(id, pending, {
+          jobId: existing.id,
+          status: "running",
+          submissionPhase: "submitted",
+        });
+      else await this.submit(id, state, pending);
     }
   }
   private async replace(id: string, run: SpriteRun, patch: Partial<SpriteRun>) {

@@ -12,7 +12,20 @@ export const IMAGE_INPUT_MAX_TOTAL_BYTES = 80 * 1024 * 1024;
 export const IMAGE_INPUT_MAX_COUNT = 16;
 export const ImageProviderId = Id;
 export type ImageProviderId = typeof ImageProviderId.Type;
+export const ImageSpriteCapabilities = Schema.Struct({
+  kind: Schema.Literals(["fixed", "custom"]),
+  sizes: Schema.optional(
+    Schema.Array(Schema.String.check(Schema.isPattern(/^[1-9]\d{0,3}x[1-9]\d{0,3}$/))),
+  ),
+  referenceImages: Schema.optional(Schema.Boolean),
+  minPixels: Schema.optional(Integer.check(Schema.isGreaterThan(0))),
+  maxPixels: Schema.optional(Integer.check(Schema.isGreaterThan(0))),
+  maxEdge: Schema.optional(Integer.check(Schema.isBetween({ minimum: 1, maximum: 4096 }))),
+  maxAspectRatio: Schema.optional(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(1))),
+  multiple: Schema.optional(Integer.check(Schema.isBetween({ minimum: 1, maximum: 4096 }))),
+});
 export const ImageProviderModel = Schema.Struct({
+  spriteCapabilities: Schema.optional(ImageSpriteCapabilities),
   id: ModelId,
   source: Schema.Literals(["discovered", "manual"]),
   lastTestAt: Schema.NullOr(IsoDateTime),

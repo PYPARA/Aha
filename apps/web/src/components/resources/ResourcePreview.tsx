@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   resourceType,
@@ -7,10 +7,49 @@ import {
 } from "@synara/contracts/resourceLibrary";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { FileIcon, FolderIcon } from "~/lib/icons";
-import { resourceApi, resourceKey } from "./resourceLibrary";
+import { resourceApi, resourceKey, ResourceLibraryIdContext } from "./resourceLibrary";
 
-export const resourceFieldClassName =
-  "rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring";
+// Keep IPC and image decoding responsive when a full page mounts at once. Waiting
+// reads are removed when their query is disposed (page/library changes).
+let activeReads = 0;
+const waitingReads: (() => void)[] = [];
+function pumpPreviews() {
+  // eslint-disable-next-line no-unmodified-loop-condition -- each queued start acquires a read slot.
+  while (activeReads < 4 && waitingReads.length) waitingReads.shift()!();
+}
+function readPreview(id: string, thumbnail: boolean, signal: AbortSignal) {
+  return new Promise<ResourceReadResult>((resolve, reject) => {
+    const cancel = () => {
+      const index = waitingReads.indexOf(start);
+      if (index >= 0) waitingReads.splice(index, 1);
+      reject(new DOMException("Preview cancelled", "AbortError"));
+    };
+    const start = () => {
+      signal.removeEventListener("abort", cancel);
+      if (signal.aborted) {
+        cancel();
+        return;
+      }
+      activeReads++;
+      void resourceApi<ResourceReadResult>({ op: "read", id, thumbnail })
+        .then(resolve, reject)
+        .finally(() => {
+          // Yield between groups so query notifications and image layout settle.
+          setTimeout(() => {
+            activeReads--;
+            pumpPreviews();
+          }, 0);
+        });
+    };
+    if (signal.aborted) {
+      cancel();
+      return;
+    }
+    signal.addEventListener("abort", cancel, { once: true });
+    waitingReads.push(start);
+    pumpPreviews();
+  });
+}
 
 export const humanResourceBytes = (n: number) =>
   n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`;
@@ -24,16 +63,19 @@ export function ResourcePreview({
 }) {
   const tr = useAhaTranslation();
   const [image, setImage] = useState<{ data: ResourceReadResult; url: string } | null>(null);
+  const [decodeError, setDecodeError] = useState(false);
+  const libraryId = useContext(ResourceLibraryIdContext);
   const isImage = entry.kind === "file" && resourceType(entry.name) === "image";
   const preview = useQuery({
-    queryKey: [...resourceKey, "preview", entry.id, entry.hash, large],
-    queryFn: () => resourceApi<ResourceReadResult>({ op: "read", id: entry.id, thumbnail: !large }),
+    queryKey: [...resourceKey, "preview", libraryId, entry.id, entry.hash, large],
+    queryFn: ({ signal }) => readPreview(entry.id, !large, signal),
     enabled: isImage,
     retry: false,
     staleTime: Infinity,
   });
   useEffect(() => {
     if (!preview.data) return;
+    setDecodeError(false);
     const url = URL.createObjectURL(
       new Blob([new Uint8Array(preview.data.bytes)], { type: preview.data.mimeType }),
     );
@@ -41,7 +83,7 @@ export function ResourcePreview({
     return () => URL.revokeObjectURL(url);
   }, [preview.data]);
 
-  if (image && image.data === preview.data)
+  if (image && image.data === preview.data && !decodeError)
     return (
       <img
         src={image.url}
@@ -50,13 +92,18 @@ export function ResourcePreview({
           large ? "max-h-[60vh] max-w-full object-contain" : "h-full w-full object-contain p-2"
         }
         loading={large ? "eager" : "lazy"}
+        onError={() => setDecodeError(true)}
       />
     );
-  if (large && isImage)
+  if (isImage && (large || preview.error || decodeError))
     return (
-      <p role={preview.error ? "alert" : "status"} className="text-sm text-muted-foreground">
-        {tr(preview.error?.message ?? "Loading...")}
-      </p>
+      <span
+        role={large && (preview.error || decodeError) ? "alert" : "status"}
+        className="flex max-w-full flex-col items-center gap-2 p-3 text-ui-xs text-muted-foreground"
+      >
+        <FileIcon className="size-6" />
+        <span>{tr(preview.error || decodeError ? "Preview unavailable" : "Loading...")}</span>
+      </span>
     );
   return entry.kind === "directory" ? (
     <FolderIcon className="size-10 text-muted-foreground" />

@@ -26,8 +26,10 @@ function preset(size?: string) {
 export function DrawingSizePicker({
   value,
   onChange,
+  exact = false,
 }: {
   value?: string | undefined;
+  exact?: boolean;
   onChange: (value?: string) => void;
 }) {
   const tr = useAhaTranslation();
@@ -46,6 +48,7 @@ export function DrawingSizePicker({
       {open ? (
         <SizeDialog
           value={value}
+          exact={exact}
           onClose={() => setOpen(false)}
           onApply={(size) => {
             onChange(size);
@@ -65,11 +68,13 @@ function SizeDialog({
   onClose,
   onApply,
   returnFocus,
+  exact,
 }: {
   value?: string | undefined;
   onClose: () => void;
   onApply: (size?: string) => void;
   returnFocus: React.RefObject<HTMLButtonElement | null>;
+  exact: boolean;
 }) {
   const tr = useAhaTranslation();
   const current = preset(value);
@@ -95,9 +100,19 @@ function SizeDialog({
       : mode === "ratio"
         ? (calculateImageSize(tier, ratio === "custom" ? customRatio : ratio) ?? "")
         : validDimensions
-          ? normalizeImageSize(`${Number(width)}x${Number(height)}`)
+          ? exact
+            ? `${Number(width)}x${Number(height)}`
+            : normalizeImageSize(`${Number(width)}x${Number(height)}`)
           : "";
-  const valid = mode === "auto" || Boolean(size);
+  const sizeParts = size.match(/^(\d+)x(\d+)$/);
+  const valid =
+    mode === "auto" ||
+    (Boolean(size) &&
+      (!exact ||
+        (sizeParts &&
+          Number(sizeParts[1]) <= 4096 &&
+          Number(sizeParts[2]) <= 4096 &&
+          Number(sizeParts[1]) * Number(sizeParts[2]) <= 8294400)));
   const adjusted =
     mode === "resolution" && validDimensions && size !== `${Number(width)}x${Number(height)}`;
   return (
@@ -126,6 +141,24 @@ function SizeDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-5 px-5">
+          {exact && (
+            <div className="flex flex-wrap gap-2">
+              {[512, 1024, 1536, 2048].map((edge) => (
+                <Button
+                  key={edge}
+                  size="sm"
+                  variant={size === `${edge}x${edge}` ? "secondary" : "outline"}
+                  onClick={() => {
+                    setMode("resolution");
+                    setWidth(String(edge));
+                    setHeight(String(edge));
+                  }}
+                >
+                  {edge}×{edge}
+                </Button>
+              ))}
+            </div>
+          )}
           <div
             className="grid grid-cols-3 gap-1 rounded-xl bg-muted/40 p-1"
             aria-label={tr("Size mode")}
@@ -258,7 +291,9 @@ function SizeDialog({
           {mode !== "auto" ? (
             <p className="text-ui-xs leading-relaxed text-muted-foreground">
               {tr(
-                "Size presets use multiples of 16, a maximum edge of 3840, a maximum ratio of 3:1, and 655,360–8,294,400 pixels. Provider support may differ.",
+                exact
+                  ? "Custom request dimensions are sent as entered. Provider support may differ; returned dimensions are shown after generation."
+                  : "Size presets use multiples of 16, a maximum edge of 3840, a maximum ratio of 3:1, and 655,360–8,294,400 pixels. Provider support may differ.",
               )}
             </p>
           ) : null}

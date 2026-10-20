@@ -24,6 +24,7 @@ import {
   resolvePreferredComposerModelSelection,
 } from "~/composerDraftStore";
 import { retainThreadDetailSubscription } from "~/threadDetailSubscriptionRetention";
+import { spriteImageInput } from "./spriteImageInput";
 import { type SpriteProject } from "./spriteModel";
 import type { EmbeddedChatAttachments } from "../chat/EmbeddedChatAttachments";
 import { Button } from "../ui/button";
@@ -368,8 +369,29 @@ export function SpriteChat({
   ]);
   return (
     <section
-      className="flex min-h-0 min-w-64 w-[420px] max-w-[65vw] shrink-0 resize-x flex-col overflow-auto border-l bg-background"
+      className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-auto bg-background"
       aria-label={tr("Sprite conversation")}
+      {...spriteImageInput(
+        (files) =>
+          void run(async () => {
+            const id = threadId ?? (await createConversation());
+            if (!attachmentBridge.ready(id))
+              await new Promise<void>((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                  unsubscribe();
+                  reject(new Error("Conversation is loading. Try again when it is ready."));
+                }, 5000);
+                const unsubscribe = attachmentBridge.subscribe(() => {
+                  if (attachmentBridge.ready(id)) {
+                    clearTimeout(timeout);
+                    unsubscribe();
+                    resolve();
+                  }
+                });
+              });
+            await attachmentBridge.attach(id, async () => files);
+          }),
+      )}
     >
       <SpriteConversationPicker
         conversations={conversations}

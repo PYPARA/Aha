@@ -1,9 +1,14 @@
 import "../../index.css";
 import { it, expect, vi, afterEach } from "vitest";
 import { render, cleanup } from "vitest-browser-react";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { useState } from "react";
-import { spriteGridSlice, type SpriteRun, type SpriteState } from "@synara/contracts";
+import {
+  spriteGridSlice,
+  SPRITE_ANALYSIS_VERSION,
+  type SpriteRun,
+  type SpriteState,
+} from "@synara/contracts";
 import { SpriteSliceEditor } from "./SpriteSliceEditor";
 import { previewAhaThemeState } from "~/hooks/useTheme";
 import { DEFAULT_THEME_STATE, serializeThemeState } from "~/theme/theme.logic";
@@ -81,7 +86,7 @@ function fixture(): SpriteRun {
         version: 1,
         slice,
         analysis: {
-          algorithmVersion: "layout-1",
+          algorithmVersion: SPRITE_ANALYSIS_VERSION,
           sourceId: source.id,
           width: 192,
           height: 96,
@@ -121,6 +126,7 @@ function Host() {
 }
 afterEach(async () => {
   await cleanup();
+  localStorage.clear();
   vi.clearAllMocks();
   previewAhaThemeState(serializeThemeState({ ...DEFAULT_THEME_STATE, mode: "light" }));
 });
@@ -140,19 +146,17 @@ it("keeps saved review separate from frame edits and submits the actual correcte
   });
   await render(<Host />);
   await page.getByRole("button", { name: "Use content suggestion", exact: true }).click();
-  await page.getByRole("checkbox", { name: /I checked this action/ }).click();
   await page.getByRole("spinbutton", { name: "FPS", exact: true }).fill("15");
-  await expect
-    .element(page.getByRole("checkbox", { name: /I checked this action/ }))
-    .not.toBeChecked();
-  await page.getByRole("checkbox", { name: /I checked this action/ }).click();
-  await page.getByRole("button", { name: "Save slicing correction", exact: true }).click();
+  await userEvent.keyboard("{Enter}");
+  await page
+    .getByRole("button", { name: "Save corrections and return to review", exact: true })
+    .click();
   expect(mocks.command).toHaveBeenCalledWith(
     expect.objectContaining({
       operation: "save-slicing",
       version: 1,
       slice: expect.objectContaining({
-        reviewedActionIds: ["idle"],
+        reviewedActionIds: [],
         rows: expect.arrayContaining([
           expect.objectContaining({
             action: expect.objectContaining({ id: "idle", fps: 15 }),
@@ -181,9 +185,7 @@ it("fits a narrow repair workspace and preserves the current skin contrast", asy
     path: "../../../node_modules/.cache/aha-sprite-slicing-current-skin.png",
   });
   await page.getByRole("button", { name: "Use content suggestion", exact: true }).click();
-  await expect
-    .element(page.getByRole("spinbutton", { name: "Frames", exact: true }))
-    .toHaveValue(2);
+  await expect.element(page.getByRole("button", { name: /^idle ·/ })).toHaveTextContent("idle · 2");
 });
 it("reopens the saved content region instead of resetting its handles to the full image", async () => {
   const run = fixture();
@@ -194,22 +196,163 @@ it("reopens the saved content region instead of resetting its handles to the ful
   await render(<SpriteSliceEditor run={saved} onState={() => {}} onBack={() => {}} />);
   await expect
     .element(page.getByRole("spinbutton", { name: "Content width", exact: true }))
-    .toHaveValue(128);
-  await expect
-    .element(page.getByRole("spinbutton", { name: "Frames", exact: true }))
-    .toHaveValue(2);
+    .toHaveValue("128");
+  await expect.element(page.getByRole("button", { name: /^idle ·/ })).toHaveTextContent("idle · 2");
 });
 it("keeps the edited version when another client updates the candidate", async () => {
   mocks.command.mockRejectedValue(new Error("Candidate changed. Refresh before editing."));
   const run = fixture();
   const screen = await render(<SpriteSliceEditor run={run} onState={() => {}} onBack={() => {}} />);
   await page.getByRole("spinbutton", { name: "FPS", exact: true }).fill("15");
+  await userEvent.keyboard("{Enter}");
   const changed = { ...run, candidates: [{ ...run.candidates![0]!, version: 2 }] };
   await screen.rerender(<SpriteSliceEditor run={changed} onState={() => {}} onBack={() => {}} />);
-  await page.getByRole("button", { name: "Save slicing correction", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Save corrections and return to review", exact: true })
+    .click();
   expect(mocks.command).toHaveBeenCalledWith(expect.objectContaining({ version: 1 }));
   await expect
-    .element(page.getByRole("alert"))
+    .element(page.getByRole("alert").last())
     .toHaveTextContent("Candidate changed. Refresh before editing.");
-  await expect.element(page.getByRole("spinbutton", { name: "FPS", exact: true })).toHaveValue(15);
+  await expect
+    .element(page.getByRole("spinbutton", { name: "FPS", exact: true }))
+    .toHaveValue("15");
+});
+it("undoes destructive layout changes and restores the unsaved draft after reopening", async () => {
+  const run = fixture();
+  await render(<SpriteSliceEditor run={run} onState={() => {}} onBack={() => {}} />);
+  await page.getByRole("spinbutton", { name: "FPS", exact: true }).fill("24");
+  await userEvent.keyboard("{Enter}");
+  await page.getByRole("button", { name: "Use content suggestion", exact: true }).click();
+  await expect.element(page.getByRole("button", { name: /^idle ·/ })).toHaveTextContent("idle · 2");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect.element(page.getByRole("button", { name: /^idle ·/ })).toHaveTextContent("idle · 3");
+  await expect
+    .element(page.getByRole("spinbutton", { name: "FPS", exact: true }))
+    .toHaveValue("24");
+  await page.getByRole("button", { name: "Redo", exact: true }).click();
+  await expect.element(page.getByRole("button", { name: /^idle ·/ })).toHaveTextContent("idle · 2");
+  await cleanup();
+  await render(<SpriteSliceEditor run={run} onState={() => {}} onBack={() => {}} />);
+  await expect.element(page.getByRole("button", { name: /^idle ·/ })).toHaveTextContent("idle · 2");
+  await expect.element(page.getByRole("status")).toHaveTextContent("Restored your slicing draft.");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect
+    .element(page.getByRole("spinbutton", { name: "FPS", exact: true }))
+    .toHaveValue("24");
+});
+
+it("keeps one action across physical rows, edits candidate offsets before adoption and preserves crop origins", async () => {
+  const { spriteTaskSlice } = await import("@synara/contracts");
+  const base = fixture();
+  const action = { ...base.configuration!.actions[0]!, frameCount: 8 };
+  const layout = {
+    width: 192,
+    height: 96,
+    columns: 4,
+    rows: 2,
+    cells: Array.from({ length: 8 }, (_, i) => ({
+      id: `cell-${i}`,
+      actionId: action.id,
+      frameIndex: i,
+      x: (i % 4) * 48,
+      y: Math.floor(i / 4) * 48,
+      width: 48,
+      height: 48,
+    })),
+  };
+  const slice = spriteTaskSlice(layout, [action]);
+  const run = {
+    ...base,
+    configuration: {
+      ...base.configuration!,
+      workflowVersion: 2 as const,
+      actions: [action],
+      layout,
+    },
+    candidates: [{ ...base.candidates![0]!, slice }],
+  };
+  mocks.command.mockImplementation(async (input) => ({
+    context: null,
+    runs: [{ ...run, candidates: [{ ...run.candidates![0]!, slice: input.slice, version: 2 }] }],
+  }));
+  await render(<SpriteSliceEditor run={run} onState={() => {}} onBack={() => {}} />);
+  await expect
+    .element(page.getByRole("spinbutton", { name: "Columns", exact: true }))
+    .toHaveValue("4");
+  await expect
+    .element(page.getByRole("spinbutton", { name: "Rows", exact: true }))
+    .toHaveValue("2");
+  await expect.element(page.getByRole("button", { name: "idle · 8", exact: true })).toBeVisible();
+  await page.getByRole("spinbutton", { name: "Cell width", exact: true }).fill("47");
+  await userEvent.keyboard("{Enter}");
+  await expect
+    .element(page.getByRole("spinbutton", { name: "Content origin X", exact: true }))
+    .toHaveValue("0");
+  await page.getByRole("tab", { name: "Alignment", exact: true }).click();
+  await page.getByRole("button", { name: "Frame 5", exact: true }).click({ modifiers: ["Meta"] });
+  await page.getByRole("spinbutton", { name: "Offset X", exact: true }).fill("3");
+  await userEvent.keyboard("{Enter}");
+  await page.getByRole("spinbutton", { name: "Frame duration (ms)", exact: true }).fill("175");
+  await userEvent.keyboard("{Enter}");
+  await page
+    .getByRole("button", { name: "Save corrections and return to review", exact: true })
+    .click();
+  const input = mocks.command.mock.calls[0]![0];
+  expect(input.operation).toBe("save-slicing");
+  expect(input.slice.edit.cells[0]).toMatchObject({ id: "cell-0", width: 47, originX: 0 });
+  expect(input.slice.edit.actions[0].frames[0]).toMatchObject({ offsetX: 3, durationMs: 175 });
+  expect(input.slice.edit.actions[0].frames[4]).toMatchObject({ offsetX: 3, durationMs: 175 });
+  expect(input.slice.edit.actions[0].frames[1].offsetX).toBe(0);
+  expect(input.slice.rows).toHaveLength(1);
+  expect(input.slice.rows[0].cells).toHaveLength(8);
+});
+it("uses row grouping only after explicit selection and can undo it", async () => {
+  const run = fixture();
+  await render(<SpriteSliceEditor run={run} onState={() => {}} onBack={() => {}} />);
+  await page.getByRole("tab", { name: "Action grouping", exact: true }).click();
+  await page.getByRole("combobox", { name: "Organize actions", exact: true }).click();
+  await page.getByRole("option", { name: "All valid cells as one action", exact: true }).click();
+  await page.getByRole("button", { name: "Apply grouping", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Apply changes", exact: true })
+    .click();
+  await expect.element(page.getByRole("button", { name: "idle · 6", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect.element(page.getByRole("button", { name: "idle · 3", exact: true })).toBeVisible();
+  await expect.element(page.getByRole("button", { name: "jump · 3", exact: true })).toBeVisible();
+});
+
+it("loads a historical processing version as an undoable draft without generating or adopting", async () => {
+  const base = fixture(),
+    candidate = base.candidates![0]!,
+    old = {
+      id: "old",
+      createdAt: "2026-10-19T00:00:00Z",
+      configuration: candidate.analysis!.suggestion,
+      frames: [],
+      actions: [],
+      warnings: [],
+      issues: [],
+    },
+    current = {
+      ...old,
+      id: "current",
+      createdAt: "2026-10-20T00:00:00Z",
+      configuration: candidate.slice!,
+    };
+  const run = {
+    ...base,
+    candidates: [
+      { ...candidate, processingVersionId: "current", processingVersions: [old, current] },
+    ],
+  };
+  await render(<SpriteSliceEditor run={run} onState={() => {}} onBack={() => {}} />);
+  await page.getByRole("combobox", { name: "Processing versions", exact: true }).click();
+  await page.getByRole("option", { name: /^v1 ·/ }).click();
+  await expect.element(page.getByRole("button", { name: "idle · 2", exact: true })).toBeVisible();
+  expect(mocks.command).not.toHaveBeenCalled();
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect.element(page.getByRole("button", { name: "idle · 3", exact: true })).toBeVisible();
 });

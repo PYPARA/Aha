@@ -1,801 +1,1426 @@
-/* eslint-disable react/no-array-index-key -- Grid slots keep positional identity while boundaries are dragged. */
-/* eslint-disable oxc/no-map-spread -- Immutable row updates preserve the unsaved editor snapshot. */
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+/* eslint-disable oxc/no-map-spread -- Copy-on-write edit snapshots are the undo and draft history. */
+import { createPortal } from "react-dom";
+import { useCallback, useEffect, useEffectEvent, useRef, useState, type PointerEvent } from "react";
+import { Schema } from "effect";
 import {
+  SpriteEditDescription as EditSchema,
+  SpriteSliceConfiguration as SliceSchema,
+  spriteEditFromSlice,
+  spriteSliceFromEdit,
+  spriteTaskSlice,
   spriteGridSlice,
-  SPRITE_ANALYSIS_VERSION,
-  spriteBoundaries,
+  spriteEditGrid,
+  spriteStationarySuggestions,
+  spriteSupportAnchor,
   validateSpriteSlice,
+  type SpriteEditDescription,
   type SpriteRun,
-  type SpriteSliceConfiguration,
+  type SpriteState,
   type SpriteCandidate,
+  type SpriteTaskLayout,
 } from "@synara/contracts";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Checkbox } from "../ui/checkbox";
+import { Alert } from "../ui/alert";
+import {
+  Dialog,
+  DialogPopup,
+  DialogHeader,
+  DialogTitle,
+  DialogPanel,
+  DialogFooter,
+} from "../ui/dialog";
+import { SpriteNumberField } from "./SpriteNumberField";
+import { SpriteSelect } from "./SpriteSelect";
+import { SpriteRepairPreview } from "./SpriteRepairPreview";
 import { drawingApi, imageUrl } from "../drawing/useDrawing";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
-import { spriteCandidate } from "./SpriteResults";
-const field = "h-8 min-w-0 rounded border bg-background px-2 text-xs";
-function contentRegion(slice: SpriteSliceConfiguration) {
-  const cells = slice.rows.flatMap((row) => row.cells);
-  const x = Math.min(...cells.map((cell) => cell.x));
-  const y = Math.min(...cells.map((cell) => cell.y));
-  return {
-    x,
-    y,
-    width: Math.max(...cells.map((cell) => cell.x + cell.width)) - x,
-    height: Math.max(...cells.map((cell) => cell.y + cell.height)) - y,
-  };
-}
+import { spriteCandidate } from "./spriteCandidate";
+import { spriteImageInput } from "./spriteImageInput";
+type Edit = SpriteEditDescription;
+type Frame = Edit["actions"][number]["frames"][number];
+const uid = () => crypto.randomUUID();
 export function SpriteSliceEditor({
   run,
+  initialActionId,
+  initialFrameIndex = 0,
   onState,
   onBack,
+  inspectorHost,
+  footerHost,
+  onSaved,
+  onReplaceSource,
 }: {
   run: SpriteRun;
-  onState: (state: import("@synara/contracts").SpriteState) => void;
+  initialActionId?: string | null;
+  initialFrameIndex?: number;
+  onState: (state: SpriteState) => void;
   onBack: () => void;
+  inspectorHost?: HTMLElement | null;
+  footerHost?: HTMLElement | null;
+  onSaved?: (state: SpriteState) => void;
+  onReplaceSource?: (files: File[]) => Promise<void>;
 }) {
   const tr = useAhaTranslation(),
     candidate = spriteCandidate(run)!;
-  const actions =
-    run.configuration?.actions.filter((a) => a.enabled) ?? run.actions?.map((a) => a.action) ?? [];
-  const grid = () => spriteGridSlice(candidate.source.width, candidate.source.height, actions);
-  const [slice, setSlice] = useState<SpriteSliceConfiguration>(() => candidate.slice ?? grid()),
-    [editVersion, setEditVersion] = useState(candidate.version ?? 0),
-    [rowIndex, setRowIndex] = useState(0),
-    [busy, setBusy] = useState(false),
-    [dirty, setDirty] = useState(false),
-    [error, setError] = useState(""),
-    [notice, setNotice] = useState("");
-  const [preview, setPreview] = useState<SpriteCandidate | null>(null),
-    [frame, setFrame] = useState(0);
-  const [crop, setCrop] = useState(() => contentRegion(slice));
-  const imageRef = useRef<HTMLDivElement>(null),
-    snapshot = useRef(slice);
-  snapshot.current = slice;
-  const row = slice.rows[rowIndex] ?? slice.rows[0]!;
-  const edit = (value: SpriteSliceConfiguration) => {
-    setSlice({ ...value, reviewedActionIds: [] });
-    setDirty(true);
-    setPreview(null);
-    setError("");
+  const draftKey = `aha-sprite-slice-draft:${run.context.projectId}:${run.id}:${candidate.id}`;
+  const restore = () => {
+    const active = candidate.processingVersions?.find(
+      (v) => v.id === candidate.processingVersionId,
+    )?.configuration;
+    const actions = run.configuration?.actions ??
+      run.actions?.map((o) => o.action) ?? [
+        {
+          id: run.context.selection?.actionId ?? "imported",
+          name: run.context.action,
+          description: "",
+          enabled: true,
+          frameCount: run.context.frameCount,
+          fps: run.context.fps,
+          loop: run.context.loop ?? true,
+        },
+      ];
+    const initial =
+      candidate.slice ??
+      active ??
+      (run.configuration?.layout
+        ? spriteTaskSlice(
+            run.configuration.layout,
+            actions,
+            candidate.source.width,
+            candidate.source.height,
+          )
+        : candidate.analysis?.suggestion) ??
+      spriteGridSlice(candidate.source.width, candidate.source.height, actions);
+    return spriteEditFromSlice(initial);
   };
-  const actionPatch = (value: Partial<typeof row.action>) =>
-    edit({
-      ...slice,
-      rows: slice.rows.map((r, i) =>
-        i === rowIndex ? { ...r, action: { ...r.action, ...value } } : r,
-      ),
-    });
-  const cellPatch = (index: number, value: Partial<(typeof row.cells)[number]>) =>
-    edit({
-      ...slice,
-      rows: slice.rows.map((r, i) =>
-        i === rowIndex
-          ? { ...r, cells: r.cells.map((c, j) => (j === index ? { ...c, ...value } : c)) }
-          : r,
-      ),
-    });
-  const reset = (value: SpriteSliceConfiguration) => {
-    edit(value);
-    setRowIndex(0);
-    setFrame(0);
-    setCrop(contentRegion(value));
-  };
-  const numeric = (
-    label: string,
-    value: number,
-    apply: (n: number) => void,
-    min = 0,
-    max = 4096,
-  ) => (
-    <label className="flex items-center gap-1 text-xs">
-      <span>
-        {/^(X|Y|Width|Height) \d+$/.test(label)
-          ? `${tr(label.split(" ")[0]!)} ${label.split(" ")[1]}`
-          : tr(label)}
-      </span>
-      <input
-        aria-label={tr(label)}
-        type="number"
-        className={`${field} w-20`}
-        value={value}
-        min={min}
-        max={max}
-        onChange={(e) => {
-          const n = e.target.valueAsNumber;
-          if (Number.isInteger(n) && n >= min && n <= max) apply(n);
-        }}
-      />
-    </label>
-  );
-  const fromCrop = (next = crop) => {
-    const ys = spriteBoundaries(next.height, slice.rows.length, next.y);
-    const rows = slice.rows.map((r, i) => {
-      const xs = spriteBoundaries(next.width, r.cells.length, next.x);
+  const [stored] = useState(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(draftKey) ?? "null");
+      if (!raw?.dirty) return null;
       return {
-        ...r,
-        cells: r.cells.map((c, j) => ({
-          ...c,
-          x: xs[j]!,
-          y: ys[i]!,
-          width: xs[j + 1]! - xs[j]!,
-          height: ys[i + 1]! - ys[i]!,
-        })),
+        edit: raw.edit
+          ? Schema.decodeUnknownSync(EditSchema)(raw.edit)
+          : spriteEditFromSlice(Schema.decodeUnknownSync(SliceSchema)(raw.slice)),
+        version: Number(raw.version) || 0,
+        past: (raw.past ?? [])
+          .map((v: unknown) => Schema.decodeUnknownSync(EditSchema)(v))
+          .slice(-100) as Edit[],
+        future: (raw.future ?? [])
+          .map((v: unknown) => Schema.decodeUnknownSync(EditSchema)(v))
+          .slice(-100) as Edit[],
+        actionId: raw.actionId as string | undefined,
+        selected: (raw.selected ?? []) as string[],
+        tab: raw.tab as "slice" | "groups" | "align" | undefined,
       };
-    });
-    edit({
-      ...slice,
-      rows,
-      canvasWidth: Math.max(...rows.flatMap((r) => r.cells.map((c) => c.width))),
-      canvasHeight: Math.max(...rows.flatMap((r) => r.cells.map((c) => c.height))),
-      anchorX: 0,
-      anchorY: 0,
+    } catch {
+      return null;
+    }
+  });
+  const [edit, setEdit] = useState<Edit>(() => stored?.edit ?? restore()),
+    [version, setVersion] = useState(stored?.version ?? candidate.version ?? 0);
+  const [past, setPast] = useState<Edit[]>(stored?.past ?? []),
+    [future, setFuture] = useState<Edit[]>(stored?.future ?? []),
+    [dirty, setDirty] = useState(!!stored);
+  const [processedPreview, setProcessedPreview] = useState<SpriteCandidate | null>(null);
+  const snapshot = useRef(edit);
+  snapshot.current = edit;
+  const [tab, setTab] = useState<"slice" | "groups" | "align">(stored?.tab ?? "slice");
+  const [actionId, setActionId] = useState(
+    stored?.actionId ?? initialActionId ?? edit.actions[0]?.action.id ?? "",
+  );
+  const group = edit.actions.find((g) => g.action.id === actionId) ?? edit.actions[0];
+  const [selected, setSelected] = useState<string[]>(
+    stored?.selected ??
+      (group?.frames[initialFrameIndex] ? [group.frames[initialFrameIndex]!.id] : []),
+  );
+  const currentFrame = group?.frames.find((f) => selected.includes(f.id)) ?? group?.frames[0];
+  const [cellId, setCellId] = useState(currentFrame?.cellId ?? edit.cells[0]?.id ?? "");
+  const cell = edit.cells.find((g) => g.id === cellId) ?? edit.cells[0];
+  const [selectedCells, setSelectedCells] = useState<string[]>([]),
+    [baselineId, setBaselineId] = useState(group?.frames[0]?.id ?? "");
+  const [onion, setOnion] = useState(false),
+    [reference, setReference] = useState(false),
+    [anchorMode, setAnchorMode] = useState(false),
+    [playing, setPlaying] = useState(false),
+    [playIndex, setPlayIndex] = useState(0);
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState(stored ? "Restored your slicing draft." : "");
+  const [historyId, setHistoryId] = useState(candidate.processingVersionId ?? "");
+  const [suggestions, setSuggestions] = useState<ReturnType<typeof spriteStationarySuggestions>>(
+      [],
+    ),
+    [pending, setPending] = useState<{ edit: Edit; message: string } | null>(null),
+    [leave, setLeave] = useState(false),
+    [replacement, setReplacement] = useState<File[] | null>(null);
+  const canvasHost = useRef<HTMLDivElement>(null);
+  const [canvasHeight, setCanvasHeight] = useState(360);
+  useEffect(() => {
+    const host = canvasHost.current;
+    if (!host) return;
+    const observer = new ResizeObserver((entries) =>
+      setCanvasHeight(entries[0]?.contentRect.height ?? 360),
+    );
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+  const correctionUnit =
+    run.context.renderSpec?.mode === "pixel" ? run.context.renderSpec.outputScale : 1;
+  const [columns, setColumns] = useState(new Set(edit.cells.map((c) => c.x)).size),
+    [rows, setRows] = useState(new Set(edit.cells.map((c) => c.y)).size);
+  const [region, setRegion] = useState(() => ({
+    x: Math.min(...edit.cells.map((c) => c.x)),
+    y: Math.min(...edit.cells.map((c) => c.y)),
+    width:
+      Math.max(...edit.cells.map((c) => c.x + c.width)) - Math.min(...edit.cells.map((c) => c.x)),
+    height:
+      Math.max(...edit.cells.map((c) => c.y + c.height)) - Math.min(...edit.cells.map((c) => c.y)),
+  }));
+  const [groupPreset, setGroupPreset] = useState<"all" | "rows" | "columns">("all");
+  const replaceInput = useRef<HTMLInputElement>(null),
+    previewCanvas = useRef<HTMLCanvasElement | null>(null),
+    sourceRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{
+    x: number;
+    y: number;
+    cell: NonNullable<typeof cell>;
+    handle: string;
+  } | null>(null);
+  const commit = (next: Edit) => {
+    const previous = snapshot.current;
+    setPast((p) => [...p.slice(-99), previous]);
+    setFuture([]);
+    snapshot.current = next;
+    setEdit(next);
+    setDirty(true);
+    setError("");
+    setSuggestions([]);
+    setProcessedPreview(null);
+    setPlaying(false);
+  };
+  const undo = () => {
+    const next = past.at(-1);
+    if (!next) return;
+    setPast((p) => p.slice(0, -1));
+    const previous = snapshot.current;
+    setFuture((p) => [...p, previous]);
+    snapshot.current = next;
+    setEdit(next);
+    setProcessedPreview(null);
+    setDirty(true);
+    setSuggestions([]);
+  };
+  const redo = () => {
+    const next = future.at(-1);
+    if (!next) return;
+    setFuture((p) => p.slice(0, -1));
+    const previous = snapshot.current;
+    setPast((p) => [...p, previous]);
+    snapshot.current = next;
+    setEdit(next);
+    setProcessedPreview(null);
+    setDirty(true);
+    setSuggestions([]);
+  };
+  const shift = (dx: number, dy: number) => {
+    const step = run.context.renderSpec?.mode === "pixel" ? run.context.renderSpec.outputScale : 1;
+    dx = Math.round(dx / step) * step;
+    dy = Math.round(dy / step) * step;
+    const ids = selected.length ? selected : currentFrame ? [currentFrame.id] : [];
+    commit({
+      ...edit,
+      actions: edit.actions.map((g) => ({
+        ...g,
+        frames: g.frames.map((f) =>
+          ids.includes(f.id) ? { ...f, offsetX: f.offsetX + dx, offsetY: f.offsetY + dy } : f,
+        ),
+      })),
     });
   };
-  const drag = (
-    event: React.PointerEvent,
-    kind: "x" | "y" | "crop-left" | "crop-right" | "crop-top" | "crop-bottom",
-    edge: number,
-  ) => {
-    event.preventDefault();
-    const target = event.currentTarget as HTMLElement;
-    target.setPointerCapture(event.pointerId);
-    const move = (e: PointerEvent) => {
-      const bounds = imageRef.current!.getBoundingClientRect();
-      const x = Math.round(((e.clientX - bounds.left) / bounds.width) * candidate.source.width),
-        y = Math.round(((e.clientY - bounds.top) / bounds.height) * candidate.source.height);
-      const current = snapshot.current;
-      if (kind.startsWith("crop")) {
-        setCrop((p) => {
-          if (kind === "crop-left") {
-            const nx = Math.max(0, Math.min(p.x + p.width - 1, x));
-            return { ...p, x: nx, width: p.x + p.width - nx };
-          }
-          if (kind === "crop-right")
-            return { ...p, width: Math.max(1, Math.min(candidate.source.width - p.x, x - p.x)) };
-          if (kind === "crop-top") {
-            const ny = Math.max(0, Math.min(p.y + p.height - 1, y));
-            return { ...p, y: ny, height: p.y + p.height - ny };
-          }
-          return { ...p, height: Math.max(1, Math.min(candidate.source.height - p.y, y - p.y)) };
-        });
-        return;
-      }
-      if (kind === "x") {
-        const cells = [...current.rows[rowIndex]!.cells],
-          before = cells[edge - 1],
-          after = cells[edge];
-        const left = before?.x ?? 0,
-          right = after ? after.x + after.width : candidate.source.width;
-        const nx = Math.max(left + 1, Math.min(right - 1, x));
-        if (before) cells[edge - 1] = { ...before, width: nx - before.x };
-        if (after) cells[edge] = { ...after, x: nx, width: after.x + after.width - nx };
-        edit({
-          ...current,
-          rows: current.rows.map((r, i) => (i === rowIndex ? { ...r, cells } : r)),
-        });
-      } else {
-        const before = current.rows[edge - 1],
-          after = current.rows[edge];
-        const top = before?.cells[0]?.y ?? 0,
-          bottom = after
-            ? Math.max(...after.cells.map((c) => c.y + c.height))
-            : candidate.source.height;
-        const ny = Math.max(top + 1, Math.min(bottom - 1, y));
-        edit({
-          ...current,
-          rows: current.rows.map((r, i) =>
-            i === edge - 1
-              ? { ...r, cells: r.cells.map((c) => ({ ...c, height: ny - c.y })) }
-              : i === edge
-                ? {
-                    ...r,
-                    cells: r.cells.map((c) => ({ ...c, y: ny, height: c.y + c.height - ny })),
-                  }
-                : r,
-          ),
-        });
+  const keys = useEffectEvent((e: KeyboardEvent) => {
+    if ((e.target as Element)?.closest("input,textarea,[contenteditable=true]") || busy) return;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.shiftKey) redo();
+      else undo();
+      return;
+    }
+    if (tab === "align" && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+      e.preventDefault();
+      const n =
+        (e.shiftKey ? 10 : 1) *
+        (run.context.renderSpec?.mode === "pixel" ? run.context.renderSpec.outputScale : 1);
+      shift(
+        e.key === "ArrowLeft" ? -n : e.key === "ArrowRight" ? n : 0,
+        e.key === "ArrowUp" ? -n : e.key === "ArrowDown" ? n : 0,
+      );
+    }
+  });
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => keys(e);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+  useEffect(() => {
+    const persist = () => {
+      try {
+        localStorage.setItem(
+          draftKey,
+          JSON.stringify({
+            schemaVersion: 1,
+            edit,
+            version,
+            dirty,
+            past,
+            future,
+            actionId,
+            selected,
+            tab,
+          }),
+        );
+      } catch {
+        setNotice("Could not save the local slicing draft. Keep this editor open.");
       }
     };
-    const up = () => {
-      target.removeEventListener("pointermove", move);
-      target.removeEventListener("pointerup", up);
-      target.removeEventListener("pointercancel", up);
+    persist();
+    const before = (e: BeforeUnloadEvent) => {
+      persist();
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
     };
-    target.addEventListener("pointermove", move);
-    target.addEventListener("pointerup", up);
-    target.addEventListener("pointercancel", up);
-  };
-  const perform = async (
-    operation: "preview-slicing" | "save-slicing" | "restore-slicing",
-    processingVersionId?: string,
-  ) => {
+    window.addEventListener("beforeunload", before);
+    return () => window.removeEventListener("beforeunload", before);
+  }, [draftKey, edit, version, dirty, past, future, actionId, selected, tab]);
+  useEffect(() => {
+    if (!playing || !group?.frames.length) return;
+    const frame = group.frames[playIndex % group.frames.length]!;
+    const timer = setTimeout(
+      () => {
+        setPlayIndex((i) =>
+          group.action.loop
+            ? (i + 1) % group.frames.length
+            : Math.min(group.frames.length - 1, i + 1),
+        );
+        if (!group.action.loop && playIndex >= group.frames.length - 1) setPlaying(false);
+      },
+      frame.durationMs ?? 1000 / group.action.fps,
+    );
+    return () => clearTimeout(timer);
+  }, [playing, playIndex, group]);
+  const perform = async (operation: "save-slicing" | "preview-slicing" | "fork-slicing") => {
+    if (busy) return;
     setBusy(true);
     setError("");
-    setNotice("");
+    setPlaying(false);
     try {
-      if (operation !== "restore-slicing")
-        validateSpriteSlice(slice, candidate.source.width, candidate.source.height);
-      const state = await drawingApi().spriteCommand({
+      const slice = spriteSliceFromEdit(edit, {
+        background: candidate.slice?.background ?? run.context.background,
+        chromaKey: candidate.slice?.chromaKey ?? run.context.chromaKey,
+      });
+      validateSpriteSlice(slice, candidate.source.width, candidate.source.height);
+      const result = await drawingApi().spriteCommand({
         operation,
         projectId: run.context.projectId,
         runId: run.id,
         candidateId: candidate.id,
-        version: editVersion,
+        version,
         slice,
-        ...(processingVersionId ? { processingVersionId } : {}),
       });
-      const updated = state.runs
+      if (operation === "preview-slicing") {
+        setProcessedPreview(
+          result.runs
+            .find((r) => r.id === run.id)
+            ?.candidates?.find((c) => c.id === candidate.id) ?? null,
+        );
+        setNotice("Preview generated locally. No image was generated.");
+        return;
+      }
+      const saved = result.runs
         .find((r) => r.id === run.id)
         ?.candidates?.find((c) => c.id === candidate.id);
-      if (operation === "preview-slicing") setPreview(updated ?? null);
-      else {
-        onState(state);
-        if (updated?.slice) {
-          setSlice(updated.slice);
-          setCrop(contentRegion(updated.slice));
-          setRowIndex((index) => Math.min(index, updated.slice!.rows.length - 1));
-          setFrame(0);
-        }
-        setEditVersion(updated?.version ?? editVersion);
-        setDirty(false);
-        setPreview(null);
-        setNotice(tr("Slicing correction saved. No image was generated."));
-      }
+      setVersion(saved?.version ?? version);
+      setDirty(false);
+      setPast([]);
+      setFuture([]);
+      localStorage.removeItem(draftKey);
+      setNotice("Slicing correction saved. No image was generated.");
+      onState(result);
+      onSaved?.(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
-  const synchronizeAnalysis = (state: import("@synara/contracts").SpriteState) => {
-    const analyzed = state.runs
-      .find((item) => item.id === run.id)
-      ?.candidates?.find((item) => item.id === candidate.id);
-    if (analyzed) {
-      setEditVersion(analyzed.version ?? editVersion);
-      setSlice((current) => ({ ...current, reviewedActionIds: [] }));
-      setPreview(null);
-    }
-    onState(state);
-  };
-  const acceptAnalysis = useEffectEvent(synchronizeAnalysis);
-  const analysisId = candidate.id,
-    analysisVersion = candidate.version ?? 0,
-    hasAnalysis = candidate.analysis?.algorithmVersion === SPRITE_ANALYSIS_VERSION,
-    analysisProject = run.context.projectId;
-  useEffect(() => {
-    if (hasAnalysis) return;
-    let live = true;
-    setBusy(true);
-    void drawingApi()
-      .spriteCommand({
-        operation: "analyze-candidate",
-        projectId: analysisProject,
-        runId: run.id,
-        candidateId: analysisId,
-        version: analysisVersion,
-      })
-      .then((state) => {
-        if (live) {
-          setBusy(false);
-          acceptAnalysis(state);
-        }
-      })
-      .catch((e) => {
-        if (live) {
-          setBusy(false);
-          setError(String(e));
-        }
+  const patchCell = (patch: Partial<NonNullable<typeof cell>>) => {
+    if (cell)
+      commit({
+        ...edit,
+        cells: edit.cells.map((c) => (c.id === cell.id ? { ...c, ...patch } : c)),
       });
-    return () => {
-      live = false;
+  };
+  const patchGroup = (patch: Partial<NonNullable<typeof group>["action"]>) => {
+    if (group)
+      commit({
+        ...edit,
+        actions: edit.actions.map((g) =>
+          g.action.id === group.action.id ? { ...g, action: { ...g.action, ...patch } } : g,
+        ),
+      });
+  };
+  const changeSelection = (frame: Frame, add: boolean) => {
+    setSelected(
+      add
+        ? selected.includes(frame.id)
+          ? selected.filter((id) => id !== frame.id)
+          : [...selected, frame.id]
+        : [frame.id],
+    );
+    setCellId(frame.cellId);
+    setPlaying(false);
+  };
+  const applyGrid = () => {
+    try {
+      if (columns * rows > 1024 || region.width < columns || region.height < rows)
+        throw new Error("Invalid grid dimensions.");
+      const layout: SpriteTaskLayout = {
+        width: candidate.source.width,
+        height: candidate.source.height,
+        columns,
+        rows,
+        cells: Array.from({ length: columns * rows }, (_, i) => {
+          const x = region.x + Math.floor(((i % columns) * region.width) / columns),
+            y = region.y + Math.floor((Math.floor(i / columns) * region.height) / rows);
+          return {
+            id: edit.cells[i]?.id ?? `cell-${uid()}`,
+            actionId: group?.action.id ?? "imported",
+            frameIndex: i,
+            x,
+            y,
+            width: region.x + Math.floor((((i % columns) + 1) * region.width) / columns) - x,
+            height:
+              region.y + Math.floor(((Math.floor(i / columns) + 1) * region.height) / rows) - y,
+          };
+        }),
+      };
+      const next = spriteEditGrid(edit, layout);
+      if (
+        next.removed.some((id) => edit.actions.some((g) => g.frames.some((f) => f.cellId === id)))
+      )
+        setPending({
+          edit: next.edit,
+          message:
+            "Changing this grid removes cells used by actions. Their frame instances will be removed; Undo restores them.",
+        });
+      else commit(next.edit);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const regroup = () => {
+    const active = edit.cells.filter((c) => c.enabled).toSorted((a, b) => a.y - b.y || a.x - b.x);
+    const buckets = new Map<number, typeof active>();
+    for (const c of active) {
+      const key = groupPreset === "rows" ? c.y : groupPreset === "columns" ? c.x : 0;
+      buckets.set(key, [...(buckets.get(key) ?? []), c]);
+    }
+    const next = {
+      ...edit,
+      actions: [...buckets.values()].map((cells, i) => ({
+        action: {
+          ...(group?.action ?? {
+            description: "",
+            fps: 12,
+            loop: true,
+            enabled: true,
+            name: "action",
+            frameCount: 1,
+            id: "imported",
+          }),
+          id: i === 0 ? (group?.action.id ?? "imported") : uid(),
+          name: i === 0 ? (group?.action.name ?? "action") : `action-${i + 1}`,
+          frameCount: cells.length,
+        },
+        frames: cells.map((c) => ({ id: uid(), cellId: c.id, offsetX: 0, offsetY: 0 })),
+      })),
     };
-  }, [analysisId, analysisVersion, hasAnalysis, analysisProject, run.id]);
-  const currentPreview = preview?.actions.find((a) => a.action.id === row.action.id),
-    previewFrame =
-      currentPreview?.frames[Math.min(frame, (currentPreview?.frames.length ?? 1) - 1)];
-  return (
-    <section className="space-y-4" aria-label={tr("Correct frame slicing")}>
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold">{tr("Correct frame slicing")}</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {candidate.source.width} × {candidate.source.height} · {tr("Planned frames")}:{" "}
-            {actions.reduce((n, a) => n + a.frameCount, 0)} · {tr("Correction frames")}:{" "}
-            {slice.rows.reduce((n, r) => n + r.cells.filter((c) => c.enabled).length, 0)}
+    setPending({
+      edit: next,
+      message:
+        "This replaces action grouping and frame order in this processing draft. Existing formal actions are preserved.",
+    });
+  };
+  const reorder = (direction: number) => {
+    if (!group) return;
+    const frames = [...group.frames],
+      indices = frames.flatMap((f, i) => (selected.includes(f.id) ? [i] : []));
+    if (direction > 0) indices.reverse();
+    for (const i of indices) {
+      const j = i + direction;
+      if (j >= 0 && j < frames.length && !selected.includes(frames[j]!.id))
+        [frames[i], frames[j]] = [frames[j]!, frames[i]!];
+    }
+    commit({ ...edit, actions: edit.actions.map((g) => (g === group ? { ...g, frames } : g)) });
+  };
+  const duplicate = () => {
+    if (!group) return;
+    commit({
+      ...edit,
+      actions: edit.actions.map((g) =>
+        g === group
+          ? {
+              ...g,
+              frames: g.frames.flatMap((f) =>
+                selected.includes(f.id) ? [f, { ...f, id: uid() }] : [f],
+              ),
+            }
+          : g,
+      ),
+    });
+  };
+  const remove = () => {
+    if (!group) return;
+    const frames = group.frames.filter((f) => !selected.includes(f.id));
+    if (!frames.length) {
+      setError("Keep at least one frame in an action.");
+      return;
+    }
+    commit({ ...edit, actions: edit.actions.map((g) => (g === group ? { ...g, frames } : g)) });
+    setSelected([]);
+  };
+  const addCells = (fresh: boolean) => {
+    const cells = edit.cells.filter((c) => selectedCells.includes(c.id));
+    if (!cells.length) return;
+    const frames = cells.map((c) => ({ id: uid(), cellId: c.id, offsetX: 0, offsetY: 0 }));
+    const id = uid();
+    commit({
+      ...edit,
+      actions: fresh
+        ? [
+            ...edit.actions,
+            {
+              action: {
+                id,
+                name: `action-${edit.actions.length + 1}`,
+                description: "",
+                enabled: true,
+                frameCount: frames.length,
+                fps: 12,
+                loop: true,
+              },
+              frames,
+            },
+          ]
+        : edit.actions.map((g) => (g === group ? { ...g, frames: [...g.frames, ...frames] } : g)),
+    });
+    if (fresh) setActionId(id);
+  };
+  const applySuggestion = () => {
+    commit({
+      ...edit,
+      actions: edit.actions.map((g) => ({
+        ...g,
+        frames: g.frames.map((f) =>
+          selected.includes(f.id) || (!selected.length && f.id === currentFrame?.id)
+            ? { ...f, ...suggestions.find((s) => s.id === f.id) }
+            : f,
+        ),
+      })),
+    });
+    setSuggestions([]);
+  };
+  const support = () => {
+    const canvas = previewCanvas.current;
+    if (!canvas || !currentFrame) return;
+    const a = spriteSupportAnchor(
+      canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data,
+      canvas.width,
+      canvas.height,
+    );
+    if (!a) {
+      setError("No reliable transparent foreground. Set the anchor manually.");
+      return;
+    }
+    commit({
+      ...edit,
+      actions: edit.actions.map((g) => ({
+        ...g,
+        frames: g.frames.map((f) =>
+          f.id === currentFrame.id
+            ? { ...f, anchor: { x: a.x - f.offsetX, y: a.y - f.offsetY, confirmed: false } }
+            : f,
+        ),
+      })),
+    });
+    setNotice(
+      a.reliable
+        ? "Anchor suggestion requires confirmation."
+        : "Multiple supports or image edges detected. Confirm the anchor manually.",
+    );
+  };
+  const pointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    const target = (e.target as HTMLElement).closest("[data-handle]") as HTMLElement | null;
+    const clicked = edit.cells.find((c) => c.id === target?.dataset.cellId) ?? cell;
+    if (!clicked) return;
+    const handle = target?.dataset.handle;
+    if (!handle) return;
+    e.preventDefault();
+    setCellId(clicked.id);
+    drag.current = { x: e.clientX, y: e.clientY, cell: clicked, handle };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const pointerUp = (e: PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    drag.current = null;
+    const b = e.currentTarget.getBoundingClientRect();
+    const dx = Math.round(((e.clientX - d.x) * candidate.source.width) / b.width),
+      dy = Math.round(((e.clientY - d.y) * candidate.source.height) / b.height),
+      c = d.cell;
+    let x = c.x,
+      y = c.y,
+      w = c.width,
+      h = c.height;
+    if (d.handle === "move") {
+      x = Math.min(candidate.source.width - w, Math.max(0, x + dx));
+      y = Math.min(candidate.source.height - h, Math.max(0, y + dy));
+    } else {
+      if (d.handle.includes("w")) {
+        const nx = Math.max(0, Math.min(x + w - 1, x + dx));
+        w += x - nx;
+        x = nx;
+      }
+      if (d.handle.includes("e")) w = Math.max(1, Math.min(candidate.source.width - x, w + dx));
+      if (d.handle.includes("n")) {
+        const ny = Math.max(0, Math.min(y + h - 1, y + dy));
+        h += y - ny;
+        y = ny;
+      }
+      if (d.handle.includes("s")) h = Math.max(1, Math.min(candidate.source.height - y, h + dy));
+    }
+    patchCell({ x, y, width: w, height: h });
+  };
+  const properties = (
+    <div className="space-y-4 p-3" data-testid="sprite-repair-properties">
+      <h3 className="font-medium">
+        {tr(
+          tab === "slice"
+            ? "Selected source cell"
+            : tab === "groups"
+              ? "Action grouping"
+              : "Frame alignment",
+        )}
+      </h3>
+      {tab === "slice" && cell && (
+        <>
+          <p className="text-ui-sm text-muted-foreground">
+            {tr("Crop boundaries and content origin are independent.")}
           </p>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            if (!dirty || window.confirm(tr("Discard unsaved slicing changes?"))) onBack();
-          }}
-        >
-          {tr("Back to task details")}
-        </Button>
-      </header>
-      <fieldset disabled={busy} className="contents">
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => reset(grid())}>
-            {tr("Use planned grid")}
-          </Button>
+          <div className="grid grid-cols-2 gap-3">
+            {(["x", "y", "width", "height", "originX", "originY"] as const).map((k) => (
+              <SpriteNumberField
+                key={k}
+                label={tr(
+                  k === "originX"
+                    ? "Content origin X"
+                    : k === "originY"
+                      ? "Content origin Y"
+                      : k === "width"
+                        ? "Cell width"
+                        : k === "height"
+                          ? "Cell height"
+                          : k.toUpperCase(),
+                )}
+                value={cell[k]}
+                min={k === "width" || k === "height" ? 1 : 0}
+                onChange={(v) => patchCell({ [k]: v })}
+              />
+            ))}
+          </div>
+          <label className="flex items-center gap-2 text-ui-sm">
+            <Checkbox
+              checked={cell.enabled}
+              onCheckedChange={(enabled) => patchCell({ enabled: !!enabled })}
+            />
+            {tr("Include this source cell")}
+          </label>
+          <details open>
+            <summary className="cursor-pointer text-ui-sm">{tr("Advanced layout")}</summary>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <SpriteNumberField
+                label={tr("Columns")}
+                value={columns}
+                max={1024}
+                onChange={setColumns}
+              />
+              <SpriteNumberField label={tr("Rows")} value={rows} max={1024} onChange={setRows} />
+              {(["x", "y", "width", "height"] as const).map((k) => (
+                <SpriteNumberField
+                  key={k}
+                  label={tr(
+                    k === "width"
+                      ? "Content width"
+                      : k === "height"
+                        ? "Content height"
+                        : `Content ${k.toUpperCase()}`,
+                  )}
+                  value={region[k]}
+                  min={k === "width" || k === "height" ? 1 : 0}
+                  onChange={(v) => setRegion((p) => ({ ...p, [k]: v }))}
+                />
+              ))}
+            </div>
+            <Button size="sm" variant="outline" className="mt-3" onClick={applyGrid}>
+              {tr("Apply grid layout")}
+            </Button>
+          </details>
           <Button
             size="sm"
             variant="outline"
-            disabled={!candidate.analysis?.reliable || busy}
-            onClick={() => reset(candidate.analysis!.suggestion)}
-          >
-            {tr("Use content suggestion")}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
             disabled={busy}
-            onClick={() => {
+            onClick={async () => {
               setBusy(true);
-              void drawingApi()
-                .spriteCommand({
+              try {
+                const result = await drawingApi().spriteCommand({
                   operation: "analyze-candidate",
                   projectId: run.context.projectId,
                   runId: run.id,
                   candidateId: candidate.id,
-                  version: editVersion,
-                })
-                .then(synchronizeAnalysis)
-                .catch((e) => setError(String(e)))
-                .finally(() => setBusy(false));
+                });
+                onState(result);
+                setNotice("Analysis updated. Apply the suggestion only after reviewing it.");
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
             }}
           >
-            {tr("Recheck layout")}
+            {tr("Analyze source again")}
           </Button>
-        </div>
-        {candidate.analysis && !candidate.analysis.reliable && (
-          <p className="rounded-lg border border-orange-500/30 p-3 text-xs">
+          {candidate.analysis && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                const next = spriteEditFromSlice(candidate.analysis!.suggestion);
+                setColumns(new Set(next.cells.map((c) => c.x)).size);
+                setRows(new Set(next.cells.map((c) => c.y)).size);
+                setRegion({
+                  x: Math.min(...next.cells.map((c) => c.x)),
+                  y: Math.min(...next.cells.map((c) => c.y)),
+                  width:
+                    Math.max(...next.cells.map((c) => c.x + c.width)) -
+                    Math.min(...next.cells.map((c) => c.x)),
+                  height:
+                    Math.max(...next.cells.map((c) => c.y + c.height)) -
+                    Math.min(...next.cells.map((c) => c.y)),
+                });
+                commit({
+                  ...next,
+                  actions: next.actions.map((g) => ({
+                    ...g,
+                    action: { ...g.action, fps: group?.action.fps ?? g.action.fps },
+                  })),
+                });
+              }}
+            >
+              {tr("Use content suggestion")}
+            </Button>
+          )}
+        </>
+      )}
+      {group && (
+        <>
+          <label className="flex flex-col gap-1 text-ui-sm">
+            {tr("Action name")}
+            <Input
+              value={group.action.name}
+              onChange={(e) => patchGroup({ name: e.target.value })}
+            />
+          </label>
+          <SpriteNumberField
+            label={tr("FPS")}
+            value={group.action.fps}
+            max={60}
+            onChange={(fps) => patchGroup({ fps })}
+          />
+          <label className="flex items-center gap-2 text-ui-sm">
+            <Checkbox
+              checked={group.action.loop}
+              onCheckedChange={(loop) => patchGroup({ loop: !!loop })}
+            />
+            {tr("Loop")}
+          </label>
+        </>
+      )}
+      {tab === "align" && currentFrame && (
+        <>
+          <p className="text-ui-sm text-muted-foreground">
             {tr(
-              "The content layout could not be reliably identified. Review frame boundaries manually.",
+              "Drag the character or use arrow keys. Shift moves 10 pixels. Multi-selection applies the same translation.",
             )}
           </p>
-        )}
-        <div className="flex flex-wrap gap-2 rounded-lg border p-3">
-          {numeric(
-            "Content left",
-            crop.x,
-            (n) => setCrop((p) => ({ ...p, x: n })),
-            0,
-            candidate.source.width - 1,
-          )}
-          {numeric(
-            "Content top",
-            crop.y,
-            (n) => setCrop((p) => ({ ...p, y: n })),
-            0,
-            candidate.source.height - 1,
-          )}
-          {numeric(
-            "Content width",
-            crop.width,
-            (n) => setCrop((p) => ({ ...p, width: n })),
-            1,
-            candidate.source.width,
-          )}
-          {numeric(
-            "Content height",
-            crop.height,
-            (n) => setCrop((p) => ({ ...p, height: n })),
-            1,
-            candidate.source.height,
+          <div className="grid grid-cols-2 gap-3">
+            <SpriteNumberField
+              label={tr("Offset X")}
+              min={-4096}
+              value={currentFrame.offsetX / correctionUnit}
+              onChange={(v) => shift(v * correctionUnit - currentFrame.offsetX, 0)}
+            />
+            <SpriteNumberField
+              label={tr("Offset Y")}
+              min={-4096}
+              value={currentFrame.offsetY / correctionUnit}
+              onChange={(v) => shift(0, v * correctionUnit - currentFrame.offsetY)}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-ui-sm">
+            <Checkbox
+              checked={!!currentFrame.allowEmpty}
+              onCheckedChange={(allowEmpty) =>
+                commit({
+                  ...edit,
+                  actions: edit.actions.map((g) => ({
+                    ...g,
+                    frames: g.frames.map((f) =>
+                      f.id === currentFrame.id ? { ...f, allowEmpty: !!allowEmpty } : f,
+                    ),
+                  })),
+                })
+              }
+            />
+            {tr("Intentional blank frame")}
+          </label>
+          <SpriteNumberField
+            label={tr("Frame duration (ms)")}
+            value={currentFrame.durationMs ?? Math.round(1000 / (group?.action.fps ?? 12))}
+            max={60000}
+            onChange={(durationMs) =>
+              commit({
+                ...edit,
+                actions: edit.actions.map((g) => ({
+                  ...g,
+                  frames: g.frames.map((f) => (selected.includes(f.id) ? { ...f, durationMs } : f)),
+                })),
+              })
+            }
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              commit({
+                ...edit,
+                actions: edit.actions.map((g) => ({
+                  ...g,
+                  frames: g.frames.map((f) =>
+                    selected.includes(f.id) ? { ...f, durationMs: undefined } : f,
+                  ),
+                })),
+              })
+            }
+          >
+            {tr("Inherit action FPS")}
+          </Button>
+          <SpriteSelect
+            label={tr("Baseline frame")}
+            value={baselineId}
+            options={(group?.frames ?? []).map((f, i) => ({
+              value: f.id,
+              label: `${tr("Frame")} ${i + 1}`,
+            }))}
+            onChange={setBaselineId}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={onion ? "secondary" : "ghost"}
+              onClick={() => setOnion(!onion)}
+            >
+              {tr("Previous frame onion skin")}
+            </Button>
+            <Button
+              size="sm"
+              variant={reference ? "secondary" : "ghost"}
+              onClick={() => setReference(!reference)}
+            >
+              {tr("Compare character reference")}
+            </Button>
+            <Button
+              size="sm"
+              variant={anchorMode ? "secondary" : "outline"}
+              onClick={() => setAnchorMode(!anchorMode)}
+            >
+              {tr("Set anchor manually")}
+            </Button>
+            <Button size="sm" variant="outline" onClick={support}>
+              {tr("Suggest support anchor")}
+            </Button>
+          </div>
+          {currentFrame.anchor && (
+            <>
+              <p className="text-ui-sm">
+                {tr(
+                  currentFrame.anchor.confirmed ? "Anchor confirmed" : "Anchor needs confirmation",
+                )}{" "}
+                · {Math.round(currentFrame.anchor.x)},{Math.round(currentFrame.anchor.y)}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  commit({
+                    ...edit,
+                    actions: edit.actions.map((g) => ({
+                      ...g,
+                      frames: g.frames.map((f) =>
+                        f.id === currentFrame.id
+                          ? { ...f, anchor: { ...currentFrame.anchor!, confirmed: true } }
+                          : f,
+                      ),
+                    })),
+                  })
+                }
+              >
+                {tr("Confirm anchor")}
+              </Button>
+            </>
           )}
           <Button
             size="sm"
             variant="outline"
             onClick={() => {
               try {
-                fromCrop();
+                setSuggestions(spriteStationarySuggestions(edit, group!.action.id, baselineId));
+                setNotice(
+                  "Preview fixed-position corrections, then apply to selected frames. Intentional movement is preserved until applied.",
+                );
               } catch (e) {
-                setError(String(e));
+                setError((e as Error).message);
               }
             }}
           >
-            {tr("Apply content region")}
+            {tr("Preview fixed position")}
           </Button>
-        </div>
-        <div
-          className="relative mx-auto max-w-4xl overflow-hidden rounded border bg-muted/30"
-          ref={imageRef}
-          style={{
-            aspectRatio: `${candidate.source.width}/${candidate.source.height}`,
-            backgroundImage: "repeating-conic-gradient(#80808020 0% 25%,transparent 0% 50%)",
-            backgroundSize: "20px 20px",
-          }}
-        >
-          <img
-            draggable={false}
-            src={imageUrl(candidate.source)}
-            alt={tr("Original image with frame boundaries")}
-            className="pointer-events-none absolute inset-0 size-full object-contain"
-          />
-          {slice.rows.flatMap((r, ri) =>
-            r.cells.map((c, i) => (
-              <div
-                key={`${ri}:${i}`}
-                className={`pointer-events-none absolute border ${ri === rowIndex ? "border-primary" : "border-orange-400/70"} ${c.enabled ? "" : "bg-black/20"}`}
-                style={{
-                  left: `${(c.x / candidate.source.width) * 100}%`,
-                  top: `${(c.y / candidate.source.height) * 100}%`,
-                  width: `${(c.width / candidate.source.width) * 100}%`,
-                  height: `${(c.height / candidate.source.height) * 100}%`,
-                }}
-              />
-            )),
+          {!!suggestions.length && (
+            <Button size="sm" onClick={applySuggestion}>
+              {tr("Apply corrections to selected frames")}
+            </Button>
           )}
-          {row.cells.map((c, i) => (
-            <div
-              key={`x:${i}`}
-              role="separator"
-              aria-label={`${tr("Frame boundary")} ${i}`}
-              onPointerDown={(e) => drag(e, "x", i)}
-              className="absolute z-10 w-3 -translate-x-1/2 cursor-col-resize touch-none border-l-2 border-primary"
-              style={{
-                left: `${(c.x / candidate.source.width) * 100}%`,
-                top: `${(c.y / candidate.source.height) * 100}%`,
-                height: `${(c.height / candidate.source.height) * 100}%`,
-              }}
+        </>
+      )}
+      {(candidate.processingVersions?.length ?? 0) > 1 && (
+        <SpriteSelect
+          label={tr("Processing versions")}
+          value={historyId}
+          options={candidate.processingVersions!.map((v, i) => ({
+            value: v.id,
+            label: `v${i + 1} · ${new Date(v.createdAt).toLocaleString()}`,
+          }))}
+          onChange={(id) => {
+            const saved = candidate.processingVersions?.find((v) => v.id === id);
+            if (!saved) return;
+            commit(spriteEditFromSlice(saved.configuration));
+            setHistoryId(id);
+            setNotice(
+              "Historical processing loaded as an editable draft. Saving creates a new version.",
+            );
+          }}
+        />
+      )}
+      <details>
+        <summary className="cursor-pointer text-ui-sm">{tr("Shared canvas and transform")}</summary>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {(["canvasWidth", "canvasHeight", "anchorX", "anchorY"] as const).map((k) => (
+            <SpriteNumberField
+              key={k}
+              label={tr(k)}
+              value={edit.common[k]}
+              min={k.startsWith("canvas") ? 1 : 0}
+              onChange={(v) => commit({ ...edit, common: { ...edit.common, [k]: v } })}
             />
           ))}
-          {slice.rows.map((r, i) => (
-            <div
-              key={`y:${i}`}
-              role="separator"
-              aria-label={`${tr("Row boundary")} ${i}`}
-              onPointerDown={(e) => drag(e, "y", i)}
-              className="absolute z-10 h-3 w-full -translate-y-1/2 cursor-row-resize touch-none border-t-2 border-orange-400"
-              style={{ top: `${(r.cells[0]!.y / candidate.source.height) * 100}%` }}
-            />
-          ))}
-          {(["left", "right", "top", "bottom"] as const).map((side) => (
-            <div
-              key={side}
-              onPointerDown={(e) => drag(e, `crop-${side}`, 0)}
-              className={`absolute z-20 touch-none ${side === "left" || side === "right" ? "h-full w-3 cursor-col-resize border-l-2" : "h-3 w-full cursor-row-resize border-t-2"} border-emerald-500`}
-              style={
-                side === "left"
-                  ? { left: `${(crop.x / candidate.source.width) * 100}%` }
-                  : side === "right"
-                    ? { left: `${((crop.x + crop.width) / candidate.source.width) * 100}%` }
-                    : side === "top"
-                      ? { top: `${(crop.y / candidate.source.height) * 100}%` }
-                      : { top: `${((crop.y + crop.height) / candidate.source.height) * 100}%` }
+          {(["scale", "offsetX", "offsetY"] as const).map((k) => (
+            <SpriteNumberField
+              key={k}
+              label={tr(`Shared ${k}`)}
+              value={edit.common.registration[k]}
+              min={k === "scale" ? 0.01 : -4096}
+              max={k === "scale" ? 16 : 4096}
+              step={k === "scale" ? 0.01 : 1}
+              onChange={(v) =>
+                commit({
+                  ...edit,
+                  common: { ...edit.common, registration: { ...edit.common.registration, [k]: v } },
+                })
               }
             />
           ))}
         </div>
-        <p className="text-xs text-muted-foreground">
-          {tr(
-            "Drag grid boundaries or enter exact original-image coordinates. Green boundaries define the content region.",
-          )}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {numeric(
-            "Rows",
-            slice.rows.length,
-            (n) => {
-              const nextActions = Array.from(
-                { length: n },
-                (_, i) =>
-                  slice.rows[i]?.action ?? {
-                    ...slice.rows[0]!.action,
-                    id: crypto.randomUUID(),
-                    name: `action-${i + 1}`,
-                  },
-              );
-              const rows = spriteGridSlice(
-                candidate.source.width,
-                candidate.source.height,
-                nextActions,
-              ).rows;
-              reset({
-                ...slice,
-                rows,
-                canvasWidth: Math.max(...rows.flatMap((r) => r.cells.map((c) => c.width))),
-                canvasHeight: Math.max(...rows.flatMap((r) => r.cells.map((c) => c.height))),
-                anchorX: 0,
-                anchorY: 0,
-              });
-            },
-            1,
-            32,
-          )}
+      </details>
+    </div>
+  );
+  const captureCanvas = useCallback((canvas: HTMLCanvasElement) => {
+    previewCanvas.current = canvas;
+  }, []);
+  const frameForPreview = playing ? group?.frames[playIndex % group.frames.length] : currentFrame;
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="sprite-repair-editor">
+      <div className="sb-work-header">
+        <div>
+          <h2 className="font-medium">
+            {tr("Repair frames")} · {candidate.source.name}
+          </h2>
+          <p className="text-ui-sm text-muted-foreground">
+            {candidate.source.width}×{candidate.source.height} → {run.context.width}×
+            {run.context.height} · {tr("Changes are saved as a processing version")}
+          </p>
         </div>
-        <div className="flex flex-wrap gap-1">
-          {slice.rows.map((r, i) => (
-            <Button
-              key={r.action.id}
-              size="sm"
-              variant={i === rowIndex ? "default" : "outline"}
-              onClick={() => {
-                setRowIndex(i);
-                setFrame(0);
-              }}
-            >
-              {r.action.name} · {r.cells.filter((c) => c.enabled).length}
-            </Button>
-          ))}
-        </div>
-        <div className="space-y-3 rounded-lg border p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              aria-label={tr("Action name")}
-              className={field}
-              value={row.action.name}
-              onChange={(e) => actionPatch({ name: e.target.value })}
-            />
-            {numeric("FPS", row.action.fps, (n) => actionPatch({ fps: n }), 1, 60)}
-            <label className="text-xs">
-              <input
-                type="checkbox"
-                checked={row.action.loop}
-                onChange={(e) => actionPatch({ loop: e.target.checked })}
-              />{" "}
-              {tr("Loop")}
-            </label>
-            {numeric(
-              "Frames",
-              row.cells.length,
-              (n) => {
-                const left = row.cells[0]!.x,
-                  right = Math.max(...row.cells.map((c) => c.x + c.width)),
-                  xs = spriteBoundaries(right - left, n, left),
-                  base = row.cells[0]!;
-                edit({
-                  ...slice,
-                  rows: slice.rows.map((r, i) =>
-                    i === rowIndex
-                      ? {
-                          ...r,
-                          cells: xs
-                            .slice(0, -1)
-                            .map((x, j) => ({ ...base, x, width: xs[j + 1]! - x, enabled: true })),
-                          action: { ...r.action, frameCount: n },
-                        }
-                      : r,
-                  ),
-                });
-              },
-              1,
-              32,
+        <Button size="sm" variant="ghost" onClick={() => (dirty ? setLeave(true) : onBack())}>
+          {tr("Return to candidate review")}
+        </Button>
+      </div>
+      <div className="sb-toolbar border-b" role="tablist" aria-label={tr("Repair frames")}>
+        {(["slice", "groups", "align"] as const).map((value) => (
+          <Button
+            key={value}
+            role="tab"
+            aria-selected={tab === value}
+            variant={tab === value ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => {
+              setTab(value);
+              setPlaying(false);
+            }}
+          >
+            {tr(
+              value === "slice" ? "Slicing" : value === "groups" ? "Action grouping" : "Alignment",
             )}
-            {numeric(
-              "Row top",
-              row.cells[0]!.y,
-              (n) =>
-                edit({
-                  ...slice,
-                  rows: slice.rows.map((r, i) =>
-                    i === rowIndex ? { ...r, cells: r.cells.map((c) => ({ ...c, y: n })) } : r,
-                  ),
-                }),
-              0,
-              candidate.source.height - 1,
-            )}
-            {numeric(
-              "Row height",
-              row.cells[0]!.height,
-              (n) =>
-                edit({
-                  ...slice,
-                  rows: slice.rows.map((r, i) =>
-                    i === rowIndex ? { ...r, cells: r.cells.map((c) => ({ ...c, height: n })) } : r,
-                  ),
-                }),
-              1,
-              candidate.source.height,
-            )}
-          </div>
-          <div className="max-h-72 space-y-2 overflow-auto">
-            {row.cells.map((c, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2 rounded border p-2 text-xs">
-                <label>
-                  <input
-                    aria-label={`${tr("Keep frame")} ${i + 1}`}
-                    type="checkbox"
-                    checked={c.enabled}
-                    onChange={(e) => cellPatch(i, { enabled: e.target.checked })}
-                  />{" "}
-                  {tr("Frame")} {i + 1}
-                </label>
-                {numeric(
-                  `X ${i + 1}`,
-                  c.x,
-                  (n) => cellPatch(i, { x: n }),
-                  0,
-                  candidate.source.width,
-                )}
-                {numeric(
-                  `Y ${i + 1}`,
-                  c.y,
-                  (n) => cellPatch(i, { y: n }),
-                  0,
-                  candidate.source.height,
-                )}
-                {numeric(
-                  `Width ${i + 1}`,
-                  c.width,
-                  (n) => cellPatch(i, { width: n }),
-                  1,
-                  candidate.source.width,
-                )}
-                {numeric(
-                  `Height ${i + 1}`,
-                  c.height,
-                  (n) => cellPatch(i, { height: n }),
-                  1,
-                  candidate.source.height,
-                )}
-                {[-1, 1].map((direction) => (
-                  <Button
-                    key={direction}
-                    size="sm"
-                    variant="ghost"
-                    disabled={i + direction < 0 || i + direction >= row.cells.length}
-                    onClick={() => {
-                      const cells = [...row.cells];
-                      [cells[i], cells[i + direction]] = [cells[i + direction]!, cells[i]!];
-                      edit({
-                        ...slice,
-                        rows: slice.rows.map((r, ri) => (ri === rowIndex ? { ...r, cells } : r)),
-                      });
-                    }}
-                  >
-                    {tr(direction < 0 ? "Move earlier" : "Move later")}
-                  </Button>
-                ))}
-              </div>
-            ))}
-          </div>
-          <label className="flex items-start gap-2 rounded bg-muted/30 p-2 text-xs">
-            <input
-              type="checkbox"
-              checked={slice.reviewedActionIds.includes(row.action.id)}
-              onChange={(e) => {
-                setSlice({
-                  ...slice,
-                  reviewedActionIds: e.target.checked
-                    ? [...slice.reviewedActionIds, row.action.id]
-                    : slice.reviewedActionIds.filter((id) => id !== row.action.id),
-                });
-                setDirty(true);
-              }}
-            />
-            {tr("I checked this action's actual frame count, empty positions and boundaries.")}
-          </label>
-        </div>
-        <div className="flex flex-wrap gap-3 rounded-lg border p-3">
-          {numeric(
-            "Shared canvas width",
-            slice.canvasWidth,
-            (n) => edit({ ...slice, canvasWidth: n }),
-            1,
-          )}
-          {numeric(
-            "Shared canvas height",
-            slice.canvasHeight,
-            (n) => edit({ ...slice, canvasHeight: n }),
-            1,
-          )}
-          {numeric("Shared anchor X", slice.anchorX, (n) => edit({ ...slice, anchorX: n }))}
-          {numeric("Shared anchor Y", slice.anchorY, (n) => edit({ ...slice, anchorY: n }))}
+          </Button>
+        ))}
+        <Button size="sm" variant="ghost" disabled={!past.length || busy} onClick={undo}>
+          {tr("Undo")}
+        </Button>
+        <Button size="sm" variant="ghost" disabled={!future.length || busy} onClick={redo}>
+          {tr("Redo")}
+        </Button>
+      </div>
+      {version !== (candidate.version ?? 0) && (
+        <Alert size="sm" variant="warning">
+          {tr("The source processing version changed. Your draft is preserved.")}
           <Button
             size="sm"
-            variant="outline"
-            onClick={() =>
-              edit({
-                ...slice,
-                canvasWidth: Math.max(...slice.rows.flatMap((r) => r.cells.map((c) => c.width))),
-                canvasHeight: Math.max(...slice.rows.flatMap((r) => r.cells.map((c) => c.height))),
-                anchorX: 0,
-                anchorY: 0,
-              })
-            }
+            variant="ghost"
+            onClick={() => {
+              setEdit(restore());
+              setVersion(candidate.version ?? 0);
+              setDirty(false);
+              setPast([]);
+              setFuture([]);
+            }}
           >
-            {tr("Fit shared canvas to regions")}
+            {tr("Reload saved version")}
           </Button>
-        </div>
-        {previewFrame && (
-          <div className="rounded-lg border p-3">
-            <img
-              src={imageUrl(previewFrame)}
-              alt={row.action.name}
-              className="mx-auto h-48 object-contain [image-rendering:pixelated]"
-            />
-            <input
-              aria-label={tr("Preview frame")}
-              type="range"
-              min={0}
-              max={(currentPreview?.frames.length ?? 1) - 1}
-              value={frame}
-              onChange={(e) => setFrame(Number(e.target.value))}
-            />
-            <span className="text-xs">
-              {frame + 1}/{currentPreview?.frames.length}
-            </span>
+          <Button size="sm" variant="outline" onClick={() => void perform("fork-slicing")}>
+            {tr("Save as processing branch")}
+          </Button>
+        </Alert>
+      )}
+      {error && (
+        <Alert variant="error" size="sm">
+          {tr(error)}
+        </Alert>
+      )}
+      {notice && (
+        <p role="status" className="px-3 py-1 text-ui-sm text-muted-foreground">
+          {tr(notice)}
+        </p>
+      )}
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-auto">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 p-3">
+          <div className="flex flex-wrap gap-1">
+            {edit.actions.map((g) => (
+              <Button
+                key={g.action.id}
+                size="sm"
+                variant={g === group ? "secondary" : "ghost"}
+                onClick={() => {
+                  setActionId(g.action.id);
+                  setSelected(g.frames[0] ? [g.frames[0].id] : []);
+                  setCellId(g.frames[0]?.cellId ?? cellId);
+                  setPlaying(false);
+                }}
+              >
+                {g.action.name} · {g.frames.length}
+              </Button>
+            ))}
           </div>
-        )}
-        {!!candidate.processingVersions?.length && (
-          <details className="rounded border p-3 text-xs">
-            <summary>{tr("Processing history")}</summary>
-            {candidate.processingVersions.map((v) => (
-              <div key={v.id} className="my-2 flex items-center justify-between">
-                <span>
-                  {new Date(v.createdAt).toLocaleString()} · {v.frames.length} {tr("frames")}
-                </span>
+          <div ref={canvasHost} className="min-h-16 min-w-0 flex-1 overflow-auto">
+            {tab === "slice" || tab === "groups" ? (
+              <div
+                ref={sourceRef}
+                className="relative mx-auto w-full touch-none border bg-muted/30"
+                style={{
+                  aspectRatio: `${candidate.source.width}/${candidate.source.height}`,
+                  maxWidth: Math.min(
+                    640,
+                    (Math.max(128, canvasHeight) * candidate.source.width) /
+                      candidate.source.height,
+                  ),
+                }}
+                onPointerDown={pointerDown}
+                onPointerUp={pointerUp}
+                onPointerCancel={() => {
+                  drag.current = null;
+                }}
+                {...spriteImageInput((files) => setReplacement(files))}
+              >
+                <img
+                  src={imageUrl(candidate.source)}
+                  alt={tr("Source image")}
+                  className="pointer-events-none h-full w-full object-fill"
+                  draggable={false}
+                />
+                {edit.cells.map((c, i) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    aria-label={`${tr("Source cell")} ${i + 1}`}
+                    aria-pressed={
+                      tab === "groups" ? selectedCells.includes(c.id) : c.id === cell?.id
+                    }
+                    className={`absolute border ${c.id === cell?.id || selectedCells.includes(c.id) ? "border-primary bg-primary/15" : "border-muted-foreground/50"} text-left text-ui-sm text-foreground`}
+                    style={{
+                      left: `${(c.x / candidate.source.width) * 100}%`,
+                      top: `${(c.y / candidate.source.height) * 100}%`,
+                      width: `${(c.width / candidate.source.width) * 100}%`,
+                      height: `${(c.height / candidate.source.height) * 100}%`,
+                    }}
+                    data-cell-id={c.id}
+                    data-handle={tab === "slice" ? "move" : undefined}
+                    onClick={(e) => {
+                      setCellId(c.id);
+                      if (tab === "groups")
+                        setSelectedCells((p) =>
+                          e.metaKey || e.ctrlKey || e.shiftKey
+                            ? p.includes(c.id)
+                              ? p.filter((id) => id !== c.id)
+                              : [...p, c.id]
+                            : [c.id],
+                        );
+                      const f = group?.frames.find((f) => f.cellId === c.id);
+                      if (f) setSelected([f.id]);
+                    }}
+                  >
+                    <span className="pointer-events-none bg-background/80 px-1">
+                      {group?.frames
+                        .flatMap((f, j) => (f.cellId === c.id ? [j + 1] : []))
+                        .join(",") || "–"}
+                    </span>
+                  </button>
+                ))}
+                {tab === "slice" &&
+                  cell &&
+                  (["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const).map((handle) => (
+                    <div
+                      key={handle}
+                      data-handle={handle}
+                      className="absolute size-3 -translate-1/2 border border-primary bg-background"
+                      style={{
+                        left: `${((cell.x + (handle.includes("w") ? 0 : handle.includes("e") ? cell.width : cell.width / 2)) / candidate.source.width) * 100}%`,
+                        top: `${((cell.y + (handle.includes("n") ? 0 : handle.includes("s") ? cell.height : cell.height / 2)) / candidate.source.height) * 100}%`,
+                        cursor: `${handle}-resize`,
+                      }}
+                    />
+                  ))}
+              </div>
+            ) : (
+              <SpriteRepairPreview
+                run={run}
+                edit={edit}
+                frame={frameForPreview}
+                maxHeight={canvasHeight}
+                onion={
+                  onion
+                    ? group?.frames[
+                        Math.max(0, group.frames.findIndex((f) => f.id === frameForPreview?.id) - 1)
+                      ]
+                    : undefined
+                }
+                baseline={group?.frames.find(
+                  (f) => f.id === baselineId && f.id !== frameForPreview?.id,
+                )}
+                reference={reference}
+                anchorMode={anchorMode}
+                offset={suggestions.find((s) => s.id === frameForPreview?.id)}
+                onCanvas={captureCanvas}
+                processedAsset={
+                  processedPreview?.actions
+                    .flatMap((o) =>
+                      o.frames.map((asset, i) => ({ asset, id: o.frameMetadata?.[i]?.id })),
+                    )
+                    .find((f) => f.id === frameForPreview?.id)?.asset
+                }
+                onMove={(x, y) => {
+                  setPlaying(false);
+                  shift(x, y);
+                }}
+                onAnchor={(x, y) => {
+                  if (!currentFrame) return;
+                  commit({
+                    ...edit,
+                    actions: edit.actions.map((g) => ({
+                      ...g,
+                      frames: g.frames.map((f) =>
+                        f.id === currentFrame.id ? { ...f, anchor: { x, y, confirmed: true } } : f,
+                      ),
+                    })),
+                  });
+                  setAnchorMode(false);
+                }}
+              />
+            )}
+          </div>
+          {tab === "groups" && (
+            <div className="space-y-3">
+              <SpriteSelect
+                label={tr("Organize actions")}
+                value={groupPreset}
+                options={[
+                  { value: "all", label: tr("All valid cells as one action") },
+                  { value: "rows", label: tr("One action per row") },
+                  { value: "columns", label: tr("One action per column") },
+                ]}
+                onChange={setGroupPreset}
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={regroup}>
+                  {tr("Apply grouping")}
+                </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={busy || v.id === candidate.processingVersionId}
-                  onClick={() => void perform("restore-slicing", v.id)}
+                  disabled={!selectedCells.length}
+                  onClick={() => addCells(false)}
                 >
-                  {tr("Restore this slicing")}
+                  {tr("Add selected cells to action")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!selectedCells.length}
+                  onClick={() => addCells(true)}
+                >
+                  {tr("Create action from selected cells")}
                 </Button>
               </div>
-            ))}
-          </details>
-        )}
-        {error && (
-          <p role="alert" className="text-xs text-destructive">
-            {tr(error)}{" "}
+              <p className="text-ui-sm text-muted-foreground">
+                {tr(
+                  "Cells can be reused across actions. Each addition creates independent frames.",
+                )}
+              </p>
+            </div>
+          )}
+          <div className="shrink-0 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setTab("align");
+                setPlayIndex(group?.frames.findIndex((f) => f.id === currentFrame?.id) ?? 0);
+                setPlaying(!playing);
+              }}
+            >
+              {tr(playing ? "Pause" : "Play")}
+            </Button>
             <Button
               size="sm"
               variant="ghost"
+              onClick={() => setSelected(group?.frames.map((f) => f.id) ?? [])}
+            >
+              {tr("Select all frames")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!selected.length}
+              onClick={() => reorder(-1)}
+            >
+              {tr("Move earlier")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!selected.length}
+              onClick={() => reorder(1)}
+            >
+              {tr("Move later")}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={!selected.length} onClick={duplicate}>
+              {tr("Duplicate frames")}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={!selected.length} onClick={remove}>
+              {tr("Remove frames")}
+            </Button>
+          </div>
+          <div
+            className="flex shrink-0 gap-2 overflow-x-auto pb-2"
+            aria-label={tr("Action frames")}
+          >
+            {group?.frames.map((f, i) => {
+              const c = edit.cells.find((c) => c.id === f.cellId);
+              return (
+                <button
+                  key={f.id}
+                  className={`w-20 shrink-0 rounded border p-1 text-ui-sm ${selected.includes(f.id) ? "border-primary bg-primary/10" : "border-border"}`}
+                  aria-label={`${tr("Frame")} ${i + 1}`}
+                  aria-pressed={selected.includes(f.id)}
+                  onClick={(e) => changeSelection(f, e.metaKey || e.ctrlKey || e.shiftKey)}
+                >
+                  {c && (
+                    <svg viewBox={`${c.x} ${c.y} ${c.width} ${c.height}`} className="h-14 w-full">
+                      <image
+                        href={imageUrl(candidate.source)}
+                        width={candidate.source.width}
+                        height={candidate.source.height}
+                      />
+                    </svg>
+                  )}
+                  <span>
+                    {i + 1} · {Math.round(f.durationMs ?? 1000 / (group.action.fps || 12))}ms
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {!inspectorHost && <div className="min-h-32 overflow-auto">{properties}</div>}
+        </div>
+      </div>
+      {inspectorHost && createPortal(properties, inspectorHost)}
+      {footerHost &&
+        createPortal(
+          <Button className="w-full" disabled={busy} onClick={() => void perform("save-slicing")}>
+            {tr("Save corrections and return to review")}
+          </Button>,
+          footerHost,
+        )}
+      <div className="sb-work-footer flex-wrap shrink-0 border-t">
+        <input
+          ref={replaceInput}
+          hidden
+          type="file"
+          accept="image/*"
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            e.target.value = "";
+            if (files.length) setReplacement(files);
+          }}
+        />
+        {onReplaceSource && (
+          <Button variant="ghost" size="sm" onClick={() => replaceInput.current?.click()}>
+            {tr("Replace source image")}
+          </Button>
+        )}
+        <span className="mr-auto text-ui-sm text-muted-foreground">
+          {dirty ? tr("Unsaved corrections") : tr("Saved processing version")}
+        </span>
+        <Button variant="outline" disabled={busy} onClick={() => void perform("preview-slicing")}>
+          {tr("Validate processing")}
+        </Button>
+        {!footerHost && (
+          <Button disabled={busy} onClick={() => void perform("save-slicing")}>
+            {tr("Save corrections and return to review")}
+          </Button>
+        )}
+      </div>
+      <Dialog
+        open={!!pending}
+        onOpenChange={(open) => {
+          if (!open) setPending(null);
+        }}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>{tr("Confirm frame mapping changes")}</DialogTitle>
+          </DialogHeader>
+          <DialogPanel>{tr(pending?.message ?? "")}</DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPending(null)}>
+              {tr("Cancel")}
+            </Button>
+            <Button
               onClick={() => {
-                setBusy(true);
-                void drawingApi()
-                  .spriteCommand({ operation: "get", projectId: run.context.projectId })
-                  .then((state) => {
-                    onState(state);
-                    const latest = state.runs.find((r) => r.id === run.id);
-                    if (latest) {
-                      const loaded = spriteCandidate(latest);
-                      const configuration = loaded?.slice ?? grid();
-                      setSlice(configuration);
-                      setCrop(contentRegion(configuration));
-                      setEditVersion(loaded?.version ?? 0);
-                      setRowIndex(0);
-                      setFrame(0);
-                      setPreview(null);
-                      setDirty(false);
-                      setError("");
-                    }
-                  })
-                  .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-                  .finally(() => setBusy(false));
+                if (pending) commit(pending.edit);
+                setPending(null);
               }}
             >
-              {tr("Reload candidate")}
+              {tr("Apply changes")}
             </Button>
-          </p>
-        )}
-        {notice && (
-          <p role="status" className="text-xs text-primary">
-            {notice}
-          </p>
-        )}
-        <footer className="sticky bottom-0 flex flex-wrap justify-end gap-2 rounded-lg border bg-[var(--color-background-elevated-primary)] p-3">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => void perform("preview-slicing")}
-          >
-            {tr("Preview slicing")}
-          </Button>
-          <Button size="sm" disabled={busy || !dirty} onClick={() => void perform("save-slicing")}>
-            {tr("Save slicing correction")}
-          </Button>
-        </footer>
-      </fieldset>
-    </section>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+      <Dialog open={leave} onOpenChange={setLeave}>
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>{tr("Keep unsaved corrections?")}</DialogTitle>
+          </DialogHeader>
+          <DialogPanel>
+            {tr(
+              "Your repair draft is saved locally and can be resumed. No candidate has been adopted.",
+            )}
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLeave(false)}>
+              {tr("Continue editing")}
+            </Button>
+            <Button
+              onClick={() => {
+                setLeave(false);
+                onBack();
+              }}
+            >
+              {tr("Keep draft and return")}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+      <Dialog
+        open={!!replacement}
+        onOpenChange={(open) => {
+          if (!open) setReplacement(null);
+        }}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>{tr("Replace source image")}</DialogTitle>
+          </DialogHeader>
+          <DialogPanel>
+            {tr(
+              "Your current corrections remain in this source draft. The replacement opens a separate processing branch.",
+            )}
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReplacement(null)}>
+              {tr("Cancel")}
+            </Button>
+            <Button
+              onClick={() => {
+                if (replacement && onReplaceSource)
+                  void onReplaceSource(replacement).catch((e) => setError((e as Error).message));
+                setReplacement(null);
+              }}
+            >
+              {tr("Keep draft and replace")}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+    </div>
   );
 }

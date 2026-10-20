@@ -59,5 +59,10 @@ export * from "./imageGeneration";
 
 export * from "./spriteAnimation";
 export * from "./spritePlan";
+export * from "./spriteWorkflow";
 
 export * from "./spriteProcessing";
+
+export * from "./spriteSizing";
+
+export * from "./spriteEdit";

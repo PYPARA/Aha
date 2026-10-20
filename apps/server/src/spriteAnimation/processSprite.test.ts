@@ -46,7 +46,11 @@ describe("sprite deterministic processing", () => {
     )
       .png()
       .toBuffer();
-    const result = await processSprite(bytes, { ...testContext, frameCount: 1 });
+    const result = await processSprite(bytes, {
+      ...testContext,
+      frameCount: 1,
+      background: "transparent",
+    });
     const raw = await sharp(result.frames[0]).raw().toBuffer();
     expect(raw[(5 * 16 + 5) * 4 + 1]).toBe(255);
     expect(raw[(5 * 16 + 5) * 4 + 3]).toBeGreaterThan(120);

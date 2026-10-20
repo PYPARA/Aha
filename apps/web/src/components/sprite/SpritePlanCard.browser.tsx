@@ -3,7 +3,7 @@ import { previewAhaThemeState } from "~/hooks/useTheme";
 import { DEFAULT_THEME_STATE, serializeThemeState } from "~/theme/theme.logic";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { cleanup, render } from "vitest-browser-react";
 import type {
   SpriteState,
@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   state: { context: null, runs: [], plans: [] } as SpriteState,
   command: vi.fn(),
   confirm: vi.fn(),
+  retry: vi.fn(),
   navigate: vi.fn(),
   upload: vi.fn(),
 }));
@@ -38,6 +39,7 @@ vi.mock("../drawing/useDrawing", () => ({
   drawingApi: () => ({
     spriteCommand: mocks.command,
     spriteConfirm: mocks.confirm,
+    spriteRetryConfirm: mocks.retry,
     onEvent: () => () => {},
   }),
   uploadDrawingImage: mocks.upload,
@@ -98,7 +100,7 @@ function initialPlan(): SpriteGenerationPlan {
 }
 beforeEach(async () => {
   vi.clearAllMocks();
-  localStorage.removeItem("aha-sprite-plan-collapsed:plan");
+  localStorage.clear();
   sessionStorage.removeItem("aha-sprite-plan-focus");
   await page.viewport(820, 1200);
   mocks.state = { context: null, runs: [], plans: [initialPlan()] };
@@ -125,6 +127,7 @@ afterEach(async () => {
   previewAhaThemeState(serializeThemeState({ ...DEFAULT_THEME_STATE, mode: "light" }));
 });
 async function mount() {
+  const expandByDefault = localStorage.getItem("aha-sprite-plan-collapsed:plan") === null;
   const host = document.createElement("div");
   host.dataset.planTest = "true";
   host.style.cssText = "max-width:720px;margin:24px auto;padding:0 16px;";
@@ -137,7 +140,11 @@ async function mount() {
     </QueryClientProvider>,
     { container: host },
   );
-  await expect.element(page.getByRole("heading", { name: "Sprite generation plan" })).toBeVisible();
+  await expect
+    .element(page.getByRole("heading", { name: /^(Action|Character) generation$/ }))
+    .toBeVisible();
+  if (expandByDefault && mocks.state.plans![0]!.status === "draft")
+    await page.getByRole("button", { name: "Modify parameters", exact: true }).click();
   return host;
 }
 it("shows an editable multi-action plan and submits only the saved version", async () => {
@@ -147,11 +154,10 @@ it("shows an editable multi-action plan and submits only the saved version", asy
     .element(page.getByText("1 image tasks · 3 actions · 26 frames", { exact: true }))
     .toBeVisible();
   await page.getByRole("spinbutton", { name: "Frames 1" }).fill("10");
+  await userEvent.keyboard("{Enter}");
   await expect.poll(() => mocks.state.plans![0]!.configuration.actions[0]!.frameCount).toBe(10);
-  await expect
-    .element(page.getByRole("button", { name: "Confirm and generate · 1" }))
-    .toBeEnabled();
-  await page.getByRole("button", { name: "Confirm and generate · 1" }).click();
+  await expect.element(page.getByRole("button", { name: "Start generation · 1" })).toBeEnabled();
+  await page.getByRole("button", { name: "Start generation · 1" }).click();
   expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith({
     projectId: "project",
     planId: "plan",
@@ -164,20 +170,31 @@ it("shows an editable multi-action plan and submits only the saved version", asy
 });
 it("changes generation mode and blocks animation without a character reference", async () => {
   await mount();
-  await page.getByRole("combobox", { name: "Generation mode" }).selectOptions("separate");
+  await page.getByRole("combobox", { name: "Generation mode" }).click();
+  await page.getByRole("option", { name: "One image per action", exact: true }).click();
   await expect
     .element(page.getByText("3 image tasks · 3 actions · 26 frames", { exact: true }))
     .toBeVisible();
-  await expect
-    .element(page.getByRole("button", { name: "Confirm and generate · 3" }))
-    .toBeEnabled();
+  await expect.element(page.getByRole("button", { name: "Start generation · 3" })).toBeEnabled();
   await page.getByRole("button", { name: "Remove reference fox.png" }).click();
   await expect
     .element(page.getByText("Add a reference image before generating animation.", { exact: true }))
     .toBeVisible();
-  await expect
-    .element(page.getByRole("button", { name: "Confirm and generate · 3" }))
-    .toBeDisabled();
+  await expect.element(page.getByRole("button", { name: "Start generation · 3" })).toBeDisabled();
+  expect(mocks.confirm).not.toHaveBeenCalled();
+});
+it("sends the chosen 512 request dimensions without increasing the output frame or hiding other request parameters", async () => {
+  await mount();
+  await page.getByText("Drawing settings", { exact: true }).click();
+  await page.getByRole("button", { name: "Size", exact: true }).click();
+  await page.getByRole("button", { name: "512×512", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect.poll(() => mocks.state.plans![0]!.configuration.parameters.size).toBe("512x512");
+  expect(mocks.state.plans![0]!.configuration.width).toBe(256);
+  await page.getByRole("combobox", { name: "Quality", exact: true }).click();
+  await page.getByRole("option", { name: "high", exact: true }).click();
+  await expect.poll(() => mocks.state.plans![0]!.configuration.parameters.quality).toBe("high");
+  expect(mocks.state.plans![0]!.configuration.parameters.size).toBe("512x512");
   expect(mocks.confirm).not.toHaveBeenCalled();
 });
 it("keeps conflicting edits visible and requires reload before confirming", async () => {
@@ -188,6 +205,7 @@ it("keeps conflicting edits visible and requires reload before confirming", asyn
     return structuredClone(mocks.state);
   });
   await page.getByRole("spinbutton", { name: "Frames 1" }).fill("10");
+  await userEvent.keyboard("{Enter}");
   await expect
     .element(
       page.getByText("Plan changed. Refresh before editing or confirming.", { exact: false }),
@@ -195,7 +213,7 @@ it("keeps conflicting edits visible and requires reload before confirming", asyn
     .toBeVisible();
   await expect.element(page.getByRole("button", { name: "Saving…" })).toBeDisabled();
   await page.getByRole("button", { name: "Reload plan" }).click();
-  await expect.element(page.getByRole("spinbutton", { name: "Frames 1" })).toHaveValue(8);
+  await expect.element(page.getByRole("spinbutton", { name: "Frames 1" })).toHaveValue("8");
 });
 it("fits narrow chat widths and uses project styling in light and dark themes", async () => {
   await page.viewport(430, 1600);
@@ -300,11 +318,11 @@ it.each([false, true])(
     );
     const screen = await render(view(true), { container: host });
     await expect
-      .element(page.getByRole("heading", { name: "Sprite generation plan" }))
+      .element(page.getByRole("heading", { name: /^(Action|Character) generation$/ }))
       .toBeVisible();
     await screen.rerender(view(false));
     await expect
-      .element(page.getByRole("heading", { name: "Sprite generation plan" }))
+      .element(page.getByRole("heading", { name: /^(Action|Character) generation$/ }))
       .toBeVisible();
     expect(host.querySelectorAll('section[aria-label="Sprite generation plan"]')).toHaveLength(1);
     const answer = host.querySelector('[data-message-id="answer"]')!;
@@ -312,19 +330,21 @@ it.each([false, true])(
     expect(
       answer.compareDocumentPosition(planCard) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    await page.getByRole("combobox", { name: "Generation mode" }).selectOptions("separate");
+    await page.getByRole("button", { name: "Modify parameters", exact: true }).click();
+    await page.getByRole("combobox", { name: "Generation mode" }).click();
+    await page.getByRole("option", { name: "One image per action", exact: true }).click();
     await expect.poll(() => mocks.state.plans![0]!.version).toBe(2);
     await expect
-      .element(page.getByRole("heading", { name: "Sprite generation plan" }))
+      .element(page.getByRole("heading", { name: /^(Action|Character) generation$/ }))
       .toBeVisible();
     await screen.rerender(<div />);
     await screen.rerender(view(false));
     await expect
-      .element(page.getByRole("heading", { name: "Sprite generation plan" }))
+      .element(page.getByRole("heading", { name: /^(Action|Character) generation$/ }))
       .toBeVisible();
     await expect
       .element(page.getByRole("combobox", { name: "Generation mode" }))
-      .toHaveValue("separate");
+      .toHaveTextContent("One image per action");
     await page.screenshot({
       path: `../../../node_modules/.cache/aha-sprite-plan-after-reply-${conversationOnly}.png`,
     });
@@ -334,14 +354,15 @@ it.each([false, true])(
 it("saves edits while collapsed and restores the local disclosure preference after reopening", async () => {
   await mount();
   await page.getByRole("spinbutton", { name: "Frames 1" }).fill("10");
+  await userEvent.keyboard("{Enter}");
   await page.getByRole("button", { name: "Collapse plan" }).click();
   await expect.poll(() => mocks.state.plans![0]!.configuration.actions[0]!.frameCount).toBe(10);
-  await expect.element(page.getByRole("button", { name: "Expand to edit" })).toBeVisible();
+  await expect.element(page.getByRole("button", { name: "Modify parameters" })).toBeVisible();
   await cleanup();
   await mount();
-  await expect.element(page.getByRole("button", { name: "Expand to edit" })).toBeVisible();
-  await page.getByRole("button", { name: "Expand to edit" }).click();
-  await expect.element(page.getByRole("spinbutton", { name: "Frames 1" })).toHaveValue(10);
+  await expect.element(page.getByRole("button", { name: "Modify parameters" })).toBeVisible();
+  await page.getByRole("button", { name: "Modify parameters" }).click();
+  await expect.element(page.getByRole("spinbutton", { name: "Frames 1" })).toHaveValue("10");
   expect(mocks.confirm).not.toHaveBeenCalled();
 });
 it("restores a single prompt from legacy text and edits drawing background without losing content", async () => {
@@ -370,7 +391,8 @@ it("restores a single prompt from legacy text and edits drawing background witho
     .fill("A fox wearing a green coat, pixel art, side view");
   await expect.poll(() => mocks.state.plans![0]!.configuration.prompt).toContain("green coat");
   await page.getByText("Drawing settings", { exact: true }).click();
-  await page.getByRole("combobox", { name: "Generated background" }).selectOptions("chroma");
+  await page.getByRole("combobox", { name: "Generated background" }).click();
+  await page.getByRole("option", { name: "Chroma background", exact: true }).click();
   await expect.poll(() => mocks.state.plans![0]!.configuration.background).toBe("chroma");
   expect(mocks.state.plans![0]!.configuration.creative).toBeUndefined();
   expect(mocks.confirm).not.toHaveBeenCalled();
@@ -383,9 +405,17 @@ it("registers pasted references in the conversation and saves them without gener
     name: "pasted.png",
   });
   await mount();
-  const zone = document.querySelector<HTMLElement>('[data-sprite-plan-id="plan"] [tabindex="0"]')!;
+  const zone = document.querySelector<HTMLElement>(
+    '[data-sprite-plan-id="plan"] [data-sprite-reference-drop]',
+  )!;
   const data = new DataTransfer();
-  data.items.add(new File([new Uint8Array([1])], "pasted.png", { type: "image/png" }));
+  const canvas = document.createElement("canvas");
+  canvas.width = 8;
+  canvas.height = 8;
+  const blob = await new Promise<Blob>((resolve) =>
+    canvas.toBlob((value) => resolve(value!), "image/png"),
+  );
+  data.items.add(new File([blob], "pasted.png", { type: "image/png" }));
   zone.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }));
   await expect.poll(() => mocks.state.plans![0]!.configuration.references.length).toBe(2);
   expect(
@@ -408,3 +438,60 @@ it("uses the current skin palette without losing contrast in a narrow card", asy
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   await page.screenshot({ path: "../../../node_modules/.cache/aha-sprite-plan-current-skin.png" });
 });
+
+it.each([true, false])(
+  "offers original-parameter retry when the confirmed plan is collapsed=%s",
+  async (collapsed) => {
+    const plan = { ...initialPlan(), status: "confirmed" as const };
+    const config = plan.configuration;
+    const run: import("@synara/contracts").SpriteRun = {
+      id: "failed",
+      planId: plan.id,
+      planVersion: plan.version,
+      configuration: config,
+      input: { kind: config.kind, prompt: config.prompt, requestId: "original" },
+      context: {
+        projectId: "project",
+        threadId: "thread",
+        name: "Fox",
+        providerId: config.providerId,
+        model: config.model,
+        referenceAssetId: null,
+        action: "idle",
+        frameCount: 8,
+        fps: 12,
+        width: 256,
+        height: 256,
+        background: "transparent",
+        chromaKey: "#00ff00",
+      },
+      status: "failed",
+      jobId: "job",
+      source: null,
+      frames: [],
+      warnings: [],
+      error: "Image provider returned invalid JSON (524).",
+      createdAt: plan.createdAt,
+    };
+    mocks.state = { context: null, plans: [plan], runs: [run] };
+    localStorage.setItem("aha-sprite-plan-collapsed:plan", String(collapsed));
+    mocks.retry.mockImplementation(async () => {
+      mocks.state = {
+        ...mocks.state,
+        runs: [run, { ...run, id: "retry", retryOfRunId: run.id, status: "running", error: null }],
+      };
+      return structuredClone(mocks.state);
+    });
+    await mount();
+    await page.getByRole("button", { name: "Retry failed tasks", exact: true }).click();
+    expect(mocks.retry).not.toHaveBeenCalled();
+    await page
+      .getByRole("button", { name: "Retry with original settings (1)", exact: true })
+      .click();
+    expect(mocks.retry).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "project", threadId: "thread", runIds: ["failed"] }),
+    );
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.command.mock.calls.every(([input]) => input.operation === "get")).toBe(true);
+  },
+);

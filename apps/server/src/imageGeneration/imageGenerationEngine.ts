@@ -43,6 +43,8 @@ const secretName = (id: string) => `image-provider-${id}-key`;
 export class ImageGenerationEngine {
   /** Assets retained by persistent sprite generation records. */
   readonly spriteAssetIds = new Set<string>();
+  /** Unknown sprite records can contain references we cannot safely enumerate. */
+  spriteRecoveryProjects = new Set<string>();
   readonly assets: ImageAssetStore;
   private tail: Promise<unknown> = Promise.resolve();
   private active = new Map<
@@ -141,6 +143,7 @@ export class ImageGenerationEngine {
           return {
             id: m.id,
             source: m.source,
+            spriteCapabilities: m.spriteCapabilities,
             lastTestAt: old?.lastTestAt ?? null,
             lastTestStatus: old?.lastTestStatus ?? null,
           };
@@ -592,7 +595,7 @@ export class ImageGenerationEngine {
           ...p,
           models: p.models.map((m) =>
             m.id === job.model
-              ? { id: m.id, source: m.source, lastTestAt: now(), lastTestStatus: job.status }
+              ? Object.assign({}, m, { lastTestAt: now(), lastTestStatus: job.status })
               : m,
           ),
         }),
@@ -620,7 +623,11 @@ export class ImageGenerationEngine {
         [...job.inputs, ...job.outputs, ...(job.mask ? [job.mask] : [])].map((a) => a.id),
       );
       for (const asset of await Effect.runPromise(this.repository.unusedAssets(now())))
-        if (candidates.has(asset.id) && !this.spriteAssetIds.has(asset.id))
+        if (
+          !this.spriteRecoveryProjects.size &&
+          candidates.has(asset.id) &&
+          !this.spriteAssetIds.has(asset.id)
+        )
           await this.assets.remove(asset.id);
     });
   }
@@ -638,6 +645,7 @@ export class ImageGenerationEngine {
   }
   async cleanup(_immediate: boolean) {
     await this.locked(async () => {
+      if (this.spriteRecoveryProjects.size) return;
       const before = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       for (const doc of await Effect.runPromise(this.repository.unusedDocuments(before)))
         await Effect.runPromise(this.repository.deleteDocument(doc.id));

@@ -283,7 +283,11 @@ export function SpriteFramePicker({
               }
             }}
           >
-            <FrameThumbnail source={project.sources.find((s) => s.id === f.sourceId)!} frame={f} />
+            <FrameThumbnail
+              pixelated={project.renderSpec?.mode !== "illustration"}
+              source={project.sources.find((s) => s.id === f.sourceId)!}
+              frame={f}
+            />
             <span>{i + 1}</span>
             <span>
               {f.width}×{f.height}

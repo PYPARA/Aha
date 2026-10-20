@@ -85,10 +85,13 @@ describe("layout inspection and corrected slicing", () => {
     expect(
       spriteBlockedActions({
         id: "source",
-        source: {} as never,
+        source: { width: 1312, height: 1199 } as never,
         status: "ready",
         frames: [],
-        actions: processed.actions.map((a) => ({ ...a, frames: [] })),
+        actions: processed.actions.map((a) => ({
+          ...a,
+          frames: a.frames.map(() => ({ id: "frame" }) as never),
+        })),
         warnings: [],
         error: null,
         slice: corrected,

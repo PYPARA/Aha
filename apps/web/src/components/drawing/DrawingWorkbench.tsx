@@ -1,4 +1,5 @@
-import { useResourceAttachments } from "../resources/resourceLibrary";
+import { useResourceAttachments, type ResourceReceiveResult } from "../resources/resourceLibrary";
+import { drawingResourceError, DRAWING_RESOURCE_LIMITS } from "@synara/contracts/resourceLibrary";
 import { normalizeDrawingParameters, updateDrawingParameters } from "./drawingParameters";
 import { RouteInsetSurface } from "../RouteInsetSurface";
 import { ChatSurfaceHeader } from "../chat/ChatSurfaceHeader";
@@ -140,11 +141,18 @@ export default function DrawingWorkbench() {
       focusCommentId?: string;
     } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null),
+    mounted = useRef(true),
     refs = useRef(inputs),
     pendingRequest = useRef<{ signature: string; id: string } | null>(null),
     draftWrites = useRef(Promise.resolve()),
     uploadWrites = useRef(Promise.resolve());
   refs.current = inputs;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const provider = providers.data?.find((p) => p.id === providerId && p.enabled);
   const changeSelection = useCallback(
     (id: string, selectedModel?: string) => {
@@ -260,37 +268,51 @@ export default function DrawingWorkbench() {
   const append = (asset: ImageAsset) => {
     const current = refs.current;
     if (current.some((a) => a.id === asset.id)) return;
-    if (asset.bytes > 20 * 1024 * 1024)
+    if (asset.bytes > DRAWING_RESOURCE_LIMITS.fileBytes)
       throw new Error(tr("Choose PNG, JPEG or WebP images up to 20 MiB each."));
     if (
-      current.length >= 16 ||
-      current.reduce((n, a) => n + a.bytes, 0) + asset.bytes > 80 * 1024 * 1024
+      current.length >= DRAWING_RESOURCE_LIMITS.count ||
+      current.reduce((n, a) => n + a.bytes, 0) + asset.bytes > DRAWING_RESOURCE_LIMITS.totalBytes
     )
       throw new Error(tr("Reference image limit exceeded (16 images / 80 MiB)."));
     setReferences([...current, asset]);
   };
-  const addFiles = (files: File[]) => {
-    if (!files.length) return;
+  const addFiles = (files: File[]): Promise<ResourceReceiveResult> => {
+    if (!files.length) return Promise.resolve({ accepted: [], rejected: [] });
     setUploading(true);
-    uploadWrites.current = uploadWrites.current
+    const task = uploadWrites.current
       .catch(() => {})
       .then(async () => {
-        for (const file of files) {
-          if (
-            !["image/png", "image/jpeg", "image/webp"].includes(file.type) ||
-            file.size > 20 * 1024 * 1024
-          )
-            throw new Error(tr("Choose PNG, JPEG or WebP images up to 20 MiB each."));
-          if (
-            refs.current.length >= 16 ||
-            refs.current.reduce((n, a) => n + a.bytes, 0) + file.size > 80 * 1024 * 1024
-          )
-            throw new Error(tr("Reference image limit exceeded (16 images / 80 MiB)."));
-          append(await uploadDrawingImage(file, file.name));
+        const result: ResourceReceiveResult = { accepted: [], rejected: [] };
+        for (const [index, file] of files.entries()) {
+          try {
+            const error = drawingResourceError(file, {
+              count: refs.current.length,
+              bytes: refs.current.reduce((n, a) => n + a.bytes, 0),
+            });
+            if (error) throw new Error(tr(error));
+            const uploaded = await uploadDrawingImage(file, file.name);
+            if (!mounted.current)
+              throw new Error("The destination is not ready to accept attachments.");
+            append(uploaded);
+            result.accepted.push(index);
+          } catch (cause) {
+            result.rejected.push({
+              index,
+              error: cause instanceof Error ? cause.message : String(cause),
+            });
+          }
         }
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+        setError(result.rejected.map((item) => item.error).join("\n") || null);
+        return result;
+      });
+    uploadWrites.current = task
+      .then(
+        () => {},
+        () => {},
+      )
       .finally(() => setUploading(false));
+    return task;
   };
   useResourceAttachments("drawing", addFiles, hydrated);
   const reuse = (job: ImageJob) => {
