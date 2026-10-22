@@ -1,3 +1,6 @@
+import { IMAGE_BATCH_GUIDANCE } from "../../agentGateway/imageBatchTools";
+import { makeSpriteReferenceReader } from "../../agentGateway/spriteReferences";
+import { createHash } from "node:crypto";
 import { ImageGenerationService } from "../../imageGeneration/Services/ImageGenerationService";
 import { spriteConversationPrompt } from "../../spriteAnimation/spriteConversation";
 import { appendAppSnapPromptContext } from "../../provider/appSnapPromptContext.ts";
@@ -3132,7 +3135,61 @@ const make = Effect.gen(function* () {
           additionalFolders: threadProject.additionalFolders ?? [],
         })
       : null;
-    const projectContext = [spritePrompt, projectContextPacket, projectFoldersPreamble ?? ""]
+    const batch = spriteImages?.batches
+      ? yield* Effect.promise(() => spriteImages.batches.repository.forThread(input.threadId))
+      : null;
+    if (batch && spritePrompt)
+      return yield* Effect.fail(new Error("Conversation is bound to two creative workbenches."));
+    if (batch && spriteImages)
+      yield* Effect.promise(async () => {
+        const reader = makeSpriteReferenceReader({
+          turns: { getByTurnId: () => Effect.succeed(Option.none()) },
+          messages: projectionThreadMessageRepository,
+          attachments: managedAttachments,
+          attachmentsDir: serverConfig.attachmentsDir,
+          includeFiles: true,
+        });
+        const sources = [];
+        for (const attachment of input.attachments ?? []) {
+          if (attachment.type !== "image" && attachment.type !== "file") continue;
+          try {
+            const file = await reader.readSent!(input.threadId, input.messageId, attachment.id);
+            const id = createHash("sha256")
+              .update(attachment.id + ":" + input.messageId)
+              .digest("hex");
+            sources.push({
+              id,
+              name: file.name,
+              mimeType: file.mimeType ?? "application/octet-stream",
+              bytes: file.bytes.length,
+              threadId: input.threadId,
+              messageId: input.messageId,
+              attachmentId: attachment.id,
+              data: file.bytes,
+            });
+          } catch (error) {
+            await spriteImages.batches.reportSources(batch.id, input.threadId, input.messageId, [
+              {
+                sourceId: attachment.id,
+                status: "failed",
+                message: error instanceof Error ? error.message : String(error),
+                turnId: input.messageId,
+              },
+            ]);
+          }
+        }
+        if (sources.length)
+          await spriteImages.batches.captureSources(batch.id, input.threadId, sources);
+      });
+    const batchPrompt = batch
+      ? `<image_batch_instructions>\n${IMAGE_BATCH_GUIDANCE}\n</image_batch_instructions>`
+      : "";
+    const projectContext = [
+      spritePrompt,
+      batchPrompt,
+      projectContextPacket,
+      projectFoldersPreamble ?? "",
+    ]
       .filter((block) => block.trim().length > 0)
       .join("\n\n");
     const debugPromptOverheadChars = debugModePromptOverheadChars(input.interactionMode);
@@ -7279,7 +7336,13 @@ const make = Effect.gen(function* () {
             updatedAt: event.payload.deletedAt,
           });
           yield* clearThreadRuntimeCaches(event.payload.threadId);
-          if (spriteImages) yield* spriteImages.spriteDetachThread(event.payload.threadId);
+          if (spriteImages) {
+            yield* spriteImages.spriteDetachThread(event.payload.threadId);
+            if (spriteImages.batches)
+              yield* Effect.promise(() =>
+                spriteImages.batches.detachThread(event.payload.threadId),
+              );
+          }
           // Finish local cleanup before computer teardown, which can reject or
           // time out independently of the durable queue and runtime caches.
           if (Option.isSome(computerService))

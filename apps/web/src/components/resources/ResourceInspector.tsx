@@ -1,6 +1,9 @@
 import { resourceType, type ResourceEntry } from "@synara/contracts/resourceLibrary";
 import { useNavigate } from "@tanstack/react-router";
 import type { ThreadId } from "@synara/contracts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { batchApi, batchKey } from "../imageBatches/useImageBatches";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { useStore } from "~/store";
 import { WorkAreaPanel } from "~/components/ui/work-area-panel";
@@ -34,6 +37,24 @@ export function ResourceInspector({
   const navigate = useNavigate();
   const threads = useStore((state) => state.sidebarThreadSummaryById);
   const entry = entries.length === 1 ? entries[0]! : null;
+  const client = useQueryClient(),
+    batchId = entry?.origin?.kind === "image-batch" ? entry.origin.batchId : undefined;
+  useEffect(
+    () =>
+      batchId
+        ? batchApi().onEvent((event) => {
+            if (event.type === "snapshot" || event.batchId === batchId)
+              void client.invalidateQueries({ queryKey: batchKey });
+          })
+        : undefined,
+    [batchId, client],
+  );
+  const batchResult = useQuery({
+    queryKey: [...batchKey, "result", entry?.origin?.resultId],
+    enabled: entry?.origin?.kind === "image-batch" && !!entry.origin.resultId,
+    queryFn: () => batchApi().result({ id: entry!.origin!.resultId! }),
+    retry: false,
+  });
   return (
     <WorkAreaPanel
       title={tr("Details")}
@@ -139,6 +160,42 @@ export function ResourceInspector({
               <section className="space-y-2 text-ui-sm">
                 <h4 className="font-medium">{tr("Source")}</h4>
                 <p>{tr(entry.origin.kind)}</p>
+                {entry.origin.kind === "image-batch" && entry.origin.batchId && (
+                  <>
+                    <p>
+                      {tr("System selection")}:{" "}
+                      {tr(
+                        batchResult.isPending
+                          ? "Loading..."
+                          : batchResult.data?.adopted
+                            ? "Adopted"
+                            : batchResult.isError
+                              ? "Source is unavailable"
+                              : "Not adopted",
+                      )}
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        editor.guard(() => {
+                          void navigate({
+                            to: "/image-batches",
+                            search: {
+                              batchId: entry.origin!.batchId!,
+                              ...(entry.origin!.taskId ? { taskId: entry.origin!.taskId } : {}),
+                              ...(entry.origin!.resultId
+                                ? { resultId: entry.origin!.resultId }
+                                : {}),
+                            },
+                          });
+                        })
+                      }
+                    >
+                      {tr("Open image batch")}
+                    </Button>
+                  </>
+                )}
                 {entry.origin.threadId ? (
                   <Button
                     variant="outline"

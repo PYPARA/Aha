@@ -138,6 +138,7 @@ beforeEach(async () => {
   window.desktopBridge = {
     resourceLibrary: {
       request: async (command: ResourceCommand) => {
+        if (command.op === "listCollections") return [];
         commands.push(command);
         if (command.op === "snapshot" || command.op === "refresh" || command.op === "chooseRoot")
           return {

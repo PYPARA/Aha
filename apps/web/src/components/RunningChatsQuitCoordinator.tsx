@@ -18,8 +18,13 @@ import { readNativeApi } from "~/nativeApi";
 import { useStore } from "~/store";
 
 import { RunningChatsQuitDialog, type RunningChatsQuitDecision } from "./RunningChatsQuitDialog";
+import type { ResourceCollectionOperation } from "@synara/contracts/resourceLibrary";
+import { resourceApi } from "./resources/resourceLibrary";
+import { useAhaTranslation } from "~/aha/AppearanceProvider";
 
 export function RunningChatsQuitCoordinator() {
+  const tr = useAhaTranslation();
+  const [activities, setActivities] = useState<ReadonlyArray<RunningChatQuitSummary>>([]);
   const [chats, setChats] = useState<ReadonlyArray<RunningChatQuitSummary> | null>(null);
   // True while the resume record is being written: the dialog stays up (inert) so the
   // user does not see a bare window for the bounded wait before the desktop hides it.
@@ -111,20 +116,73 @@ export function RunningChatsQuitCoordinator() {
 
     return subscribe((request) => {
       const running = listRunningChatsFromDesktopStore(useStore.getState());
-      reply({
-        requestId: request.requestId,
-        phase: "ready",
-        runningCount: running.length,
-        chats: running,
-      });
       pendingRequestIdRef.current = request.requestId;
-      setChats(running);
+      void (async () => {
+        const extra: RunningChatQuitSummary[] = [];
+        const collect = async () => {
+          const api = readNativeApi();
+          if (api?.imageBatches) {
+            let cursor: string | undefined;
+            do {
+              const page = await api.imageBatches.list({
+                filter: "active",
+                ...(cursor ? { cursor } : {}),
+              });
+              extra.push(
+                ...page.batches.map((batch) => ({
+                  id: "image-batch:" + batch.id,
+                  title: tr("Batch images") + ": " + batch.name,
+                })),
+              );
+              cursor = page.nextCursor ?? undefined;
+            } while (cursor);
+          }
+          if (window.desktopBridge?.resourceLibrary) {
+            const operations = await resourceApi<ResourceCollectionOperation[]>({
+              op: "listCollections",
+            });
+            for (const operation of operations)
+              if (
+                operation.items.some((item) =>
+                  ["queued", "writing", "committed"].includes(item.status),
+                )
+              )
+                extra.push({
+                  id: "collection:" + operation.id,
+                  title: tr("Saving batch results") + ": " + operation.items.length,
+                });
+          }
+        };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            collect(),
+            new Promise<void>((resolve) => {
+              timer = setTimeout(resolve, 1200);
+            }),
+          ]);
+        } catch {
+          /* Normal quit confirmation remains available when a backend is disconnected. */
+        } finally {
+          clearTimeout(timer);
+        }
+        if (pendingRequestIdRef.current !== request.requestId) return;
+        setActivities([...extra]);
+        reply({
+          requestId: request.requestId,
+          phase: "ready",
+          runningCount: running.length + extra.length,
+          chats: [...running, ...extra],
+        });
+        setChats(running);
+      })();
     });
-  }, []);
+  }, [tr]);
 
   return (
     <RunningChatsQuitDialog
       chats={chats}
+      activities={activities}
       quitting={quitting}
       onStay={() => settle(null)}
       onQuit={settle}

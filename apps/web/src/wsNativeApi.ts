@@ -994,6 +994,20 @@ export function createWsNativeApi(): NativeApi {
       delete: (input) => transport.request(WS_METHODS.todoDelete, input),
       onEvent: todoEventListeners.subscribe,
     },
+    imageBatches: {
+      list: (input) => transport.request(WS_METHODS.imageBatchList, input),
+      get: (input) => transport.request(WS_METHODS.imageBatchGet, input),
+      command: (input) => transport.request(WS_METHODS.imageBatchCommand, { command: input }),
+      preflight: (input) => transport.request(WS_METHODS.imageBatchPreflight, input),
+      results: (input) => transport.request(WS_METHODS.imageBatchResults, input),
+      result: (input) => transport.request(WS_METHODS.imageBatchResult, input),
+      importSources: (input) => transport.request(WS_METHODS.imageBatchImportSources, input),
+      forThread: (input) => transport.request(WS_METHODS.imageBatchForThread, input),
+      onEvent: (callback) =>
+        imageJobEventListeners.subscribe((event) => {
+          if (event.type === "batch-changed" || event.type === "snapshot") callback(event);
+        }),
+    },
     imageGeneration: {
       spriteForThread: (input) => transport.request(WS_METHODS.spriteForThread, input),
       spriteRetryConfirm: (input) => transport.request(WS_METHODS.spriteRetryConfirm, input),

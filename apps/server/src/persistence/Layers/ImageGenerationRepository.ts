@@ -19,8 +19,17 @@ export const ImageGenerationRepositoryLive = Layer.effect(
   ImageGenerationRepository,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const batchTables =
+      yield* sql`SELECT name FROM sqlite_master WHERE name='image_batch_asset_refs'`;
+    const hasBatches = batchTables.length > 0;
     const guard = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.mapError(error));
     const readJob = (rows: readonly { payload: string }[]) => decode(ImageJob, rows)[0] ?? null;
+    const retainedDocuments = hasBatches
+      ? sql`AND NOT EXISTS(SELECT 1 FROM image_edit_document_assets x JOIN image_batch_asset_refs b ON b.asset_id=x.asset_id WHERE x.document_id=d.id)`
+      : sql``;
+    const retained = hasBatches
+      ? sql`AND NOT EXISTS(SELECT 1 FROM image_batch_asset_refs WHERE asset_id=a.id) AND NOT EXISTS(SELECT 1 FROM image_batch_results WHERE asset_id=a.id)`
+      : sql``;
     const api: ImageGenerationRepositoryShape = {
       getDocument: (id) =>
         guard(
@@ -45,7 +54,7 @@ export const ImageGenerationRepositoryLive = Layer.effect(
         guard(
           sql<{
             payload: string;
-          }>`SELECT payload FROM image_edit_documents d WHERE created_at<${before} AND NOT EXISTS(SELECT 1 FROM image_job_documents WHERE document_id=d.id) AND NOT EXISTS(SELECT 1 FROM image_draft_documents WHERE document_id=d.id)`.pipe(
+          }>`SELECT payload FROM image_edit_documents d WHERE created_at<${before} AND NOT EXISTS(SELECT 1 FROM image_job_documents WHERE document_id=d.id) AND NOT EXISTS(SELECT 1 FROM image_draft_documents WHERE document_id=d.id) ${retainedDocuments}`.pipe(
             Effect.map((rows) => decode(ImageEditDocument, rows)),
           ),
         ),
@@ -114,8 +123,12 @@ export const ImageGenerationRepositoryLive = Layer.effect(
             const page = cursor
               ? sql`AND (created_at<${cursor.at} OR (created_at=${cursor.at} AND id<${cursor.id}))`
               : sql``;
+            const origin =
+              input.origin !== "all"
+                ? sql`AND COALESCE(json_extract(payload, '$.origin.kind'), 'legacy') IN ('drawing', 'legacy')`
+                : sql``;
             const rows = yield* sql<{ payload: string }>`SELECT payload FROM image_jobs
-              WHERE 1=1 ${search} ${status} ${page}
+              WHERE 1=1 ${search} ${status} ${page} ${origin}
               ORDER BY created_at DESC, id DESC LIMIT 31`;
             const jobs = decode(ImageJob, rows.slice(0, 30));
             const last = jobs.at(-1);
@@ -238,7 +251,7 @@ export const ImageGenerationRepositoryLive = Layer.effect(
         guard(
           sql<{
             payload: string;
-          }>`SELECT payload FROM image_assets a WHERE created_at<${before} AND NOT EXISTS(SELECT 1 FROM image_job_assets WHERE asset_id=a.id) AND NOT EXISTS(SELECT 1 FROM image_draft_assets WHERE asset_id=a.id) AND NOT EXISTS(SELECT 1 FROM image_edit_document_assets WHERE asset_id=a.id)`.pipe(
+          }>`SELECT payload FROM image_assets a WHERE created_at<${before} AND NOT EXISTS(SELECT 1 FROM image_job_assets WHERE asset_id=a.id) AND NOT EXISTS(SELECT 1 FROM image_draft_assets WHERE asset_id=a.id) AND NOT EXISTS(SELECT 1 FROM image_edit_document_assets WHERE asset_id=a.id) ${retained}`.pipe(
             Effect.map((rows) => decode(ImageAsset, rows)),
           ),
         ),

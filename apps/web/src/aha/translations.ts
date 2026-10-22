@@ -1,10 +1,12 @@
 import { spriteV5Copy } from "./spriteV5Copy";
 import { resourceCopy } from "./resourceCopy";
+import { imageBatchCopy } from "./imageBatchCopy";
 
 /** Central product copy. User, model and tool content remain verbatim. */
 export const copy: Record<string, string> = {
   ...resourceCopy,
   ...spriteV5Copy,
+  ...imageBatchCopy,
   "Faster long conversations and parallel work": "长对话与并行工作更流畅",
   "Long chats do less repeated history work, while parallel requests share bounded queues and workspace refreshes.":
     "减少长聊天中重复的历史读取；并行请求通过有界队列处理，工作区刷新更加平稳。",

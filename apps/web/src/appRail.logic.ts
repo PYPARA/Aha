@@ -35,6 +35,7 @@ export type RailRouteItemId =
   | "studio"
   | "settings"
   | "drawing"
+  | "imageBatches"
   | "spriteAnimation"
   | "resources";
 export type RailItemId = RailPanelItemId | RailRouteItemId;
@@ -47,6 +48,7 @@ export type RailItemId = RailPanelItemId | RailRouteItemId;
 export const RAIL_ORDERABLE_ITEM_IDS = [
   "home",
   "drawing",
+  "imageBatches",
   "spriteAnimation",
   "resources",
   "inbox",
@@ -81,7 +83,8 @@ export function normalizeRailItemOrder(order: readonly string[]): RailOrderableI
     "home",
   );
   const withResources = placeNewIdAfter(withDrawing, order, "resources", "drawing");
-  return placeNewIdAfter(withResources, order, "spriteAnimation", "drawing");
+  const withSprites = placeNewIdAfter(withResources, order, "spriteAnimation", "drawing");
+  return placeNewIdAfter(withSprites, order, "imageBatches", "drawing");
 }
 
 export function normalizeHiddenRailItems(hidden: readonly string[]): RailOrderableItemId[] {
@@ -208,6 +211,7 @@ export function railItemShowsPanel(id: RailItemId): boolean {
     id !== "spriteAnimation" &&
     id !== "resources" &&
     id !== "drawing" &&
+    id !== "imageBatches" &&
     id !== "kanban" &&
     id !== "tasks" &&
     id !== "pullRequests" &&
@@ -224,6 +228,7 @@ export function railItemForPathname(pathname: string): RailRouteItemId | null {
   if (matchesRoute(pathname, "/sprite-animation")) return "spriteAnimation";
   if (matchesRoute(pathname, "/resources")) return "resources";
   if (matchesRoute(pathname, "/drawing")) return "drawing";
+  if (matchesRoute(pathname, "/image-batches")) return "imageBatches";
   if (matchesRoute(pathname, "/inbox")) return "inbox";
   if (matchesRoute(pathname, "/kanban")) return "kanban";
   if (matchesRoute(pathname, "/tasks")) return "tasks";

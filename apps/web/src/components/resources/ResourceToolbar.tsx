@@ -47,6 +47,8 @@ export function ResourceToolbar({
   query,
   tag,
   type,
+  originKind,
+  onOriginKind,
   sort,
   view,
   multiple,
@@ -73,6 +75,8 @@ export function ResourceToolbar({
   query: string;
   tag: string;
   type: ResourceQuery["type"];
+  originKind?: ResourceQuery["originKind"];
+  onOriginKind?: (value: ResourceQuery["originKind"]) => void;
   sort: "name" | "modified";
   view: "grid" | "list";
   multiple: boolean;
@@ -168,7 +172,7 @@ export function ResourceToolbar({
           </p>
           {page?.stats ? (
             <p className="mt-1 text-ui-xs tabular-nums text-muted-foreground">
-              {query || tag || type !== "all"
+              {query || tag || type !== "all" || originKind
                 ? `${tr("Matched files")}: ${page.stats.matchedFiles} / ${tr("Files in scope")}: ${page.stats.scopeFiles} · `
                 : ""}
               {tr("Folders")}: {page.stats.matchedDirectories} · {tr("Files")}:{" "}
@@ -283,6 +287,24 @@ export function ResourceToolbar({
             ]}
           />
         </div>
+        {onOriginKind && (
+          <div className="w-32">
+            <ResourceSelect
+              label={tr("Resource source")}
+              value={originKind ?? "all"}
+              onChange={(value) =>
+                onOriginKind(value === "all" ? undefined : (value as ResourceQuery["originKind"]))
+              }
+              options={[
+                { value: "all", label: tr("All sources") },
+                ...["image-batch", "drawing", "chat", "local", "game"].map((value) => ({
+                  value,
+                  label: tr(value),
+                })),
+              ]}
+            />
+          </div>
+        )}
         <Button
           size="icon-sm"
           variant="outline"
@@ -291,7 +313,7 @@ export function ResourceToolbar({
         >
           <Rows3Icon />
         </Button>
-        {query || tag || type !== "all" ? (
+        {query || tag || type !== "all" || originKind ? (
           <Button size="sm" variant="ghost" onClick={onClearFilters}>
             {tr("Clear filters")}
           </Button>

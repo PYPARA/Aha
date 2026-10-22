@@ -94,6 +94,18 @@ export class SpriteEngine {
     }
     this.rebuildReferences();
   }
+  async migrateJobOrigins() {
+    if (!this.images.repository) return;
+    for (const [id, state] of this.states)
+      for (const run of state.runs)
+        if (run.jobId) {
+          const job = await Effect.runPromise(this.images.repository.getJob(run.jobId));
+          if (job && !job.origin)
+            await Effect.runPromise(
+              this.images.repository.saveJob({ ...job, origin: { kind: "sprite", ownerId: id } }),
+            );
+        }
+  }
   private rebuildReferences() {
     this.images.spriteAssetIds.clear();
     for (const [id, state] of this.states) if (!this.deleted.has(id)) this.retain(state);
@@ -1575,18 +1587,22 @@ export class SpriteEngine {
       });
       state = await this.state(id);
       submitting = true;
-      const job = await this.images.createJob({
-        clientRequestId: this.requestKey(id, run),
-        providerId: c.providerId,
-        model: c.model,
-        prompt,
-        parameters,
-        inputAssetIds: inputs,
-        maskAssetId: null,
-        sourceJobId: run.retryOfRunId
-          ? (state.runs.find((r) => r.id === run.retryOfRunId)?.jobId ?? null)
-          : null,
-      });
+      const job = await this.images.createJob(
+        {
+          clientRequestId: this.requestKey(id, run),
+          providerId: c.providerId,
+          model: c.model,
+          prompt,
+          parameters,
+          inputAssetIds: inputs,
+          maskAssetId: null,
+          sourceJobId: run.retryOfRunId
+            ? (state.runs.find((r) => r.id === run.retryOfRunId)?.jobId ?? null)
+            : null,
+        },
+        false,
+        { kind: "sprite", ownerId: id },
+      );
       recordedJobId = job.id;
       await this.save(id, {
         ...state,

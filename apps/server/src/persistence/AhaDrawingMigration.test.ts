@@ -43,12 +43,12 @@ it.effect(
       const before = yield* readDrawing();
       const prefixBefore = (yield* readTracker(sql)).filter((row) => row.migration_id <= 131);
       const backup = yield* inspectMigrationBackupPlan;
-      assert.deepStrictEqual(backup, { sourceVersion: "v132", targetVersion: 137 });
+      assert.deepStrictEqual(backup, { sourceVersion: "v132", targetVersion: 138 });
 
       const executed = yield* runMigrations();
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [132, 133, 134, 135, 136, 137],
+        [132, 133, 134, 135, 136, 137, 138],
       );
       assert.deepStrictEqual(yield* readDrawing(), before);
       const tracker = yield* readTracker(sql);
@@ -91,6 +91,7 @@ it.effect("adds drawing to a native Synara 1.0.3 database and supports a fresh d
       [135, "ImageGeneration"],
       [136, "ImageEditDocuments"],
       [137, "ProjectionMessageTurnActivityIndex"],
+      [138, "ImageBatches"],
     ]);
     assert.deepStrictEqual(yield* readTracker(sql), expectedTracker);
     const tables =
@@ -134,11 +135,11 @@ for (const priorId of [135, 136] as const) {
       const documents = priorId === 136 ? yield* sql`SELECT * FROM image_edit_documents` : [];
       assert.deepStrictEqual(yield* inspectMigrationBackupPlan, {
         sourceVersion: `v${priorId}`,
-        targetVersion: 137,
+        targetVersion: 138,
       });
       assert.deepStrictEqual(
         (yield* runMigrations()).map(([id]) => id),
-        priorId === 135 ? [136, 137] : [137],
+        priorId === 135 ? [136, 137, 138] : [137, 138],
       );
       assert.deepStrictEqual(yield* sql`SELECT * FROM image_jobs`, jobs);
       if (priorId === 136) {
@@ -175,11 +176,11 @@ it.effect(
         yield* sql`SELECT sql FROM sqlite_master WHERE name = 'idx_projection_thread_messages_turn_activity'`;
       assert.deepStrictEqual(yield* inspectMigrationBackupPlan, {
         sourceVersion: "v135",
-        targetVersion: 137,
+        targetVersion: 138,
       });
       assert.deepStrictEqual(
         (yield* runMigrations()).map(([id]) => id),
-        [135, 136, 137],
+        [135, 136, 137, 138],
       );
       assert.deepStrictEqual(yield* readTracker(sql), expectedTracker);
       assert.deepStrictEqual(
@@ -220,7 +221,7 @@ it.effect("does not repair mixed or newer native-index trackers through the new 
     for (const [id, name] of [
       [130, "UnexpectedMigration"],
       [136, "FutureSynaraMigration"],
-      [138, "FutureAhaMigration"],
+      [139, "FutureAhaMigration"],
     ] as const) {
       const mixed = new Map(native);
       mixed.set(id, name);

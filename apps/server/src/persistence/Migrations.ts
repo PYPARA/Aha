@@ -1,3 +1,4 @@
+import Migration0138 from "./Migrations/138_ImageBatches";
 /**
  * MigrationsLive - Migration runner with inline loader
  *
@@ -306,6 +307,7 @@ export const migrationEntries = [
   [135, "ImageGeneration", Migration0135],
   [136, "ImageEditDocuments", Migration0136],
   [137, "ProjectionMessageTurnActivityIndex", Migration0137],
+  [138, "ImageBatches", Migration0138],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

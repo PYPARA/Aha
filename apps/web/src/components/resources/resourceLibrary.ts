@@ -60,6 +60,7 @@ export function useResourceLibrary(enabled = true) {
 }
 export interface ResourceSource {
   name: string;
+  assetId?: string;
   url?: string;
   path?: string;
   origin?: ResourceOrigin | undefined;
@@ -77,7 +78,9 @@ export function collectResources(sources: ResourceSource[]) {
       ...source,
       origin: {
         kind: "chat",
-        ...(!["drawing", "resources", "settings", ""].includes(segment ?? "")
+        ...(!["drawing", "image-batches", "sprite-animation", "resources", "settings", ""].includes(
+          segment ?? "",
+        )
           ? { threadId: segment }
           : {}),
         ...source.origin,

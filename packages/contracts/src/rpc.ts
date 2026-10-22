@@ -1,4 +1,15 @@
 import {
+  ImageBatchCommand,
+  ImageBatchListInput,
+  ImageBatchListResult,
+  ImageBatchState,
+  ImageBatchResultsInput,
+  ImageBatchResultsPage,
+  ImageBatchResult,
+  ImageBatchPreflight,
+  ImageBatchImportSources,
+} from "./imageBatches";
+import {
   SpriteCommand,
   SpriteState,
   SpritePlanConfirmInput,
@@ -2214,7 +2225,55 @@ const WsSpriteForThreadRpc = Rpc.make(WS_METHODS.spriteForThread, {
   success: Schema.NullOr(SpriteState),
   error: WsRpcError,
 });
+const WsImageBatchCommandRpc = Rpc.make(WS_METHODS.imageBatchCommand, {
+  payload: Schema.Struct({ command: ImageBatchCommand }),
+  success: ImageBatchState,
+  error: WsRpcError,
+});
+const WsImageBatchListRpc = Rpc.make(WS_METHODS.imageBatchList, {
+  payload: ImageBatchListInput,
+  success: ImageBatchListResult,
+  error: WsRpcError,
+});
+const WsImageBatchGetRpc = Rpc.make(WS_METHODS.imageBatchGet, {
+  payload: Schema.Struct({ id: Schema.String }),
+  success: ImageBatchState,
+  error: WsRpcError,
+});
+const WsImageBatchPreflightRpc = Rpc.make(WS_METHODS.imageBatchPreflight, {
+  payload: Schema.Struct({ id: Schema.String }),
+  success: ImageBatchPreflight,
+  error: WsRpcError,
+});
+const WsImageBatchResultsRpc = Rpc.make(WS_METHODS.imageBatchResults, {
+  payload: ImageBatchResultsInput,
+  success: ImageBatchResultsPage,
+  error: WsRpcError,
+});
+const WsImageBatchResultRpc = Rpc.make(WS_METHODS.imageBatchResult, {
+  payload: Schema.Struct({ id: Schema.String }),
+  success: ImageBatchResult,
+  error: WsRpcError,
+});
+const WsImageBatchImportSourcesRpc = Rpc.make(WS_METHODS.imageBatchImportSources, {
+  payload: ImageBatchImportSources,
+  success: ImageBatchState,
+  error: WsRpcError,
+});
+const WsImageBatchForThreadRpc = Rpc.make(WS_METHODS.imageBatchForThread, {
+  payload: Schema.Struct({ threadId: Schema.String }),
+  success: Schema.NullOr(ImageBatchState),
+  error: WsRpcError,
+});
 const WsImageGenerationRpcGroup = RpcGroup.make(
+  WsImageBatchCommandRpc,
+  WsImageBatchListRpc,
+  WsImageBatchGetRpc,
+  WsImageBatchResultsRpc,
+  WsImageBatchResultRpc,
+  WsImageBatchImportSourcesRpc,
+  WsImageBatchPreflightRpc,
+  WsImageBatchForThreadRpc,
   WsSpriteForThreadRpc,
   WsSpriteConfirmRpc,
   WsSpriteRetryConfirmRpc,

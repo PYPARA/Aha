@@ -26,6 +26,7 @@ import {
   type RunningChatsQuitCopy,
 } from "~/lib/runningChatsQuitConfirmation";
 import { cn } from "~/lib/utils";
+import { useAhaTranslation } from "~/aha/AppearanceProvider";
 
 export interface RunningChatsQuitDecision {
   /** Remember the listed chats and continue them automatically on the next launch. */
@@ -34,6 +35,7 @@ export interface RunningChatsQuitDecision {
 
 export interface RunningChatsQuitDialogProps {
   readonly chats: ReadonlyArray<RunningChatQuitSummary> | null;
+  readonly activities?: ReadonlyArray<RunningChatQuitSummary>;
   /** Quit was confirmed and is being finalized; the dialog stays visible but inert. */
   readonly quitting?: boolean;
   readonly onStay: () => void;
@@ -52,6 +54,7 @@ const KEY_HINT_CLASS = "text-ui-sm font-normal tabular-nums opacity-55";
 
 export function RunningChatsQuitDialog({
   chats,
+  activities = [],
   quitting = false,
   onStay,
   onQuit,
@@ -79,6 +82,7 @@ export function RunningChatsQuitDialog({
             {copy && chats ? (
               <RunningChatsQuitDialogContent
                 chats={chats}
+                activities={activities}
                 copy={copy}
                 quitting={quitting}
                 onQuit={onQuit}
@@ -94,16 +98,19 @@ export function RunningChatsQuitDialog({
 // Mounted only while the dialog is open so the settings subscription costs nothing otherwise.
 function RunningChatsQuitDialogContent({
   chats,
+  activities,
   copy,
   quitting,
   onQuit,
 }: {
   readonly chats: ReadonlyArray<RunningChatQuitSummary>;
+  readonly activities: ReadonlyArray<RunningChatQuitSummary>;
   readonly copy: RunningChatsQuitCopy;
   readonly quitting: boolean;
   readonly onQuit: (decision: RunningChatsQuitDecision) => void;
 }) {
   const { settings, updateSettings } = useAppSettings();
+  const tr = useAhaTranslation();
   const resume = settings.resumeChatsAfterQuit;
   const resumeCheckboxId = useId();
 
@@ -119,11 +126,15 @@ function RunningChatsQuitDialogContent({
             "m-0 mt-1 text-ui-lg font-normal leading-[18px] text-muted-foreground",
           )}
         >
-          {copy.description}
+          {activities.length
+            ? tr(
+                "Image batches and resource copies will stop when Aha quits. On restart, unsent tasks and saved copies can resume; sent requests with unknown status require verification.",
+              )
+            : copy.description}
         </AlertDialogPrimitive.Description>
-        {chats.length > 0 ? (
+        {chats.length + activities.length > 0 ? (
           <ul className="m-0 mt-3 flex max-h-[40vh] list-none flex-col gap-2 overflow-y-auto p-0">
-            {chats.map((chat) => (
+            {[...chats, ...activities].map((chat) => (
               <li key={chat.id} className="flex min-w-0 items-center gap-2.5">
                 <ThreadRunningSpinner />
                 <span className={cn(uiFont, "truncate text-ui-lg font-normal leading-[18px]")}>

@@ -75,6 +75,10 @@ export class ResourceIndex {
       );
       values.push(query.tag);
     }
+    if (filtered && query.originKind) {
+      predicates.push("json_extract(data, '$.origin.kind') = ?");
+      values.push(query.originKind);
+    }
     if (filtered && query.type && query.type !== "all") {
       predicates.push("kind = 'file' AND category = ?");
       values.push(query.type);

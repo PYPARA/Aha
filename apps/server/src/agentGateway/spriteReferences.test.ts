@@ -15,7 +15,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
-function fixture() {
+function fixture(includeFiles = false) {
   const attachment = {
     type: "image",
     id: "att_v2_sent",
@@ -60,6 +60,7 @@ function fixture() {
     } as unknown as ProjectionThreadMessageRepositoryShape,
     attachments: repo as unknown as ManagedAttachmentRepositoryShape,
     attachmentsDir: root,
+    includeFiles,
   });
   return { reader, repo, found, messages };
 }
@@ -70,6 +71,25 @@ it("lists only images in sent messages through the calling turn, retaining histo
   ]);
   await expect(reader.read("thread", "turn", "attachment:att_v2_future")).rejects.toThrow("belong");
   await expect(reader.list("thread", "missing-turn")).rejects.toThrow("active turn");
+});
+
+it("batch document reading accepts arbitrary extensions, verifies sent ownership and excludes future attachments", async () => {
+  const { reader, found, messages } = fixture(true);
+  const sent = messages[0]!.attachments[0]!;
+  sent.type = "file";
+  sent.name = "brief.custom";
+  sent.mimeType = "application/octet-stream";
+  found.kind = "file";
+  await fs.writeFile(path.join(root, "blob.png"), new Uint8Array([1, 2, 3]));
+  expect((await reader.list("thread", "turn")).map((source) => source.name)).toEqual([
+    "brief.custom",
+  ]);
+  expect((await reader.read("thread", "turn", "attachment:att_v2_sent")).name).toBe("brief.custom");
+  expect((await reader.readSent!("thread", "past", "att_v2_sent")).attachmentId).toBe(
+    "att_v2_sent",
+  );
+  await expect(reader.read("thread", "turn", "attachment:att_v2_future")).rejects.toThrow("belong");
+  await expect(reader.readSent!("foreign", "past", "att_v2_sent")).rejects.toThrow("unavailable");
 });
 it("validates ownership, claim, hash and path before reading a chat reference", async () => {
   const { reader, repo, found } = fixture();

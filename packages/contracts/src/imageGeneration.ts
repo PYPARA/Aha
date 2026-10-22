@@ -191,6 +191,12 @@ export const ImageGenerationError = Schema.Struct({
 export type ImageGenerationError = typeof ImageGenerationError.Type;
 export const ImageJob = Schema.Struct({
   id: Id,
+  origin: Schema.optional(
+    Schema.Struct({
+      kind: Schema.Literals(["drawing", "batch", "sprite", "chat", "test", "legacy"]),
+      ownerId: Schema.optional(Schema.String),
+    }),
+  ),
   clientRequestId: Id,
   providerId: Id,
   providerName: TrimmedNonEmptyString,
@@ -229,6 +235,7 @@ export const ImageJobCreateInput = Schema.Struct({
 });
 export type ImageJobCreateInput = typeof ImageJobCreateInput.Type;
 export const ImageJobListInput = Schema.Struct({
+  origin: Schema.optional(Schema.Literals(["drawing", "all"])),
   cursor: Schema.optional(Schema.String),
   query: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
   statusGroup: Schema.optional(Schema.Literals(["all", "active", "completed", "issues"])),
@@ -253,6 +260,7 @@ export const ImageDraft = Schema.Struct({
 export type ImageDraft = typeof ImageDraft.Type;
 export const ImageJobEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("sprite-changed"), projectId: Id }),
+  Schema.Struct({ type: Schema.Literal("batch-changed"), batchId: Id }),
   Schema.Struct({ type: Schema.Literal("changed"), jobId: Id }),
   Schema.Struct({ type: Schema.Literal("deleted"), jobId: Id }),
   Schema.Struct({ type: Schema.Literal("providers-changed") }),

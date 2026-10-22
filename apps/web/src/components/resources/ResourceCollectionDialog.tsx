@@ -31,6 +31,9 @@ import {
   useResourceLibrary,
   type ResourceSource,
 } from "./resourceLibrary";
+import { useBatchCollectionWorker } from "./useBatchCollectionWorker";
+import type { ResourceCollectionOperation } from "@synara/contracts/resourceLibrary";
+import { ensureNativeApi } from "~/nativeApi";
 
 export function ResourceCollectButton({ sources }: { sources: ResourceSource[] }) {
   const threadId = useContext(ResourceChatContext);
@@ -123,6 +126,7 @@ export function drawingResourceSource(
   return { name: asset.name, url, origin };
 }
 export function ResourceCollectionDialog() {
+  const collections = useBatchCollectionWorker();
   useEffect(() => {
     if (window.desktopBridge?.resourceLibrary)
       return installResourceContextMenuExtension(window.desktopBridge);
@@ -191,6 +195,68 @@ export function ResourceCollectionDialog() {
         (target !== "" && !library.data.directories.some((e) => e.path === target))
       )
         throw new Error("Choose a project or folder.");
+      if (sources.every((source) => source.origin?.kind === "image-batch")) {
+        const directoryId =
+          target === ""
+            ? null
+            : library.data.directories.find((entry) => entry.path === target)!.id;
+        const operationId = crypto.randomUUID();
+        const batchIds = [...new Set(sources.map((source) => source.origin!.batchId!))];
+        const items = sources.map((source) => {
+          if (!source.assetId || !source.origin?.resultId)
+            throw new Error("Batch original is unavailable.");
+          return {
+            resultId: source.origin.resultId,
+            assetId: source.assetId,
+            name: source.name,
+            origin: source.origin,
+          };
+        });
+        try {
+          for (const batchId of batchIds) {
+            await ensureNativeApi().imageBatches.command({
+              operation: "collection-start",
+              batchId,
+              operationId,
+              resultIds: sources
+                .filter((source) => source.origin!.batchId === batchId)
+                .map((source) => source.origin!.resultId!),
+            });
+          }
+          await resourceApi<ResourceCollectionOperation>({
+            op: "prepareCollection",
+            id: operationId,
+            libraryId: library.data.libraryId!,
+            directoryId,
+            items,
+          });
+        } catch (cause) {
+          // A lost prepare reply may already have created the durable desktop operation.
+          // Release retention only after proving there is no copy that could still run.
+          const recorded = await resourceApi<ResourceCollectionOperation[]>({
+            op: "listCollections",
+          }).catch(() => null);
+          if (!recorded?.some((operation) => operation.id === operationId)) {
+            if (recorded)
+              for (const batchId of batchIds)
+                await ensureNativeApi()
+                  .imageBatches.command({ operation: "collection-finish", batchId, operationId })
+                  .catch(() => {});
+            throw cause;
+          }
+        }
+        try {
+          localStorage.setItem(
+            `aha:resource-destination:${library.data.libraryId}`,
+            JSON.stringify({ libraryId: library.data.libraryId, id: directoryId }),
+          );
+        } catch {
+          /* Destination preference must not obscure an accepted copy operation. */
+        }
+        useResourceCollection.setState({ sources: null });
+        await collections.refetch();
+        return;
+      }
       let added = 0,
         skipped = 0;
       const failed: ResourceSource[] = [];
@@ -241,103 +307,179 @@ export function ResourceCollectionDialog() {
       useResourceCollection.setState({ sources: null });
     });
   return (
-    <Dialog
-      open={!!sources}
-      onOpenChange={(open) => {
-        if (!open && !busy) useResourceCollection.setState({ sources: null });
-      }}
-    >
-      <DialogPopup className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{tr("Add to resource center")}</DialogTitle>
-          <DialogDescription>
-            {tr("Keep an independent copy in the resource library.")}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 p-4">
-          <p className="text-ui text-muted-foreground">
-            {sources?.length} {tr("resources")}
+    <>
+      {collections.isError && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 border-t px-4 py-2 text-ui-sm text-destructive"
+        >
+          <p className="min-w-0 flex-1">
+            {tr("Resource copy receipts could not be read. Originals are retained.")}{" "}
+            {collections.error.message}
           </p>
-          {!library.data?.root ? (
-            <Button
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  await resourceApi({ op: "chooseRoot" });
-                })
-              }
-            >
-              {tr("Choose resource folder")}
-            </Button>
-          ) : (
-            <>
-              <label className="block space-y-2 text-ui">
-                {tr("Destination")}
-                <ResourceDestinationSelect
-                  value={target}
-                  onChange={setTarget}
-                  disabled={busy}
-                  directories={library.data.directories}
-                />
-              </label>
-              <div className="flex gap-2">
-                <Input
-                  aria-label={tr("Folder name")}
-                  placeholder={tr("Folder name")}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
+          <Button size="sm" variant="outline" onClick={() => void collections.refetch()}>
+            {tr("Retry")}
+          </Button>
+        </div>
+      )}
+      {collections.data
+        ?.filter((operation) =>
+          operation.items.some((item) => !["linked", "superseded"].includes(item.status)),
+        )
+        .map((operation) => (
+          <div
+            key={operation.id}
+            role="status"
+            className="flex flex-wrap items-center gap-2 border-t bg-background px-4 py-2 text-ui-xs"
+          >
+            <span>
+              {tr("Saving batch results")}:{" "}
+              {operation.items.filter((item) => item.status === "linked").length}/
+              {operation.items.length}
+            </span>
+            {operation.items.some((item) => item.status === "failed") && (
+              <>
+                <span className="min-w-0 flex-1 break-words text-destructive">
+                  {operation.items.find((item) => item.status === "failed")?.error}
+                </span>
                 <Button
-                  disabled={
-                    busy ||
-                    !name.trim() ||
-                    (!!library.data?.scan && library.data.scan.phase !== "ready")
-                  }
+                  size="sm"
                   variant="outline"
                   onClick={() =>
+                    void resourceApi({ op: "retryCollection", operationId: operation.id })
+                      .then(() => collections.refetch())
+                      .catch((cause) =>
+                        toastManager.add({
+                          type: "error",
+                          title: tr("Collection retry failed"),
+                          description: String(cause),
+                        }),
+                      )
+                  }
+                >
+                  {tr("Retry failed copies")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    collectResources(
+                      operation.items
+                        .filter((item) => item.status === "failed")
+                        .map((item) => ({
+                          name: item.name,
+                          assetId: item.assetId,
+                          origin: item.origin,
+                        })),
+                    )
+                  }
+                >
+                  {tr("Choose destination again")}
+                </Button>
+              </>
+            )}
+          </div>
+        ))}
+      {
+        <Dialog
+          open={!!sources}
+          onOpenChange={(open) => {
+            if (!open && !busy) useResourceCollection.setState({ sources: null });
+          }}
+        >
+          <DialogPopup className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{tr("Add to resource center")}</DialogTitle>
+              <DialogDescription>
+                {tr("Keep an independent copy in the resource library.")}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 p-4">
+              <p className="text-ui text-muted-foreground">
+                {sources?.length} {tr("resources")}
+              </p>
+              {!library.data?.root ? (
+                <Button
+                  disabled={busy}
+                  onClick={() =>
                     void run(async () => {
-                      const created = await resourceApi<ResourceEntry>({
-                        op: "createDirectory",
-                        parent: target ?? "",
-                        name,
-                      });
-                      setTarget(created.path);
-                      setName("");
+                      await resourceApi({ op: "chooseRoot" });
                     })
                   }
                 >
-                  {tr(target ? "New folder" : "New project")}
+                  {tr("Choose resource folder")}
+                </Button>
+              ) : (
+                <>
+                  <label className="block space-y-2 text-ui">
+                    {tr("Destination")}
+                    <ResourceDestinationSelect
+                      value={target}
+                      onChange={setTarget}
+                      disabled={busy}
+                      directories={library.data.directories}
+                    />
+                  </label>
+                  <div className="flex gap-2">
+                    <Input
+                      aria-label={tr("Folder name")}
+                      placeholder={tr("Folder name")}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                    <Button
+                      disabled={
+                        busy ||
+                        !name.trim() ||
+                        (!!library.data?.scan && library.data.scan.phase !== "ready")
+                      }
+                      variant="outline"
+                      onClick={() =>
+                        void run(async () => {
+                          const created = await resourceApi<ResourceEntry>({
+                            op: "createDirectory",
+                            parent: target ?? "",
+                            name,
+                          });
+                          setTarget(created.path);
+                          setName("");
+                        })
+                      }
+                    >
+                      {tr(target ? "New folder" : "New project")}
+                    </Button>
+                  </div>
+                </>
+              )}
+              {error || library.data?.error || library.error ? (
+                <p role="alert" className="whitespace-pre-wrap text-ui text-destructive">
+                  {tr(error ?? library.data?.error ?? library.error?.message ?? "")}
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => useResourceCollection.setState({ sources: null })}
+                >
+                  {tr("Cancel")}
+                </Button>
+                <Button
+                  disabled={
+                    busy ||
+                    target === null ||
+                    !!library.data?.error ||
+                    (!!library.data?.scan && library.data.scan.phase !== "ready")
+                  }
+                  onClick={() => void collect()}
+                >
+                  {tr(busy ? "Saving..." : "Add to resource center")}
                 </Button>
               </div>
-            </>
-          )}
-          {error || library.data?.error || library.error ? (
-            <p role="alert" className="whitespace-pre-wrap text-ui text-destructive">
-              {tr(error ?? library.data?.error ?? library.error?.message ?? "")}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={() => useResourceCollection.setState({ sources: null })}
-            >
-              {tr("Cancel")}
-            </Button>
-            <Button
-              disabled={
-                busy ||
-                target === null ||
-                !!library.data?.error ||
-                (!!library.data?.scan && library.data.scan.phase !== "ready")
-              }
-              onClick={() => void collect()}
-            >
-              {tr(busy ? "Saving..." : "Add to resource center")}
-            </Button>
-          </div>
-        </div>
-      </DialogPopup>
-    </Dialog>
+            </div>
+          </DialogPopup>
+        </Dialog>
+      }
+    </>
   );
 }

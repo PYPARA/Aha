@@ -21,6 +21,22 @@
 - 目标未选用 `null`，明确选择库根用空路径；两者不能互换。保留路径防逃逸、不跟随符号链接、独占目标、父子去重及批量预检规则。
 - 导航、树焦点、内容选择、详情草稿和预览对象分别管理。复用公共Tree、WorkAreaPanel、Dialog、Sheet和预览底板，不在业务内建立另一套外壳。
 
+## 批量生图与共同调度
+
+- 批次契约在 `packages/contracts/src/imageBatches.ts`，SQLite Repository 与服务在 `apps/server/src/imageBatches/`。迁移 **138_ImageBatches** 追加建立批次、结果、引用与索引，不重排 135/136/137 或上游兼容链。迁移支持已知历史谱系的幂等重放。
+- 草稿、待应用方案、执行快照、尝试与结果分开保存。修改、应用方案与执行确认都校验草稿版本；方案不能隐式更新草稿。一个批次同一时间只能有一次活跃执行。归档和执行状态独立。
+- 执行确认先持久化完整快照及待派发尝试，再创建现有生图任务。确认请求 ID 和内容指纹形成回执；回执先于版本校验，已接受的确认在后续草稿修改后仍可找回。同一 ID 不得对应不同内容。
+- 尝试 ID 与输出序号共同形成结果 ID，图片内容哈希只表示资产字节，不表示候选身份。仅可靠保存的原图进入结果；补齐重试沿尝试谱系扣除已保存候选。
+- 生图业务来源由服务端调用路径设置。普通绘图创建参数不接受批次或精灵身份。绘图默认来源过滤在数据库查询中执行，搜索、分页与计数使用相同条件；未知旧数据保持可达。精灵旧记录只由可核实的工程任务引用补来源。
+- 批量与直接绘图共用引擎并发池。批量每渠道上限为 `min(2,max(1,concurrency-1))`；直接绘图优先，批次按渠道轮转。暂停/阻塞策略在派发前读取持久化执行。限流、认证和额度错误只阻塞对应渠道后续批量请求，用户继续后解除，不能因旧错误反复重新阻塞。
+- 重启前未发送的确认任务可恢复。`running` 或网络结果不明进入待核实，不能自动补发。`saving` 用原始响应清单恢复，不重新调用模型。取消时已经返回、正在保存的批量响应继续可靠落盘。
+- 批次引用和结果加入现有图像 GC 的引用检查。批次资料存储在状态目录 `image-batches/<id>/sources`，参考图与结果仍使用现有 `drawing` 资产。删除会话只解除绑定，不删除批次快照、资产或付费结果。精灵引用读取异常时停止原图清理。
+- `image_batch` 工具复用 Agent Gateway 和活跃会话/轮次校验。读取、资料报告、提案、状态与结果预览可用；应用、确认、重试只由工作台 RPC 提供。工具读取资料不按扩展名决定是否接收；每项读取失败明确报告，未发送或其他轮次的附件不能混入上下文。
+- 跨会话导入必须从规范消息和受管附件记录核实归属、路径、大小及哈希后复制；批次引用使用新身份。嵌入式接收复用普通聊天图片/文件逻辑；批次未发送文件草稿额外保存在独立 IndexedDB 中，不把大文件写入 localStorage。
+- 批量入库扩展 `ResourceOrigin.kind=image-batch` 及批次、任务、尝试、结果 ID，不重解释旧 `drawing.batchId`。应用根控制器认证读取原始资产，主进程验证校验和并执行独占复制、元数据与索引提交。持久化操作在桌面资源配置旁的 `.collections.json`，与可重建搜索索引独立。
+- 复制前记录目标库、目录稳定身份、目标路径、预留资源 ID 和文件身份。文件提交后回执丢失，按结果来源或准确的文件身份恢复。相同结果在同库去重，部分失败仅重试失败项；移动、重命名保留资源 ID，废纸篓不触发自动入库。入库补保存绝不调用图像模型。
+- 入库开始前在批次服务登记活跃操作，回执与来源关联完成后再释放；原图清理检查这项保留。尚未完成或无法核实的入库操作、无法完整枚举的精灵引用都会阻止清理，不能仅因批次已移除而回收资产。
+
 ## 回归与证据
 
 改动时按影响运行实际核心测试，命令入口可从以下范围选择：
@@ -29,6 +45,9 @@
 bunx vitest run packages/contracts/src/sprite*.test.ts apps/server/src/spriteAnimation apps/server/src/agentGateway/sprite*.test.ts apps/server/src/imageGeneration/imageGeneration.test.ts apps/web/src/components/sprite/*.test.ts apps/desktop/src/sprites/library.test.ts
 bunx vitest run apps/desktop/src/resources apps/web/src/components/resources/resourceSelection.test.ts apps/web/src/components/resources/resourceNavigation.test.ts apps/web/src/components/resources/resourcePreferences.test.ts
 bun run --cwd apps/web test:browser src/components/sprite src/components/resources
+ bunx vitest run apps/server/src/imageBatches apps/server/src/agentGateway/imageBatchTools.test.ts apps/desktop/src/resources/collection.test.ts
+ bun run --cwd apps/web test:browser src/components/imageBatches
+ AHA_IMAGE_BATCH_E2E=1 bunx vitest run apps/web/src/components/imageBatches/imageBatches.e2e.test.ts
 AHA_SPRITE_E2E=1 bunx vitest run apps/web/src/components/sprite/sprite.e2e.test.ts
 bun run typecheck
 bun run build:desktop

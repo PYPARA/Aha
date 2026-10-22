@@ -93,6 +93,7 @@ export default function DrawingWorkbench() {
   const [search, setSearch] = useState(""),
     [query, setQuery] = useState("");
   const [statusGroup, setStatusGroup] = useState<"all" | "active" | "completed" | "issues">("all");
+  const [origin, setOrigin] = useState<"drawing" | "all">("drawing");
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 300);
     return () => clearTimeout(timer);
@@ -582,6 +583,34 @@ export default function DrawingWorkbench() {
                       type="button"
                       variant="chrome"
                       size="sm"
+                      aria-label={tr("Image history sources")}
+                    >
+                      {tr(origin === "drawing" ? "Drawing records" : "All source records")}
+                      <ChevronDownIcon className="size-3" />
+                    </Button>
+                  }
+                />
+                <ComposerPickerMenuPopup align="end">
+                  <MenuRadioGroup
+                    value={origin}
+                    onValueChange={(value) => setOrigin(value as typeof origin)}
+                  >
+                    <MenuRadioItem value="drawing" closeOnClick>
+                      {tr("Drawing records")}
+                    </MenuRadioItem>
+                    <MenuRadioItem value="all" closeOnClick>
+                      {tr("All source records")}
+                    </MenuRadioItem>
+                  </MenuRadioGroup>
+                </ComposerPickerMenuPopup>
+              </Menu>
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="chrome"
+                      size="sm"
                       aria-label={tr("History status")}
                     >
                       {tr(
@@ -618,10 +647,16 @@ export default function DrawingWorkbench() {
           </div>
         </div>
         <DrawingGallery
-          filters={{ query, statusGroup }}
+          filters={{ query, statusGroup, origin }}
           hasProvider={Boolean(provider)}
           onSettings={settings}
-          onOpen={setDetails}
+          onOpen={(job) => {
+            if (job.origin?.kind === "batch" && job.origin.ownerId)
+              void navigate({ to: "/image-batches", search: { batchId: job.origin.ownerId } });
+            else if (job.origin?.kind === "sprite" && job.origin.ownerId)
+              void navigate({ to: "/sprite-animation", search: { projectId: job.origin.ownerId } });
+            else setDetails(job);
+          }}
           onReuse={reuse}
           onRegenerate={(job) => void regenerate(job)}
           onCancel={(job) => void action(() => drawingApi().cancelJob({ id: job.id }))}

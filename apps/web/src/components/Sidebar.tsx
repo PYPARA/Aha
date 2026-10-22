@@ -6809,6 +6809,7 @@ export default function Sidebar() {
     !pathname.startsWith("/sprite-animation") &&
     !pathname.startsWith("/resources") &&
     !pathname.startsWith("/drawing") &&
+    !pathname.startsWith("/image-batches") &&
     !isOnSettings &&
     !isOnGroups &&
     !isOnKanban &&
@@ -6855,15 +6856,17 @@ export default function Sidebar() {
   const railItemLabel = (id: RailOrderableItemId): string =>
     id === "home" || id === "spaces"
       ? RAIL_PANEL_ITEM_LABELS[id]
-      : id === "spriteAnimation"
-        ? "Sprite animation"
-        : id === "resources"
-          ? "Resource center"
-          : id === "drawing"
-            ? "Drawing"
-            : id === "studio"
-              ? "Hubs"
-              : sidebarNavDescriptors[id].label;
+      : id === "imageBatches"
+        ? "Batch images"
+        : id === "spriteAnimation"
+          ? "Sprite animation"
+          : id === "resources"
+            ? "Resource center"
+            : id === "drawing"
+              ? "Drawing"
+              : id === "studio"
+                ? "Hubs"
+                : sidebarNavDescriptors[id].label;
   const railItemFor = (id: RailOrderableItemId): AppRailItem => {
     const base = { id, glyphs: railItemGlyphs(id), label: railItemLabel(id) };
     if (id === "home" || id === "spaces") {
@@ -6882,6 +6885,16 @@ export default function Sidebar() {
         },
       };
     }
+    if (id === "imageBatches")
+      return {
+        ...base,
+        badge: null,
+        active: railActiveItem === "imageBatches",
+        onSelect: () => {
+          selectRailRouteItem("imageBatches");
+          void navigate({ to: "/image-batches", search: {} });
+        },
+      };
     if (id === "spriteAnimation")
       return {
         ...base,
@@ -6942,7 +6955,16 @@ export default function Sidebar() {
   });
   const railItems: AppRailItem[] = railVisibleItemIds.map(railItemFor);
   const searchPaletteNavigationActions: SidebarSearchAction[] = (
-    ["drawing", "spriteAnimation", "resources", "inbox", "kanban", "studio", "automations"] as const
+    [
+      "drawing",
+      "imageBatches",
+      "spriteAnimation",
+      "resources",
+      "inbox",
+      "kanban",
+      "studio",
+      "automations",
+    ] as const
   )
     .filter((id) => isRailItemAvailable(id, railAvailability))
     .map((id) => {

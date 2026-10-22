@@ -5,11 +5,14 @@ export const RESOURCE_CHANNELS = {
   progress: "aha:resources:progress",
 } as const;
 export interface ResourceOrigin {
-  kind: "drawing" | "chat" | "local" | "game";
+  kind: "drawing" | "chat" | "local" | "game" | "image-batch";
   threadId?: string | undefined;
   messageId?: string | undefined;
   jobId?: string | undefined;
   batchId?: string | undefined;
+  taskId?: string | undefined;
+  attemptId?: string | undefined;
+  resultId?: string | undefined;
   prompt?: string | undefined;
   model?: string | undefined;
   parameters?: Record<string, unknown> | undefined;
@@ -58,6 +61,7 @@ export interface ResourceQuery {
   query?: string | undefined;
   searchIn?: "name" | "nameAndPath" | undefined;
   tag?: string | undefined;
+  originKind?: ResourceOrigin["kind"] | undefined;
   type?: "all" | "image" | "audio" | "video" | "document" | "other" | undefined;
   sort?: "name" | "modified" | undefined;
   offset?: number | undefined;
@@ -75,11 +79,37 @@ export interface ResourceLocateResult {
   offset: number;
   revision: number;
 }
+export interface ResourceLinkState {
+  status: "available" | "removed" | "other-library" | "unavailable";
+  name?: string | undefined;
+  error?: string | undefined;
+}
 export interface ResourceImportResult {
   added: number;
   skipped: number;
   failed: { name: string; error: string; path?: string }[];
   cancelled: boolean;
+}
+export interface ResourceCollectionItem {
+  resultId: string;
+  assetId: string;
+  name: string;
+  origin: ResourceOrigin;
+  status: "queued" | "writing" | "committed" | "linked" | "failed" | "superseded";
+  resourceId?: string | undefined;
+  path?: string | undefined;
+  fileKey?: string | undefined;
+  error?: string | undefined;
+}
+/** Durable application-level copy receipt. The target is a stable library and directory identity. */
+export interface ResourceCollectionOperation {
+  id: string;
+  libraryId: string;
+  directoryId: string | null;
+  directoryKey: string;
+  createdAt: string;
+  items: ResourceCollectionItem[];
+  released?: boolean | undefined;
 }
 export interface ResourceProgress {
   name: string;
@@ -131,9 +161,23 @@ export function drawingResourceError(
   return null;
 }
 export type ResourceCommand =
+  | { op: "listCollections" }
+  | {
+      op: "prepareCollection";
+      id: string;
+      libraryId: string;
+      directoryId: string | null;
+      items: Pick<ResourceCollectionItem, "resultId" | "assetId" | "name" | "origin">[];
+    }
+  | { op: "commitCollection"; operationId: string; resultId: string; bytes: Uint8Array }
+  | { op: "linkCollection"; operationId: string; resultId: string }
+  | { op: "failCollection"; operationId: string; resultId: string; error: string }
+  | { op: "retryCollection"; operationId: string }
+  | { op: "finishCollection"; operationId: string }
   | { op: "snapshot" | "refresh" | "chooseRoot" | "cancelImport" }
   | { op: "list"; query: ResourceQuery }
   | { op: "locate"; id: string; sort?: ResourceQuery["sort"] }
+  | { op: "resourceState"; libraryId: string; id: string }
   | { op: "createDirectory"; parent: string; name: string }
   | { op: "rename"; ids: string[]; name: string }
   | { op: "move"; ids: string[]; target: string }

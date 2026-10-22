@@ -178,7 +178,11 @@ export function DrawingGallery({
                       <img
                         loading="lazy"
                         src={imageUrl(job.outputs[0], "thumbnail")}
-                        onContextMenuCapture={(e) =>
+                        onContextMenuCapture={(e) => {
+                          if (job.origin?.kind === "batch" || job.origin?.kind === "sprite") {
+                            e.preventDefault();
+                            return;
+                          }
                           void resourceContextMenu(
                             e,
                             [
@@ -189,8 +193,8 @@ export function DrawingGallery({
                               ),
                             ],
                             tr,
-                          )
-                        }
+                          );
+                        }}
                         alt={job.prompt}
                         className="h-full w-full object-contain"
                       />
@@ -269,7 +273,10 @@ export function DrawingGallery({
                         />
                         <ComposerPickerMenuPopup align="end">
                           <MenuItem onClick={() => onOpen(job)}>{tr("Details")}</MenuItem>
-                          {window.desktopBridge?.resourceLibrary && job.outputs.length ? (
+                          {window.desktopBridge?.resourceLibrary &&
+                          job.outputs.length &&
+                          job.origin?.kind !== "batch" &&
+                          job.origin?.kind !== "sprite" ? (
                             <MenuItem
                               onClick={() =>
                                 collectResources(
@@ -283,16 +290,22 @@ export function DrawingGallery({
                             </MenuItem>
                           ) : null}
                           <MenuItem onClick={() => onReuse(job)}>{tr("Reuse parameters")}</MenuItem>
-                          {activeImageJob(job) ? (
+                          {job.origin?.kind === "batch" || job.origin?.kind === "sprite" ? (
+                            <MenuItem onClick={() => onOpen(job)}>
+                              {tr("Open source workbench")}
+                            </MenuItem>
+                          ) : activeImageJob(job) ? (
                             <MenuItem onClick={() => onCancel(job)}>{tr("Cancel task")}</MenuItem>
                           ) : (
                             <MenuItem onClick={() => onRegenerate(job)}>
                               {tr("Regenerate")} · {job.parameters.n}
                             </MenuItem>
                           )}
-                          <MenuItem className="text-destructive" onClick={() => onDelete(job)}>
-                            {tr("Delete")}
-                          </MenuItem>
+                          {job.origin?.kind !== "batch" && job.origin?.kind !== "sprite" && (
+                            <MenuItem className="text-destructive" onClick={() => onDelete(job)}>
+                              {tr("Delete")}
+                            </MenuItem>
+                          )}
                         </ComposerPickerMenuPopup>
                       </Menu>
                     </div>

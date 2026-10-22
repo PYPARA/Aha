@@ -17,6 +17,7 @@ import { Route as ChatResourcesRouteImport } from './routes/_chat.resources'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatPluginsRouteImport } from './routes/_chat.plugins'
 import { Route as ChatInboxRouteImport } from './routes/_chat.inbox'
+import { Route as ChatImageBatchesRouteImport } from './routes/_chat.image-batches'
 import { Route as ChatDrawingRouteImport } from './routes/_chat.drawing'
 import { Route as ChatAutomationsRouteImport } from './routes/_chat.automations'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
@@ -67,6 +68,11 @@ const ChatPluginsRoute = ChatPluginsRouteImport.update({
 const ChatInboxRoute = ChatInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatImageBatchesRoute = ChatImageBatchesRouteImport.update({
+  id: '/image-batches',
+  path: '/image-batches',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatDrawingRoute = ChatDrawingRouteImport.update({
@@ -136,6 +142,7 @@ export interface FileRoutesByFullPath {
   '/$threadId': typeof ChatThreadIdRoute
   '/automations': typeof ChatAutomationsRouteWithChildren
   '/drawing': typeof ChatDrawingRoute
+  '/image-batches': typeof ChatImageBatchesRoute
   '/inbox': typeof ChatInboxRoute
   '/plugins': typeof ChatPluginsRoute
   '/pull-requests': typeof ChatPullRequestsRouteWithChildren
@@ -155,6 +162,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/$threadId': typeof ChatThreadIdRoute
   '/drawing': typeof ChatDrawingRoute
+  '/image-batches': typeof ChatImageBatchesRoute
   '/inbox': typeof ChatInboxRoute
   '/plugins': typeof ChatPluginsRoute
   '/resources': typeof ChatResourcesRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/_chat/$threadId': typeof ChatThreadIdRoute
   '/_chat/automations': typeof ChatAutomationsRouteWithChildren
   '/_chat/drawing': typeof ChatDrawingRoute
+  '/_chat/image-batches': typeof ChatImageBatchesRoute
   '/_chat/inbox': typeof ChatInboxRoute
   '/_chat/plugins': typeof ChatPluginsRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRouteWithChildren
@@ -201,6 +210,7 @@ export interface FileRouteTypes {
     | '/$threadId'
     | '/automations'
     | '/drawing'
+    | '/image-batches'
     | '/inbox'
     | '/plugins'
     | '/pull-requests'
@@ -220,6 +230,7 @@ export interface FileRouteTypes {
   to:
     | '/$threadId'
     | '/drawing'
+    | '/image-batches'
     | '/inbox'
     | '/plugins'
     | '/resources'
@@ -241,6 +252,7 @@ export interface FileRouteTypes {
     | '/_chat/$threadId'
     | '/_chat/automations'
     | '/_chat/drawing'
+    | '/_chat/image-batches'
     | '/_chat/inbox'
     | '/_chat/plugins'
     | '/_chat/pull-requests'
@@ -319,6 +331,13 @@ declare module '@tanstack/react-router' {
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof ChatInboxRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/image-batches': {
+      id: '/_chat/image-batches'
+      path: '/image-batches'
+      fullPath: '/image-batches'
+      preLoaderRoute: typeof ChatImageBatchesRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/drawing': {
@@ -437,6 +456,7 @@ interface ChatRouteChildren {
   ChatThreadIdRoute: typeof ChatThreadIdRoute
   ChatAutomationsRoute: typeof ChatAutomationsRouteWithChildren
   ChatDrawingRoute: typeof ChatDrawingRoute
+  ChatImageBatchesRoute: typeof ChatImageBatchesRoute
   ChatInboxRoute: typeof ChatInboxRoute
   ChatPluginsRoute: typeof ChatPluginsRoute
   ChatPullRequestsRoute: typeof ChatPullRequestsRouteWithChildren
@@ -456,6 +476,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatThreadIdRoute: ChatThreadIdRoute,
   ChatAutomationsRoute: ChatAutomationsRouteWithChildren,
   ChatDrawingRoute: ChatDrawingRoute,
+  ChatImageBatchesRoute: ChatImageBatchesRoute,
   ChatInboxRoute: ChatInboxRoute,
   ChatPluginsRoute: ChatPluginsRoute,
   ChatPullRequestsRoute: ChatPullRequestsRouteWithChildren,

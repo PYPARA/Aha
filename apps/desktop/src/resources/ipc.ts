@@ -7,16 +7,47 @@ import { ResourceLibrary } from "./library";
 const ids = z.array(z.string().min(1).max(128)).min(1).max(10000);
 const text = z.string().max(4096);
 const origin = z.object({
-  kind: z.enum(["drawing", "chat", "local", "game"]),
+  kind: z.enum(["drawing", "chat", "local", "game", "image-batch"]),
   threadId: text.optional(),
   messageId: text.optional(),
   jobId: text.optional(),
   batchId: text.optional(),
+  taskId: text.optional(),
+  attemptId: text.optional(),
+  resultId: text.optional(),
   prompt: z.string().max(100000).optional(),
   model: text.optional(),
   parameters: z.record(z.string(), z.unknown()).optional(),
 });
 const Command = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("listCollections") }),
+  z.object({
+    op: z.literal("prepareCollection"),
+    id: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+    libraryId: text,
+    directoryId: text.nullable(),
+    items: z
+      .array(
+        z.object({
+          resultId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+          assetId: z.string().regex(/^[a-f0-9]{64}$/),
+          name: text,
+          origin,
+        }),
+      )
+      .min(1)
+      .max(500),
+  }),
+  z.object({
+    op: z.literal("commitCollection"),
+    operationId: text,
+    resultId: text,
+    bytes: z.instanceof(Uint8Array).refine((b) => b.byteLength <= 100 * 1024 * 1024),
+  }),
+  z.object({ op: z.literal("linkCollection"), operationId: text, resultId: text }),
+  z.object({ op: z.literal("failCollection"), operationId: text, resultId: text, error: text }),
+  z.object({ op: z.literal("retryCollection"), operationId: text }),
+  z.object({ op: z.literal("finishCollection"), operationId: text }),
   z.object({ op: z.literal("snapshot") }),
   z.object({ op: z.literal("refresh") }),
   z.object({ op: z.literal("chooseRoot") }),
@@ -30,12 +61,14 @@ const Command = z.discriminatedUnion("op", [
       query: text.optional(),
       searchIn: z.enum(["name", "nameAndPath"]).optional(),
       tag: text.optional(),
+      originKind: z.enum(["drawing", "chat", "local", "game", "image-batch"]).optional(),
       type: z.enum(["all", "image", "audio", "video", "document", "other"]).optional(),
       sort: z.enum(["name", "modified"]).optional(),
       offset: z.number().int().nonnegative().optional(),
     }),
   }),
   z.object({ op: z.literal("locate"), id: text, sort: z.enum(["name", "modified"]).optional() }),
+  z.object({ op: z.literal("resourceState"), libraryId: text, id: text }),
   z.object({ op: z.literal("createDirectory"), parent: text, name: text }),
   z.object({ op: z.literal("rename"), ids, name: text }),
   z.object({ op: z.literal("move"), ids, target: text }),
@@ -119,6 +152,10 @@ export function registerResourceLibrary(
     if (input.op === "snapshot") return library.snapshot();
     if (input.op === "list") return library.list(input.query);
     if (input.op === "locate") return library.locate(input.id, input.sort);
+    if (input.op === "resourceState") {
+      await ready;
+      return library.resourceState(input.libraryId, input.id);
+    }
     if (input.op === "read") return library.read(input.id, input.thumbnail);
     if (input.op === "reveal")
       return shell.showItemInFolder(
@@ -126,8 +163,33 @@ export function registerResourceLibrary(
       );
     await ready;
     return library.serial(async () => {
-      if (input.op !== "refresh" && input.op !== "chooseRoot") library.assertWritable();
+      if (
+        ![
+          "refresh",
+          "chooseRoot",
+          "listCollections",
+          "linkCollection",
+          "failCollection",
+          "finishCollection",
+          "commitCollection",
+        ].includes(input.op)
+      )
+        library.assertWritable();
       switch (input.op) {
+        case "listCollections":
+          return library.listCollections();
+        case "prepareCollection":
+          return library.prepareCollection(input);
+        case "commitCollection":
+          return library.commitCollection(input.operationId, input.resultId, input.bytes);
+        case "linkCollection":
+          return library.linkCollection(input.operationId, input.resultId);
+        case "failCollection":
+          return library.failCollection(input.operationId, input.resultId, input.error);
+        case "retryCollection":
+          return library.retryCollection(input.operationId);
+        case "finishCollection":
+          return library.finishCollection(input.operationId);
         case "refresh":
           return library.scan();
         case "chooseRoot": {

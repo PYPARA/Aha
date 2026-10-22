@@ -312,6 +312,7 @@ import { ThreadWorktreeHandoffDialog } from "./ThreadWorktreeHandoffDialog";
 
 import { ChatComposerFooter } from "./chat/ChatComposerFooter";
 import { ChatHeader } from "./chat/ChatHeader";
+import { ChatToImageBatch } from "./imageBatches/ChatToImageBatch";
 import { OpenThreadTabStrip } from "./chat/OpenThreadTabStrip";
 import { ChatSurfaceHeader } from "./chat/ChatSurfaceHeader";
 import { useAsyncUserInputResponse } from "./chat/useAsyncUserInputResponse";
@@ -3016,36 +3017,35 @@ export default function ChatView({
   useEffect(() => {
     if (!attachmentBridge || isSidechatExpired || pendingUserInputs.length) return;
     return attachmentBridge.register(threadId, async (files) => {
-      const result = await prepareComposerImageAttachmentsFromFiles({
+      await waitForLocalComposerImages();
+      const result = await receiveComposerResourceFiles(
         files,
-        existingAttachmentCount: composerImageAttachmentCount(),
-      });
-      const accepted = commitPreparedComposerImages(result.images);
-      const error =
-        accepted < result.images.length
-          ? `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} references per message.`
-          : result.error;
+        threadId,
+        addComposerImagesToDraft,
+        addComposerFilesToDraft,
+      );
+      const error = result.rejected.map((item) => item.error).join("\n") || null;
       setComposerImagePreparationError(error);
-      if (error) throw new Error(error);
+      // The regular composer owns persistence, including ordinary files and partial intake.
+      // A capacity failure must not discard the existing draft or accepted files.
       try {
         await persistComposerDraftImages(threadId);
       } catch (cause) {
-        // Roll back only this intake. Existing text/attachments survive a storage failure.
-        for (const image of result.images)
-          useComposerDraftStore.getState().removeImage(threadId, image.id);
         setComposerImagePreparationError(
-          cause instanceof Error ? cause.message : "Could not save image attachments. Try again.",
+          cause instanceof Error ? cause.message : "Could not save attachments. Try again.",
         );
         throw cause;
       }
+      if (error) throw new Error(error);
     });
   }, [
     attachmentBridge,
     threadId,
     isSidechatExpired,
     pendingUserInputs.length,
-    composerImageAttachmentCount,
-    commitPreparedComposerImages,
+    waitForLocalComposerImages,
+    addComposerImagesToDraft,
+    addComposerFilesToDraft,
     setComposerImagePreparationError,
   ]);
 
@@ -6836,6 +6836,7 @@ export default function ChatView({
           onRenameThread={() => setRenameDialogOpen(true)}
           {...(onCloseThreadPane ? { onCloseThreadPane } : {})}
         />
+        {!hideHeader && !isLocalDraftThread && <ChatToImageBatch thread={activeThread} />}
       </ChatSurfaceHeader>
 
       {/* Floating find panel — a root-level overlay so it sits on top of the

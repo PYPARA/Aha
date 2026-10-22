@@ -2,6 +2,10 @@ import { readEventLoopStatus } from "./eventLoopMonitor";
 import { makeGitActionRunner } from "./git/gitActionRunner";
 import { AgentGatewaySessionRegistry } from "./agentGateway/Services/AgentGatewaySessionRegistry";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { ProjectionThreadMessageRepository } from "./persistence/Services/ProjectionThreadMessages";
+import { ManagedAttachmentRepository } from "./persistence/Services/ManagedAttachments";
+import { makeSpriteReferenceReader } from "./agentGateway/spriteReferences";
 
 import {
   CommandId,
@@ -510,6 +514,12 @@ const makeWsRpcHandlersLayer = () =>
       const automationService = yield* AutomationService;
       const todoService = yield* TodoService;
       const imageGenerationService = yield* ImageGenerationService;
+      const batchMessages = Option.getOrUndefined(
+        yield* Effect.serviceOption(ProjectionThreadMessageRepository),
+      );
+      const batchAttachments = Option.getOrUndefined(
+        yield* Effect.serviceOption(ManagedAttachmentRepository),
+      );
       const projectAgentService = yield* ProjectAgentService;
       const projectAgentRepository = yield* ProjectAgentRepository;
       const config = yield* ServerConfig;
@@ -3190,6 +3200,83 @@ const makeWsRpcHandlersLayer = () =>
           rpcEffect(imageGenerationService.spriteConfirm(input), "Sprite confirmation failed"),
         [WS_METHODS.spriteCommand]: (input) =>
           rpcEffect(imageGenerationService.spriteCommand(input), "Sprite request failed"),
+        [WS_METHODS.imageBatchCommand]: (input) =>
+          rpcEffect(
+            Effect.tryPromise(() => imageGenerationService.batches.command(input.command)),
+            "Batch request failed",
+          ),
+        [WS_METHODS.imageBatchGet]: (input) =>
+          rpcEffect(
+            Effect.tryPromise(() => imageGenerationService.batches.get(input.id)),
+            "Could not read batch",
+          ),
+        [WS_METHODS.imageBatchList]: (input) =>
+          rpcEffect(
+            Effect.tryPromise(() => imageGenerationService.batches.repository.list(input)),
+            "Could not list batches",
+          ),
+        [WS_METHODS.imageBatchResults]: (input) =>
+          rpcEffect(
+            Effect.tryPromise(() => imageGenerationService.batches.repository.results(input)),
+            "Could not list results",
+          ),
+        [WS_METHODS.imageBatchResult]: (input) =>
+          rpcEffect(
+            Effect.tryPromise(() => imageGenerationService.batches.repository.result(input.id)),
+            "Could not read result",
+          ),
+        [WS_METHODS.imageBatchImportSources]: (input) =>
+          rpcEffect(
+            Effect.tryPromise(async () => {
+              const batch = await imageGenerationService.batches.get(input.batchId);
+              if (batch.sourceThreadId !== input.sourceThreadId || !batch.threadId)
+                throw new Error("The source conversation does not belong to this batch import.");
+              if (!batchMessages) throw new Error("Source conversation storage is unavailable.");
+              const reader = makeSpriteReferenceReader({
+                turns: { getByTurnId: () => Effect.succeed(Option.none()) },
+                messages: batchMessages,
+                attachments: batchAttachments,
+                attachmentsDir: config.attachmentsDir,
+                includeFiles: true,
+              });
+              for (const selected of input.attachments) {
+                const file = await reader.readSent!(
+                  input.sourceThreadId,
+                  selected.messageId,
+                  selected.attachmentId,
+                );
+                const id = createHash("sha256")
+                  .update(batch.id + ":" + selected.messageId + ":" + selected.attachmentId)
+                  .digest("hex");
+                await imageGenerationService.batches.captureSources(batch.id, batch.threadId, [
+                  {
+                    id,
+                    name: file.name,
+                    mimeType: file.mimeType ?? "application/octet-stream",
+                    bytes: file.bytes.length,
+                    threadId: input.sourceThreadId,
+                    messageId: selected.messageId,
+                    attachmentId: "batch-copy-" + id,
+                    data: file.bytes,
+                  },
+                ]);
+              }
+              return imageGenerationService.batches.get(batch.id);
+            }),
+            "Could not copy source attachments",
+          ),
+        [WS_METHODS.imageBatchPreflight]: (input) =>
+          rpcEffect(
+            Effect.tryPromise(() => imageGenerationService.batches.preflight(input.id)),
+            "Batch preflight failed",
+          ),
+        [WS_METHODS.imageBatchForThread]: (input) =>
+          rpcEffect(
+            Effect.tryPromise(() =>
+              imageGenerationService.batches.repository.forThread(input.threadId),
+            ),
+            "Could not read batch conversation",
+          ),
         [WS_METHODS.imageProviderList]: () =>
           rpcEffect(imageGenerationService.listProviders(), "Failed to list image providers"),
         [WS_METHODS.imageProviderUpsert]: (input) =>

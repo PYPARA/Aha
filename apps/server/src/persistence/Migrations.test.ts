@@ -684,6 +684,7 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         [135, "ImageGeneration"],
         [136, "ImageEditDocuments"],
         [137, "ProjectionMessageTurnActivityIndex"],
+        [138, "ImageBatches"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -773,6 +774,7 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
           { migration_id: 135, name: "ImageGeneration" },
           { migration_id: 136, name: "ImageEditDocuments" },
           { migration_id: 137, name: "ProjectionMessageTurnActivityIndex" },
+          { migration_id: 138, name: "ImageBatches" },
         ],
       );
       const groupConfigColumns = yield* sql<{ readonly name: string }>`
@@ -942,6 +944,7 @@ agentGatewayRetentionLegacyLayer(
           [135, "ImageGeneration"],
           [136, "ImageEditDocuments"],
           [137, "ProjectionMessageTurnActivityIndex"],
+          [138, "ImageBatches"],
         ]);
 
         const columns = yield* sql<{ readonly name: string }>`
@@ -1074,6 +1077,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [135, "ImageGeneration"],
         [136, "ImageEditDocuments"],
         [137, "ProjectionMessageTurnActivityIndex"],
+        [138, "ImageBatches"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -1147,6 +1151,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [135, "ImageGeneration"],
           [136, "ImageEditDocuments"],
           [137, "ProjectionMessageTurnActivityIndex"],
+          [138, "ImageBatches"],
         ],
       );
 
@@ -1274,6 +1279,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [135, "ImageGeneration"],
         [136, "ImageEditDocuments"],
         [137, "ProjectionMessageTurnActivityIndex"],
+        [138, "ImageBatches"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -1343,6 +1349,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [135, "ImageGeneration"],
           [136, "ImageEditDocuments"],
           [137, "ProjectionMessageTurnActivityIndex"],
+          [138, "ImageBatches"],
         ],
       );
       const preservedSpaces = yield* sql<{ readonly spaceId: string }>`

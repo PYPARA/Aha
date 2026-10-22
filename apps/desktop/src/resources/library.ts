@@ -21,6 +21,9 @@ import {
   type ResourceBatchPlan,
   type ResourceBatchItemResult,
   type ResourceBatchResult,
+  type ResourceCollectionOperation,
+  type ResourceCollectionItem,
+  type ResourceLinkState,
 } from "@synara/contracts/resourceLibrary";
 
 const CONTROL = ".aha-resources";
@@ -42,11 +45,14 @@ const Metadata = z.object({
       deleted: z.boolean().optional(),
       origin: z
         .object({
-          kind: z.enum(["drawing", "chat", "local", "game"]),
+          kind: z.enum(["drawing", "chat", "local", "game", "image-batch"]),
           threadId: z.string().optional(),
           messageId: z.string().optional(),
           jobId: z.string().optional(),
           batchId: z.string().optional(),
+          taskId: z.string().optional(),
+          attemptId: z.string().optional(),
+          resultId: z.string().optional(),
           prompt: z.string().optional(),
           model: z.string().optional(),
           parameters: z.record(z.string(), z.unknown()).optional(),
@@ -55,6 +61,29 @@ const Metadata = z.object({
     }),
   ),
 });
+const CollectionOperations = z.array(
+  z.object({
+    id: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+    libraryId: z.string(),
+    directoryId: z.string().nullable(),
+    directoryKey: z.string(),
+    createdAt: z.string(),
+    released: z.boolean().optional(),
+    items: z.array(
+      z.object({
+        resultId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+        assetId: z.string().regex(/^[a-f0-9]{64}$/),
+        name: z.string(),
+        origin: Metadata.shape.entries.element.shape.origin.unwrap(),
+        status: z.enum(["queued", "writing", "committed", "linked", "failed", "superseded"]),
+        resourceId: z.string().optional(),
+        path: z.string().optional(),
+        fileKey: z.string().optional(),
+        error: z.string().optional(),
+      }),
+    ),
+  }),
+);
 const missing = (e: unknown) => (e as NodeJS.ErrnoException)?.code === "ENOENT";
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function safeName(value: string) {
@@ -143,6 +172,7 @@ async function atomicJson(file: string, data: unknown) {
   }
 }
 export class ResourceLibrary {
+  private collections: ResourceCollectionOperation[] | null = null;
   root: string | null = null;
   libraryId: string | null = null;
   entries: ResourceEntry[] = [];
@@ -562,6 +592,21 @@ export class ResourceLibrary {
     if (!value) throw new Error("Resource no longer exists. Refresh the library.");
     return value;
   }
+  async resourceState(libraryId: string, id: string): Promise<ResourceLinkState> {
+    if (libraryId !== this.libraryId) return { status: "other-library" };
+    const entry = this.entries.find((entry) => entry.id === id);
+    if (!entry || entry.deleted) return { status: "removed" };
+    try {
+      const stat = await fs.lstat(await this.resolve(entry.path));
+      if (stat.isSymbolicLink() || `${stat.dev}:${stat.ino}` !== entry.fileKey)
+        return { status: "unavailable", error: "Resource identity changed. Refresh the library." };
+      return { status: "available", name: entry.name };
+    } catch (error) {
+      return missing(error)
+        ? { status: "removed" }
+        : { status: "unavailable", error: message(error) };
+    }
+  }
   async createDirectory(parent: string, name: string) {
     this.assertWritable();
     const rel = [parent, safeName(name)].filter(Boolean).join("/");
@@ -903,6 +948,225 @@ export class ResourceLibrary {
   }
   cancelImport() {
     this.cancelled = true;
+  }
+  async listCollections(): Promise<ResourceCollectionOperation[]> {
+    if (!this.collections) {
+      try {
+        this.collections = CollectionOperations.parse(
+          JSON.parse(await fs.readFile(this.configFile + ".collections.json", "utf8")),
+        );
+      } catch (error) {
+        if (!missing(error)) throw error;
+        this.collections = [];
+      }
+    }
+    return structuredClone(this.collections!);
+  }
+  private async persistCollections() {
+    await fs.mkdir(path.dirname(this.configFile), { recursive: true });
+    await atomicJson(this.configFile + ".collections.json", this.collections);
+    this.changed();
+  }
+  private async collection(id: string) {
+    await this.listCollections();
+    const operation = this.collections!.find((item) => item.id === id);
+    if (!operation) throw new Error("Collection operation is unavailable.");
+    return operation;
+  }
+  private async collectionTarget(operation: ResourceCollectionOperation) {
+    this.assertWritable();
+    if (operation.libraryId !== this.libraryId)
+      throw new Error("The target library changed. Choose the destination again.");
+    const directory = operation.directoryId === null ? "" : this.entry(operation.directoryId).path;
+    if (operation.directoryId !== null && this.entry(operation.directoryId).kind !== "directory")
+      throw new Error("Choose a folder.");
+    const stat = await fs.lstat(await this.resolve(directory));
+    if (`${stat.dev}:${stat.ino}` !== operation.directoryKey)
+      throw new Error("The target folder changed. Choose the destination again.");
+    return directory;
+  }
+  async prepareCollection(input: {
+    id: string;
+    libraryId: string;
+    directoryId: string | null;
+    items: Pick<ResourceCollectionItem, "resultId" | "assetId" | "name" | "origin">[];
+  }) {
+    await this.listCollections();
+    const existing = this.collections!.find((operation) => operation.id === input.id);
+    if (existing) {
+      if (
+        existing.libraryId !== input.libraryId ||
+        existing.directoryId !== input.directoryId ||
+        JSON.stringify(
+          existing.items.map(({ resultId, assetId, name, origin }) => ({
+            resultId,
+            assetId,
+            name,
+            origin,
+          })),
+        ) !== JSON.stringify(input.items)
+      )
+        throw new Error("Collection request ID was reused with different content.");
+      return structuredClone(existing);
+    }
+    this.assertWritable();
+    if (input.libraryId !== this.libraryId)
+      throw new Error("The target library changed. Choose the destination again.");
+    const directory = input.directoryId === null ? "" : this.entry(input.directoryId).path;
+    if (input.directoryId !== null && this.entry(input.directoryId).kind !== "directory")
+      throw new Error("Choose a folder.");
+    const stat = await fs.lstat(await this.resolve(directory));
+    if (new Set(input.items.map((item) => item.resultId)).size !== input.items.length)
+      throw new Error("Duplicate collection result.");
+    for (const item of input.items) {
+      safeName(item.name);
+      if (
+        item.origin.kind !== "image-batch" ||
+        item.origin.resultId !== item.resultId ||
+        !item.origin.batchId ||
+        !item.origin.taskId ||
+        !item.origin.attemptId
+      )
+        throw new Error("Invalid batch result source.");
+    }
+    const operation: ResourceCollectionOperation = {
+      id: input.id,
+      libraryId: input.libraryId,
+      directoryId: input.directoryId,
+      directoryKey: `${stat.dev}:${stat.ino}`,
+      createdAt: new Date().toISOString(),
+      items: input.items.map((item) => ({ ...item, status: "queued" })),
+    };
+    for (const previous of this.collections!)
+      for (const item of previous.items)
+        if (item.status === "failed" && input.items.some((next) => next.resultId === item.resultId))
+          item.status = "superseded";
+    this.collections!.push(operation);
+    await this.persistCollections();
+    return structuredClone(operation);
+  }
+  async commitCollection(operationId: string, resultId: string, bytes: Uint8Array) {
+    const operation = await this.collection(operationId),
+      item = operation.items.find((item) => item.resultId === resultId);
+    if (!item) throw new Error("Collection result is unavailable.");
+    try {
+      const target = await this.collectionTarget(operation);
+      if (createHash("sha256").update(bytes).digest("hex") !== item.assetId)
+        throw new Error("Original image checksum does not match the result.");
+      const prior = this.entries.find(
+        (entry) => entry.origin?.kind === "image-batch" && entry.origin.resultId === resultId,
+      );
+      if (prior?.deleted)
+        throw new Error(
+          "This result was removed from the library. Restore it from the system trash first.",
+        );
+      if (prior) {
+        const stat = await fs.lstat(await this.resolve(prior.path));
+        if (
+          stat.isSymbolicLink() ||
+          `${stat.dev}:${stat.ino}` !== prior.fileKey ||
+          (await hashFile(await this.resolve(prior.path))) !== item.assetId
+        )
+          throw new Error("The collected result changed. Refresh the library.");
+        item.resourceId = prior.id;
+        item.status = "committed";
+        delete item.error;
+        await this.persistCollections();
+        return structuredClone(item);
+      }
+      const control = await this.controlRoot(),
+        temp = path.join(control, `collect-${operation.id}-${resultId}.pending`);
+      let destination = item.path ? await this.resolve(item.path, true) : null;
+      let committed = false;
+      if (destination && (await exists(destination))) {
+        const stat = await fs.lstat(destination);
+        committed =
+          !stat.isSymbolicLink() &&
+          `${stat.dev}:${stat.ino}` === item.fileKey &&
+          (await hashFile(destination)) === item.assetId;
+        if (!committed)
+          throw new Error("The collection destination changed. Choose the destination again.");
+      }
+      if (!committed) {
+        await fs.rm(temp, { force: true });
+        await fs.writeFile(temp, bytes, { flag: "wx", mode: 0o600 });
+        const stat = await fs.lstat(temp);
+        item.path = (await this.available(target, item.name)).path;
+        item.fileKey = `${stat.dev}:${stat.ino}`;
+        item.resourceId ??= randomUUID();
+        item.status = "writing";
+        // Journal the identity before committing the file. A lost receipt recovers this exact inode.
+        await this.persistCollections();
+        destination = await this.resolve(item.path, true);
+        await fs.link(temp, destination);
+      }
+      const stat = await fs.lstat(destination!);
+      const recovered = this.entries.find((entry) => entry.path === item.path && !entry.deleted);
+      if (recovered && recovered.fileKey !== item.fileKey)
+        throw new Error("The collection destination changed. Choose the destination again.");
+      const entry: ResourceEntry = {
+        id: item.resourceId!,
+        path: item.path!,
+        name: path.posix.basename(item.path!),
+        kind: "file",
+        bytes: stat.size,
+        modifiedAt: stat.mtimeMs,
+        hash: item.assetId,
+        fileKey: item.fileKey!,
+        tags: recovered?.tags ?? [],
+        notes: recovered?.notes ?? "",
+        origin: item.origin,
+      };
+      await this.persist([
+        ...this.entries.filter((existing) => existing.id !== entry.id && existing !== recovered),
+        entry,
+      ]);
+      item.status = "committed";
+      delete item.error;
+      await this.persistCollections();
+      await fs.rm(temp, { force: true });
+      return structuredClone(item);
+    } catch (error) {
+      item.status = "failed";
+      item.error = message(error);
+      await this.persistCollections();
+      throw error;
+    }
+  }
+  async linkCollection(operationId: string, resultId: string) {
+    const operation = await this.collection(operationId),
+      item = operation.items.find((item) => item.resultId === resultId);
+    if (!item || !["committed", "linked"].includes(item.status))
+      throw new Error("Copy has not been committed.");
+    item.status = "linked";
+    delete item.error;
+    await this.persistCollections();
+  }
+  async failCollection(operationId: string, resultId: string, error: string) {
+    const operation = await this.collection(operationId),
+      item = operation.items.find((item) => item.resultId === resultId);
+    if (!item || ["committed", "linked"].includes(item.status)) return;
+    item.status = "failed";
+    item.error = error;
+    await this.persistCollections();
+  }
+  async retryCollection(operationId: string) {
+    const operation = await this.collection(operationId);
+    await this.collectionTarget(operation);
+    for (const item of operation.items)
+      if (item.status === "failed") {
+        item.status = "queued";
+        delete item.error;
+      }
+    await this.persistCollections();
+    return structuredClone(operation);
+  }
+  async finishCollection(operationId: string) {
+    const operation = await this.collection(operationId);
+    if (!operation.items.every((item) => ["linked", "superseded"].includes(item.status)))
+      throw new Error("Collection is still pending.");
+    operation.released = true;
+    await this.persistCollections();
   }
   private async copyOne(
     source: string | Uint8Array,

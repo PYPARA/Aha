@@ -133,6 +133,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState("");
   const [type, setType] = useState<ResourceQuery["type"]>("all");
+  const [originKind, setOriginKind] = useState<ResourceQuery["originKind"]>();
   const [offset, setOffset] = useState(0);
   const [selection, setSelection] = useState(emptyResourceSelection);
   const [multiple, setMultiple] = useState(false);
@@ -148,6 +149,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
       query: string;
       tag: string;
       type: ResourceQuery["type"];
+      originKind: ResourceQuery["originKind"];
       sort: "name" | "modified";
       offset: number;
       scroll: number;
@@ -162,6 +164,40 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const externalLocate = useRef(false);
+  useEffect(() => {
+    if (externalLocate.current) return;
+    externalLocate.current = true;
+    const raw = sessionStorage.getItem("aha:resource-locate");
+    if (!raw) return;
+    sessionStorage.removeItem("aha:resource-locate");
+    void (async () => {
+      const target = JSON.parse(raw) as { libraryId: string; resourceId: string };
+      if (target.libraryId !== snapshot.libraryId)
+        throw new Error(
+          tr("The result belongs to another library. Open that library to locate it."),
+        );
+      const located = await resourceApi<ResourceLocateResult>({
+        op: "locate",
+        id: target.resourceId,
+        sort: preferences.sort,
+      });
+      setPreferences((previous) => ({
+        ...previous,
+        location: {
+          ...directoryLocation(located.parentPath, snapshot.directories),
+          directoryId: located.parentId,
+        },
+      }));
+      setQuery("");
+      setTag("");
+      setType("all");
+      setOriginKind(undefined);
+      setOffset(located.offset);
+      setPendingLocate(located);
+      setInspector(true);
+    })().catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+  }, [snapshot.libraryId, snapshot.directories, preferences.sort, tr]);
   const [progress, setProgress] = useState("");
   const tasks = useResourceTaskResults((state) => state.byLibrary[snapshot.libraryId!]);
   const importResult = tasks?.import ?? null;
@@ -171,7 +207,10 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
   const setBatchResult = (result: typeof batchResult) =>
     recordResourceTask(snapshot.libraryId!, { batch: result });
   const transfer = useResourceTransfer((state) => state.lastResult);
-  const filters = resourceQuery(location, query, tag, type, preferences.sort, offset);
+  const filters = {
+    ...resourceQuery(location, query, tag, type, preferences.sort, offset),
+    ...(originKind ? { originKind } : {}),
+  };
   const page = useQuery({
     queryKey: [...resourceKey, "list", snapshot.libraryId, filters],
     queryFn: () => resourceApi<ResourcePage>({ op: "list", query: filters }),
@@ -369,6 +408,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
     query,
     tag,
     type,
+    originKind,
     sort: preferences.sort,
     offset,
     scroll: scroller.current?.scrollTop ?? 0,
@@ -381,6 +421,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
       query: "",
       tag: "",
       type: "all",
+      originKind: undefined,
       sort: preferences.sort,
       offset: nextOffset,
       scroll: 0,
@@ -407,6 +448,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
       setType("all");
       setMultiple(false);
       setSidebarOpen(false);
+      setOriginKind(undefined);
       setPendingLocate(null);
     });
   const traverseHistory = (direction: -1 | 1) =>
@@ -421,6 +463,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
       setQuery(item.query);
       setTag(item.tag);
       setType(item.type);
+      setOriginKind(item.originKind);
       setOffset(item.offset);
       setSelection(emptyResourceSelection());
       setPreview(null);
@@ -447,6 +490,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
         setTag("");
         setType("all");
         setMultiple(false);
+        setOriginKind(undefined);
         setSelection(emptyResourceSelection());
         setPreview(null);
         setOffset(located.offset);
@@ -861,6 +905,8 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
             query={query}
             tag={tag}
             type={type}
+            originKind={originKind}
+            onOriginKind={(value) => changeRange(() => setOriginKind(value))}
             sort={preferences.sort}
             view={preferences.view}
             multiple={multiple}
@@ -875,6 +921,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
                 setQuery("");
                 setTag("");
                 setType("all");
+                setOriginKind(undefined);
               })
             }
             onNavigate={navigateLocation}

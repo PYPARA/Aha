@@ -1,3 +1,4 @@
+import { makeImageBatchTools } from "../imageBatchTools";
 import { ImageGenerationService } from "../../imageGeneration/Services/ImageGenerationService";
 import { makeSpriteReferenceReader } from "../spriteReferences";
 import { makeSpriteTools } from "../spriteTools";
@@ -1633,6 +1634,18 @@ export const makeAgentGateway = Effect.gen(function* () {
             messages: hubMessages,
             attachments: attachmentRepository,
             attachmentsDir: serverConfig.attachmentsDir,
+          }),
+        )
+      : []),
+    ...(Option.isSome(spriteImages) && hubMessages
+      ? makeImageBatchTools(
+          spriteImages.value.batches,
+          makeSpriteReferenceReader({
+            turns: projectionTurns,
+            messages: hubMessages,
+            attachments: attachmentRepository,
+            attachmentsDir: serverConfig.attachmentsDir,
+            includeFiles: true,
           }),
         )
       : []),

@@ -15,6 +15,9 @@ export default mergeConfig(
         provider: playwright(),
         instances: [{ browser: "chromium" }],
         headless: true,
+        screenshotDirectory: fileURLToPath(
+          new URL("../../.tmp/validation/browser", import.meta.url),
+        ),
         api: { host: "127.0.0.1", port: 51230 },
       },
       testTimeout: 60000,

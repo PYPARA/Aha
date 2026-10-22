@@ -837,7 +837,7 @@ describe("migration backups", () => {
         yield* sql`INSERT INTO native_probe VALUES ('preserved')`;
         expect(
           (yield* runWithPreMigrationBackup(dbPath, runMigrations())).map(([id]) => id),
-        ).toEqual([135, 136, 137]);
+        ).toEqual([135, 136, 137, 138]);
         expect(yield* sql`SELECT * FROM native_probe`).toEqual([{ value: "preserved" }]);
         expect(yield* runMigrations()).toEqual([]);
       }),

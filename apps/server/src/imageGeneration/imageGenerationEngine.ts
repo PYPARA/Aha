@@ -41,8 +41,10 @@ export const isImageJobActive = (status: ImageJob["status"]) =>
   ["queued", "running", "saving"].includes(status);
 const secretName = (id: string) => `image-provider-${id}-key`;
 export class ImageGenerationEngine {
+  private lastBatchByProvider = new Map<string, string>();
   /** Assets retained by persistent sprite generation records. */
   readonly spriteAssetIds = new Set<string>();
+  batchCanDispatch: ((job: ImageJob) => Promise<boolean>) | undefined;
   /** Unknown sprite records can contain references we cannot safely enumerate. */
   spriteRecoveryProjects = new Set<string>();
   readonly assets: ImageAssetStore;
@@ -281,7 +283,11 @@ export class ImageGenerationEngine {
       }),
     );
   }
-  async createJob(input: ImageJobCreateInput, isTest = false) {
+  async createJob(
+    input: ImageJobCreateInput,
+    isTest = false,
+    origin: NonNullable<ImageJob["origin"]> = { kind: isTest ? "test" : "drawing" },
+  ) {
     return this.locked(async () => {
       const existing = await Effect.runPromise(this.repository.getRequest(input.clientRequestId));
       if (existing) return existing;
@@ -319,6 +325,7 @@ export class ImageGenerationEngine {
       const job: ImageJob = {
         id: randomUUID(),
         clientRequestId: input.clientRequestId,
+        origin,
         providerId: provider.id,
         providerName: provider.name,
         providerVersion: provider.version,
@@ -366,8 +373,36 @@ export class ImageGenerationEngine {
     await this.locked(async () => {
       const providers = await this.listProviders();
       const jobs = await Effect.runPromise(this.repository.activeJobs());
-      for (const queued of jobs) {
+      const ordered = jobs.filter((job) => job.origin?.kind !== "batch");
+      for (const providerId of new Set(
+        jobs.filter((job) => job.origin?.kind === "batch").map((job) => job.providerId),
+      )) {
+        const groups = new Map<string, ImageJob[]>();
+        for (const job of jobs)
+          if (job.origin?.kind === "batch" && job.providerId === providerId) {
+            const owner = job.origin.ownerId ?? job.id;
+            const group = groups.get(owner) ?? [];
+            group.push(job);
+            groups.set(owner, group);
+          }
+        const owners = [...groups.keys()],
+          last = owners.indexOf(this.lastBatchByProvider.get(providerId) ?? "");
+        const rotated = [...owners.slice(last + 1), ...owners.slice(0, last + 1)];
+        for (let row = 0; row < jobs.length; row++) {
+          let added = false;
+          for (const owner of rotated) {
+            const job = groups.get(owner)?.[row];
+            if (job) {
+              ordered.push(job);
+              added = true;
+            }
+          }
+          if (!added) break;
+        }
+      }
+      for (const queued of ordered) {
         if (queued.status !== "queued") continue;
+        if (this.batchCanDispatch && !(await this.batchCanDispatch(queued))) continue;
         const provider = providers.find((p) => p.id === queued.providerId);
         if (!provider) {
           await this.save({
@@ -397,11 +432,22 @@ export class ImageGenerationEngine {
           provider.concurrency
         )
           continue;
+        if (queued.origin?.kind === "batch") {
+          const limit = Math.min(2, Math.max(1, provider.concurrency - 1));
+          const activeJobs = [...this.active.keys()].map((id) => jobs.find((j) => j.id === id));
+          if (
+            activeJobs.filter((j) => j?.providerId === provider.id && j.origin?.kind === "batch")
+              .length >= limit
+          )
+            continue;
+        }
         const key = await this.key(provider.id);
         const job = await this.save({ ...queued, status: "running", startedAt: now() });
         const controller = new AbortController();
         const slot = { providerId: provider.id, controller, task: Promise.resolve() };
         this.active.set(job.id, slot);
+        if (job.origin?.kind === "batch")
+          this.lastBatchByProvider.set(provider.id, job.origin.ownerId ?? job.id);
         slot.task = this.run(job, provider, key, controller)
           .catch(() => {})
           .finally(() => {
@@ -607,6 +653,8 @@ export class ImageGenerationEngine {
     return this.locked(async () => {
       const job = await this.getJob(id);
       if (!isImageJobActive(job.status)) return job;
+      // Returned batch payloads must finish saving even when the remaining queue is cancelled.
+      if (job.origin?.kind === "batch" && job.status === "saving") return job;
       this.active.get(id)?.controller.abort();
       return this.save({ ...job, status: "cancelled", finishedAt: now(), error: null });
     });

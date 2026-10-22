@@ -1,3 +1,9 @@
+import {
+  ImageBatchCommand,
+  ImageBatchListInput,
+  ImageBatchResultsInput,
+  ImageBatchImportSources,
+} from "./imageBatches";
 import { SpriteCommand, SpritePlanConfirmInput, SpriteRetryConfirmInput } from "./spriteAnimation";
 import { Schema, Struct } from "effect";
 import {
@@ -398,6 +404,14 @@ export const WS_METHODS = {
   imageDraftGet: "imageDraft.get",
   imageDraftUpsert: "imageDraft.upsert",
   imageDraftDelete: "imageDraft.delete",
+  imageBatchCommand: "imageBatch.command",
+  imageBatchList: "imageBatch.list",
+  imageBatchGet: "imageBatch.get",
+  imageBatchResults: "imageBatch.results",
+  imageBatchResult: "imageBatch.result",
+  imageBatchImportSources: "imageBatch.importSources",
+  imageBatchPreflight: "imageBatch.preflight",
+  imageBatchForThread: "imageBatch.forThread",
   imageJobList: "imageJob.list",
   spriteCommand: "sprite.command",
   spriteForThread: "sprite.forThread",
@@ -697,6 +711,14 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.imageJobGet, ImageIdInput),
   tagRequestBody(WS_METHODS.imageJobDelete, ImageIdInput),
   tagRequestBody(WS_METHODS.spriteForThread, Schema.Struct({ threadId: Schema.String })),
+  tagRequestBody(WS_METHODS.imageBatchCommand, Schema.Struct({ command: ImageBatchCommand })),
+  tagRequestBody(WS_METHODS.imageBatchList, ImageBatchListInput),
+  tagRequestBody(WS_METHODS.imageBatchGet, ImageIdInput),
+  tagRequestBody(WS_METHODS.imageBatchPreflight, ImageIdInput),
+  tagRequestBody(WS_METHODS.imageBatchResults, ImageBatchResultsInput),
+  tagRequestBody(WS_METHODS.imageBatchResult, ImageIdInput),
+  tagRequestBody(WS_METHODS.imageBatchImportSources, ImageBatchImportSources),
+  tagRequestBody(WS_METHODS.imageBatchForThread, Schema.Struct({ threadId: Schema.String })),
   tagRequestBody(WS_METHODS.spriteCommand, SpriteCommand),
   tagRequestBody(WS_METHODS.spriteConfirm, SpritePlanConfirmInput),
   tagRequestBody(WS_METHODS.spriteRetryConfirm, SpriteRetryConfirmInput),

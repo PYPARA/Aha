@@ -1,3 +1,6 @@
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { ImageBatchRepository } from "../../imageBatches/repository";
+import { ImageBatchEngine } from "../../imageBatches/engine";
 import { SpriteEngine } from "../../spriteAnimation/spriteEngine";
 import type {
   SpriteCommand,
@@ -28,6 +31,7 @@ import { ServerSecretStore } from "../../auth/Services/ServerSecretStore";
 import { ImageGenerationRepository } from "../../persistence/Services/ImageGenerationRepository";
 import { ImageGenerationEngine } from "../imageGenerationEngine";
 export interface ImageGenerationServiceShape {
+  batches: ImageBatchEngine;
   spriteDetachThread: (threadId: string) => Effect.Effect<void, Error>;
   spritePropose: (input: SpriteCommand) => Effect.Effect<SpriteState, Error>;
   spriteRetryConfirm: (input: SpriteRetryConfirmInput) => Effect.Effect<SpriteState, Error>;
@@ -84,13 +88,34 @@ export const ImageGenerationServiceLive = Layer.effect(
     const sprites = new SpriteEngine(path.join(config.stateDir, "sprites"), engine, (event) =>
       Effect.runPromise(PubSub.publish(events, event)).then(() => {}),
     );
+    const batches = new ImageBatchEngine(
+      new ImageBatchRepository(yield* SqlClient.SqlClient),
+      engine,
+      path.join(config.stateDir, "image-batches"),
+      (event) => Effect.runPromise(PubSub.publish(events, event)).then(() => {}),
+    );
+    yield* promise(() => batches.initialize());
     yield* promise(() => sprites.initialize());
+    yield* promise(() => sprites.migrateJobOrigins());
+    yield* promise(() => batches.tick());
     yield* promise(() => engine.initialize());
+    let ticking = false;
     const timer = setInterval(() => {
-      void engine
+      if (ticking) return;
+      ticking = true;
+      void batches
         .tick()
+        .then(() => engine.tick())
         .then(() => sprites.tick())
-        .catch(() => {});
+        .catch((error) => {
+          console.error(
+            "Creative queue tick failed",
+            error instanceof Error ? error.message : "Unknown error",
+          );
+        })
+        .finally(() => {
+          ticking = false;
+        });
     }, 500);
     timer.unref();
     const cleanup = setInterval(
@@ -108,6 +133,7 @@ export const ImageGenerationServiceLive = Layer.effect(
       }),
     );
     const service: ImageGenerationServiceShape = {
+      batches,
       spriteDetachThread: (id) => promise(() => sprites.detachThread(id)),
       spritePropose: (input) => promise(() => sprites.command(input, true)),
       spriteRetryConfirm: (input) => promise(() => sprites.retryConfirm(input)),
@@ -124,8 +150,20 @@ export const ImageGenerationServiceLive = Layer.effect(
       listJobs: (i) => repository.listJobs(i),
       getJob: (id) => promise(() => engine.getJob(id)),
       createJob: (i) => promise(() => engine.createJob(i)),
-      cancelJob: (id) => promise(() => engine.cancelJob(id)),
-      deleteJob: (id) => promise(() => engine.deleteJob(id)),
+      cancelJob: (id) =>
+        promise(async () => {
+          const job = await engine.getJob(id);
+          if (job.origin?.kind === "batch" || job.origin?.kind === "sprite")
+            throw new Error("Manage this task from its source workbench.");
+          return engine.cancelJob(id);
+        }),
+      deleteJob: (id) =>
+        promise(async () => {
+          const job = await engine.getJob(id);
+          if (job.origin?.kind === "batch" || job.origin?.kind === "sprite")
+            throw new Error("Manage this task from its source workbench.");
+          return engine.deleteJob(id);
+        }),
       getDraft: (id) => repository.getDraft(id),
       upsertDraft: (i) => promise(() => engine.upsertDraft(i)),
       deleteDraft: (id) => repository.deleteDraft(id),
