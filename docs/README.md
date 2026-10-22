@@ -9,6 +9,7 @@
 | [批量生图](guides/IMAGE_BATCHES.md)                   | 对话编排、方案预览、任务执行、结果挑选与手动入库    |
 | [UI 实现规则](UI_GUIDELINES.md)                       | 公共布局、控件、主题、键盘和视觉验收                |
 | [创作功能维护](development/CREATIVE_WORKBENCHES.md)   | 绘图、批量、精灵与资源中心的数据约束和回归入口      |
+| [3D 工坊产品方案](design/3d-workshop/PRODUCT_SPEC.md) | AI 生成、预览与游戏资产导出方案（待评审，尚未实现） |
 
 ## 放置与维护
 
