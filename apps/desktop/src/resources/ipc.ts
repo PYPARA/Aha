@@ -40,6 +40,21 @@ const Command = z.discriminatedUnion("op", [
       )
       .min(1)
       .max(500),
+    onConflict: z.enum(["replace", "keep-both"]).optional(),
+  }),
+  z.object({
+    op: z.literal("collectionConflicts"),
+    libraryId: text,
+    directoryId: text.nullable(),
+    items: z
+      .array(
+        z.object({
+          assetId: z.string().regex(/^[a-f0-9]{64}$/),
+          name: text,
+          folder: text.optional(),
+        }),
+      )
+      .max(500),
   }),
   z.object({
     op: z.literal("commitCollection"),
@@ -120,7 +135,7 @@ export function registerResourceLibrary(
 ) {
   const library = new ResourceLibrary(
     path.join(directory, "resource-library.json"),
-    () => getWindow()?.webContents.send(C.changed),
+    (scope) => getWindow()?.webContents.send(C.changed, scope),
     (name, completed) => getWindow()?.webContents.send(C.progress, { name, completed }),
   );
   const ready = library.load(defaultRoot);
@@ -162,6 +177,10 @@ export function registerResourceLibrary(
       return library.resourceState(input.libraryId, input.id);
     }
     if (input.op === "read") return library.read(input.id, input.thumbnail);
+    if (input.op === "collectionConflicts") {
+      await ready;
+      return library.collectionConflicts(input);
+    }
     if (input.op === "reveal")
       return shell.showItemInFolder(
         await library.resolve(input.id ? library.entry(input.id).path : ""),
@@ -186,7 +205,9 @@ export function registerResourceLibrary(
         case "prepareCollection":
           return library.prepareCollection(input);
         case "commitCollection":
-          return library.commitCollection(input.operationId, input.resultId, input.bytes);
+          return library.commitCollection(input.operationId, input.resultId, input.bytes, (file) =>
+            shell.trashItem(file),
+          );
         case "linkCollection":
           return library.linkCollection(input.operationId, input.resultId);
         case "failCollection":
@@ -196,7 +217,7 @@ export function registerResourceLibrary(
         case "finishCollection":
           return library.finishCollection(input.operationId);
         case "refresh":
-          return library.scan();
+          return library.scan({ visible: true });
         case "chooseRoot": {
           const result = await dialog.showOpenDialog(window, {
             title: "资源中心 / Resource center",

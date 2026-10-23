@@ -201,3 +201,71 @@ it("creates and indexes output subfolders, reuses them and rejects escaping fold
       }),
     ).rejects.toThrow("Invalid");
 });
+
+it("replaces a same-named file with different content by default choice, or keeps both", async () => {
+  const lib = await open();
+  const folder = await lib.createDirectory("", "Delivery");
+  const collect = async (id: string, content: Uint8Array, onConflict?: "replace" | "keep-both") => {
+    const asset = createHash("sha256").update(content).digest("hex");
+    const op = await lib.prepareCollection({
+      id: randomUUID(),
+      libraryId: lib.libraryId!,
+      directoryId: folder.id,
+      items: [{ ...source(id), assetId: asset, folder: "heroes" }],
+      ...(onConflict ? { onConflict } : {}),
+    });
+    return lib.commitCollection(op.id, id, content, trash);
+  };
+  const trashed: string[] = [];
+  const trash = vi.fn(async (file: string) => {
+    trashed.push(await fs.readFile(file, "utf8"));
+    await fs.rm(file);
+  });
+  const first = await collect("first", bytes);
+  await lib.metadata([first.resourceId!], ["hero"], "keep me");
+  const next = new TextEncoder().encode("regenerated original");
+  expect(
+    lib.collectionConflicts({
+      libraryId: lib.libraryId!,
+      directoryId: folder.id,
+      items: [
+        {
+          assetId: createHash("sha256").update(next).digest("hex"),
+          name: "image.png",
+          folder: "heroes",
+        },
+        { assetId, name: "image.png", folder: "heroes" },
+        { assetId, name: "other.png", folder: "heroes" },
+      ],
+    }),
+  ).toEqual({ different: 1, identical: 1 });
+
+  const replaced = await collect("second", next, "replace");
+  expect(replaced).toMatchObject({ path: "Delivery/heroes/image.png", replaced: true });
+  expect(trashed).toEqual([new TextDecoder().decode(bytes)]);
+  expect(await fs.readFile(path.join(directory, "library/Delivery/heroes/image.png"), "utf8")).toBe(
+    "regenerated original",
+  );
+  const entry = lib.entry(replaced.resourceId!);
+  expect(entry).toMatchObject({ tags: ["hero"], notes: "keep me" });
+  expect(entry.origin?.resultId).toBe("second");
+  expect((await lib.resourceState(lib.libraryId!, first.resourceId!)).status).toBe("removed");
+
+  const kept = await collect("third", new TextEncoder().encode("third original"), "keep-both");
+  expect(kept.path).toBe("Delivery/heroes/image (1).png");
+  expect(trash).toHaveBeenCalledTimes(1);
+});
+
+it("does not reuse a request ID with a different same-name choice", async () => {
+  const lib = await open();
+  const request = {
+    id: randomUUID(),
+    libraryId: lib.libraryId!,
+    directoryId: null,
+    items: [source()],
+  };
+  await lib.prepareCollection({ ...request, onConflict: "replace" });
+  await expect(lib.prepareCollection({ ...request, onConflict: "keep-both" })).rejects.toThrow(
+    "reused",
+  );
+});

@@ -10,6 +10,9 @@ import { OptionSelect } from "../ui/option-select";
 import { SearchInput } from "../ui/search-input";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
 import { PreviewSurface } from "../ui/preview-surface";
+import { Menu, MenuGroupLabel, MenuItem, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { ComposerPickerMenuPopup } from "../chat/ComposerPickerMenuPopup";
+import { ChevronDownIcon } from "~/lib/icons";
 import { imageUrl, drawingApi } from "../drawing/useDrawing";
 import { downloadUrlAsBlob } from "~/lib/browserDownload";
 import {
@@ -135,6 +138,15 @@ export function BatchResults({
     setSelection((previous) => reconcileResourceSelection(previous, visibleIds));
   }, [visibleIds.join(",")]);
   const chosen = results.filter((r) => selection.ids.includes(r.id));
+  const shown = groups.flatMap((group) => group.results);
+  const allShown = shown.length > 0 && shown.every((r) => selection.ids.includes(r.id));
+  // Replaces the selection with one category, e.g. every adopted image or one output folder.
+  const selectOnly = (values: readonly ImageBatchResult[]) =>
+    setSelection({
+      ids: values.map((r) => r.id),
+      focusedId: values[0]?.id ?? null,
+      anchorId: values[0]?.id ?? null,
+    });
   // Checkboxes add to or remove from the selection without the modifier keys clicks need.
   const toggle = (id: string) =>
     setSelection((current) => ({
@@ -329,6 +341,62 @@ export function BatchResults({
         >
           {tr("Multiple selection")}
         </Button>
+        <label className="flex items-center gap-1.5 text-ui-sm">
+          <Checkbox
+            checked={allShown}
+            indeterminate={!allShown && shown.some((r) => selection.ids.includes(r.id))}
+            disabled={!shown.length}
+            onCheckedChange={(v) =>
+              v ? selectOnly(shown) : setSelection(emptyResourceSelection())
+            }
+          />
+          {tr("Select all")}
+        </label>
+        <Menu>
+          <MenuTrigger
+            render={
+              <Button size="sm" variant="outline" disabled={!shown.length}>
+                {tr("Select")}
+                <ChevronDownIcon />
+              </Button>
+            }
+          />
+          <ComposerPickerMenuPopup align="start">
+            <MenuItem onClick={() => selectOnly(shown)}>
+              {tr("All shown")} ({shown.length})
+            </MenuItem>
+            <MenuItem
+              disabled={!shown.some((r) => r.adopted)}
+              onClick={() => selectOnly(shown.filter((r) => r.adopted))}
+            >
+              {tr("Adopted only")} ({shown.filter((r) => r.adopted).length})
+            </MenuItem>
+            <MenuItem
+              disabled={!shown.some((r) => !r.collection)}
+              onClick={() => selectOnly(shown.filter((r) => !r.collection))}
+            >
+              {tr("Not yet in the resource center")} ({shown.filter((r) => !r.collection).length})
+            </MenuItem>
+            {foldered && groups.length > 1 && (
+              <>
+                <MenuSeparator />
+                <MenuGroupLabel>{tr("Output folder")}</MenuGroupLabel>
+                {groups.map((group) => (
+                  <MenuItem key={group.id} onClick={() => selectOnly(group.results)}>
+                    {group.id || tr("Ungrouped")} ({group.results.length})
+                  </MenuItem>
+                ))}
+              </>
+            )}
+            <MenuSeparator />
+            <MenuItem
+              disabled={!selection.ids.length}
+              onClick={() => setSelection(emptyResourceSelection())}
+            >
+              {tr("Clear selection")}
+            </MenuItem>
+          </ComposerPickerMenuPopup>
+        </Menu>
       </div>
       {adoptedOffer && (
         <div
@@ -404,9 +472,17 @@ export function BatchResults({
         </div>
       )}
       <div
-        className="min-h-0 flex-1 overflow-auto p-4"
+        // Focusable so Cmd/Ctrl+A works after clicking empty space, not only from a card.
+        tabIndex={-1}
+        className="min-h-0 flex-1 overflow-auto p-4 outline-none"
         onClick={(e) => {
           if (e.target === e.currentTarget) setSelection(emptyResourceSelection());
+        }}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "a") {
+            e.preventDefault();
+            selectOnly(shown);
+          }
         }}
       >
         {page.isPending ? (
@@ -428,7 +504,8 @@ export function BatchResults({
         {groups.map((group) => (
           <section key={group.id} className="mb-6 space-y-3">
             {foldered && (
-              <div className="flex items-center gap-2">
+              // The whole heading toggles the folder, so a category is one click away.
+              <label className="flex w-fit cursor-pointer items-center gap-2">
                 <Checkbox
                   aria-label={tr("Select folder") + ": " + (group.id || tr("Ungrouped"))}
                   checked={
@@ -448,7 +525,7 @@ export function BatchResults({
                     {group.results.length} {tr("images")}
                   </span>
                 </h3>
-              </div>
+              </label>
             )}
             {/* Candidates of one task sit together, so it is clear which images compete. */}
             <div className="flex flex-wrap gap-x-6 gap-y-4">
@@ -512,10 +589,6 @@ export function BatchResults({
                                   )
                                   ?.focus();
                               }
-                            }
-                            if ((e.metaKey || e.ctrlKey) && e.key === "a") {
-                              e.preventDefault();
-                              setSelection({ ids: visibleIds, focusedId: r.id, anchorId: r.id });
                             }
                             if (e.key === "Escape") {
                               e.preventDefault();

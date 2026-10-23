@@ -1,6 +1,6 @@
 import { createContext, useEffect } from "react";
 import { create } from "zustand";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type {
   ResourceCommand,
   ResourceSnapshot,
@@ -41,15 +41,24 @@ export function resourceApi<T = unknown>(command: ResourceCommand): Promise<T> {
   if (!api) return Promise.reject(new Error("Resource center is available in the desktop app."));
   return api.request<T>(command);
 }
+// One timer for every subscriber: a burst of desktop changes becomes a single refetch.
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleLibraryRefresh(client: QueryClient) {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    void client.invalidateQueries({
+      queryKey: resourceKey,
+      predicate: (q) => q.queryKey[1] !== "preview" && q.queryKey[1] !== "collections",
+    });
+  }, 250);
+}
 export function useResourceLibrary(enabled = true) {
   const client = useQueryClient();
   useEffect(() => {
     if (!enabled) return;
-    return window.desktopBridge?.resourceLibrary?.onChanged(() => {
-      void client.invalidateQueries({
-        queryKey: resourceKey,
-        predicate: (q) => q.queryKey[1] !== "preview",
-      });
+    // Copy receipts are refreshed by the collection worker; they do not change the library.
+    return window.desktopBridge?.resourceLibrary?.onChanged((scope) => {
+      if (scope !== "collections") scheduleLibraryRefresh(client);
     });
   }, [client, enabled]);
   return useQuery({

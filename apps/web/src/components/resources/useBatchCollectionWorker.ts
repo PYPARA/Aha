@@ -45,6 +45,7 @@ export function useBatchCollectionWorker() {
       for (const operation of operations.data!) {
         if (operation.released) continue;
         const items = operation.items.map((item) => ({ ...item }));
+        let linked = false;
         for (const candidate of items) {
           if (!["queued", "writing", "committed"].includes(candidate.status)) continue;
           let item = candidate;
@@ -92,11 +93,13 @@ export function useBatchCollectionWorker() {
               resultId: item.resultId,
             });
             candidate.status = "linked";
-            await client.invalidateQueries({ queryKey: batchKey });
+            linked = true;
           } catch {
             /* The committed receipt retries the link after reconnect; it never calls the image model. */
           }
         }
+        // Once per operation: refetching every loaded results page per image makes the grid jump.
+        if (linked) await client.invalidateQueries({ queryKey: batchKey });
         if (items.every((item) => ["linked", "superseded"].includes(item.status))) {
           try {
             for (const batchId of new Set(

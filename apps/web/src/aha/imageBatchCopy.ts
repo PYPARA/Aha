@@ -359,4 +359,7 @@ export const imageBatchCopy: Record<string, string> = {
   "Use in batch": "用于批量",
   "images will be added to the batch style reference images.": "张图片将加入批次风格参考图。",
   "Some images were not added": "部分图片未能加入",
+  "All shown": "当前显示的全部",
+  "Adopted only": "只选已采用",
+  "Not yet in the resource center": "只选未加入资源中心",
 };

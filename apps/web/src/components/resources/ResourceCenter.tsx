@@ -225,8 +225,15 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
     snapshot.revision === undefined ||
     page.data?.revision === undefined ||
     snapshot.revision === page.data.revision;
-  const entries = coherent ? (page.data?.entries ?? EMPTY_ENTRIES) : EMPTY_ENTRIES;
   const pageData = coherent ? page.data : undefined;
+  // The list and snapshot arrive separately, so their revisions briefly disagree after each change.
+  // The last matching page of this same view stays on screen meanwhile instead of a loading state.
+  const listKey = JSON.stringify([snapshot.libraryId, filters]);
+  const lastCoherent = useRef<{ key: string; page: ResourcePage } | null>(null);
+  if (pageData) lastCoherent.current = { key: listKey, page: pageData };
+  const shownPage =
+    pageData ?? (lastCoherent.current?.key === listKey ? lastCoherent.current.page : undefined);
+  const entries = shownPage?.entries ?? EMPTY_ENTRIES;
   const writeBlocked = !!snapshot.error || (!!snapshot.scan && snapshot.scan.phase !== "ready");
   const selectedEntries = entries.filter((entry) => selection.ids.includes(entry.id));
   const refresh = useCallback(
@@ -920,7 +927,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
             multiple={multiple}
             inspector={inspector}
             busy={busy || writeBlocked}
-            page={pageData}
+            page={shownPage}
             onHistory={traverseHistory}
             canBack={historyIndex > 0}
             canForward={historyIndex < history.current.length - 1}
@@ -1108,7 +1115,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
             </div>
           ) : null}
           <div className="relative flex min-h-0 min-w-0 flex-1">
-            {page.isPending || !coherent ? (
+            {(page.isPending || !coherent) && !shownPage ? (
               <div
                 role="status"
                 className="flex min-h-0 flex-1 items-center justify-center p-8 text-ui text-muted-foreground"
@@ -1201,11 +1208,11 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
             ) : null}
           </div>
           <ResourceSelectionBar
-            loading={!pageData}
-            stats={pageData?.stats}
+            loading={!shownPage}
+            stats={shownPage?.stats}
             selectedCount={selection.ids.length}
             pageCount={entries.length}
-            total={pageData?.total ?? 0}
+            total={shownPage?.total ?? 0}
             offset={offset}
             busy={busy}
             actions={actions}

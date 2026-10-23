@@ -2,7 +2,7 @@ import { it, expect } from "vitest";
 import { chromium, type Page } from "playwright";
 import { createServer } from "node:http";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -217,7 +217,10 @@ it.skipIf(!enabled)(
                 raw.operationId,
                 raw.resultId,
                 Uint8Array.from(raw.bytes as unknown as number[]),
+                (file) => rm(file),
               );
+            case "collectionConflicts":
+              return library!.collectionConflicts(raw);
             case "linkCollection":
               return library!.linkCollection(raw.operationId, raw.resultId);
             case "failCollection":

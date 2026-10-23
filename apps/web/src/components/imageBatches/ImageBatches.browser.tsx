@@ -417,6 +417,48 @@ it("keeps selection independent of adoption and copies only explicitly selected 
     exclusive: true,
   });
 });
+it("selects all shown results or one category from the toolbar", async () => {
+  const asset = {
+    id: "a".repeat(64),
+    name: "image.png",
+    mimeType: "image/png" as const,
+    url: "data:image/png;base64,iVBORw0KGgo=",
+    thumbnailUrl: "",
+    width: 16,
+    height: 16,
+    bytes: 10,
+    createdAt: new Date().toISOString(),
+  };
+  const results: ImageBatchResult[] = Array.from({ length: 3 }, (_, i) => ({
+    id: "result" + i,
+    batchId: "batch",
+    executionId: "execution",
+    attemptId: "attempt",
+    taskId: "task0",
+    taskName: "One",
+    position: i,
+    asset,
+    prompt: "Prompt",
+    model: "mock",
+    parameters: { n: 3 },
+    createdAt: new Date().toISOString(),
+    adopted: i === 1,
+  }));
+  mocks.results.mockResolvedValue({ results, total: 3, nextCursor: null });
+  await mount(<BatchResults batch={batch} onError={onError} />);
+  await page.getByRole("checkbox", { name: "Select all", exact: true }).click();
+  await expect.element(page.getByText("Selected: 3")).toBeVisible();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Adopted only/ }).click();
+  await expect.element(page.getByText("Selected: 1")).toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Select result: One 2", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("checkbox", { name: "Select all", exact: true }).click();
+  await expect.element(page.getByText("Selected: 3")).toBeVisible();
+  await page.getByRole("checkbox", { name: "Select all", exact: true }).click();
+  await expect.element(page.getByText(/Selected:/)).not.toBeInTheDocument();
+});
 it("retries a lost source-link acknowledgement even when the desktop receipt is unchanged", async () => {
   const operation: ResourceCollectionOperation = {
     id: "copy",

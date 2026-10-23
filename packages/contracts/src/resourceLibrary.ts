@@ -104,7 +104,16 @@ export interface ResourceCollectionItem {
   resourceId?: string | undefined;
   path?: string | undefined;
   fileKey?: string | undefined;
+  /** The copy took the place of a same-named file with different content (moved to the Trash). */
+  replaced?: boolean | undefined;
   error?: string | undefined;
+}
+/** What a collection does when its file name is already taken by different content. */
+export type ResourceCollectionConflict = "replace" | "keep-both";
+/** Same-named files already at a collection's destinations, counted before it starts. */
+export interface ResourceCollectionConflicts {
+  different: number;
+  identical: number;
 }
 /** Durable application-level copy receipt. The target is a stable library and directory identity. */
 export interface ResourceCollectionOperation {
@@ -114,6 +123,8 @@ export interface ResourceCollectionOperation {
   directoryKey: string;
   createdAt: string;
   items: ResourceCollectionItem[];
+  /** Absent on older receipts, which kept both files. */
+  onConflict?: ResourceCollectionConflict | undefined;
   released?: boolean | undefined;
 }
 export interface ResourceProgress {
@@ -173,6 +184,13 @@ export type ResourceCommand =
       libraryId: string;
       directoryId: string | null;
       items: Pick<ResourceCollectionItem, "resultId" | "assetId" | "name" | "folder" | "origin">[];
+      onConflict?: ResourceCollectionConflict | undefined;
+    }
+  | {
+      op: "collectionConflicts";
+      libraryId: string;
+      directoryId: string | null;
+      items: Pick<ResourceCollectionItem, "assetId" | "name" | "folder">[];
     }
   | { op: "commitCollection"; operationId: string; resultId: string; bytes: Uint8Array }
   | { op: "linkCollection"; operationId: string; resultId: string }
@@ -223,9 +241,11 @@ export interface ResourceReadResult {
   mimeType: string;
   bytes: Uint8Array;
 }
+export type ResourceChangeScope = "library" | "collections";
 export interface ResourceLibraryBridge {
   request<T = unknown>(command: ResourceCommand): Promise<T>;
-  onChanged(listener: () => void): () => void;
+  /** "collections" changes touch only copy receipts, not the library's entries. */
+  onChanged(listener: (scope: ResourceChangeScope) => void): () => void;
   onProgress(listener: (progress: ResourceProgress) => void): () => void;
 }
 export function resourceType(name: string): NonNullable<ResourceQuery["type"]> {

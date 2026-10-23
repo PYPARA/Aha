@@ -9,6 +9,18 @@ import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { FileIcon, FolderIcon } from "~/lib/icons";
 import { resourceApi, resourceKey, ResourceLibraryIdContext } from "./resourceLibrary";
 const ModelViewer = lazy(() => import("../model3d/ModelViewer"));
+// One object URL per cached preview, released when the query cache drops that preview.
+const previewUrls = new WeakMap<ResourceReadResult, string>();
+const releasePreviewUrl = new FinalizationRegistry<string>((url) => URL.revokeObjectURL(url));
+function previewUrl(data: ResourceReadResult) {
+  let url = previewUrls.get(data);
+  if (!url) {
+    url = URL.createObjectURL(new Blob([new Uint8Array(data.bytes)], { type: data.mimeType }));
+    previewUrls.set(data, url);
+    releasePreviewUrl.register(data, url);
+  }
+  return url;
+}
 
 // Keep IPC and image decoding responsive when a full page mounts at once. Waiting
 // reads are removed when their query is disposed (page/library changes).
@@ -63,7 +75,6 @@ export function ResourcePreview({
   large?: boolean;
 }) {
   const tr = useAhaTranslation();
-  const [image, setImage] = useState<{ data: ResourceReadResult; url: string } | null>(null);
   const [decodeError, setDecodeError] = useState(false);
   const libraryId = useContext(ResourceLibraryIdContext);
   const isImage = entry.kind === "file" && resourceType(entry.name) === "image";
@@ -75,15 +86,9 @@ export function ResourcePreview({
     retry: false,
     staleTime: Infinity,
   });
-  useEffect(() => {
-    if (!preview.data || isModel) return;
-    setDecodeError(false);
-    const url = URL.createObjectURL(
-      new Blob([new Uint8Array(preview.data.bytes)], { type: preview.data.mimeType }),
-    );
-    setImage({ data: preview.data, url });
-    return () => URL.revokeObjectURL(url);
-  }, [preview.data, isModel]);
+  // Read during render, so a remounted tile with a cached thumbnail shows it on the first frame.
+  const url = preview.data && !isModel ? previewUrl(preview.data) : null;
+  useEffect(() => setDecodeError(false), [url]);
 
   if (isModel && preview.data)
     return (
@@ -94,10 +99,10 @@ export function ResourcePreview({
       </div>
     );
 
-  if (image && image.data === preview.data && !decodeError)
+  if (url && !decodeError)
     return (
       <img
-        src={image.url}
+        src={url}
         alt={entry.name}
         className={
           large ? "max-h-[60vh] max-w-full object-contain" : "h-full w-full object-contain p-2"

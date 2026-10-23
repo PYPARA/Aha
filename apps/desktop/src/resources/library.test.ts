@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { ResourceLibrary, safeName } from "./library";
+import type { ResourceEntry } from "@synara/contracts/resourceLibrary";
+import { ResourceLibrary, safeName, sameEntries } from "./library";
 let directory: string;
 const libraries: ResourceLibrary[] = [];
 async function make(name = "library", onProgress?: (name: string, count: number) => void) {
@@ -417,5 +418,49 @@ describe("resource batch previews", () => {
     expect(result.items[0]?.status).toBe("failed");
     expect(result.items[0]?.error).toContain("changed after the preview");
     expect(await fs.readFile(path.join(lib.root!, file.path), "utf8")).toBe("a");
+  });
+});
+
+describe("quiet rescans", () => {
+  it("compares entries regardless of field and list order", () => {
+    const a = {
+      id: "a",
+      path: "a.png",
+      name: "a.png",
+      kind: "file",
+      bytes: 1,
+      modifiedAt: 1,
+      hash: "",
+      fileKey: "1:1",
+      tags: [],
+      notes: "",
+    } satisfies ResourceEntry;
+    const b = { ...a, id: "b", path: "b.png", name: "b.png" };
+    const { fileKey, hash, ...rest } = a;
+    const reordered: ResourceEntry = { fileKey, hash, ...rest };
+    expect(sameEntries([a, b], [b, reordered])).toBe(true);
+    expect(sameEntries([a, b], [a, { ...b, notes: "changed" }])).toBe(false);
+  });
+  it("tells the renderer only about scans that changed something", async () => {
+    const changed = vi.fn();
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "aha-quiet-scan-"));
+    const lib = new ResourceLibrary(path.join(root, "config.json"), changed);
+    await fs.mkdir(path.join(root, "library"));
+    await lib.open(path.join(root, "library"));
+    try {
+      changed.mockClear();
+      await lib.serial(() => lib.scan());
+      expect(changed).not.toHaveBeenCalled();
+      expect(lib.snapshot().scan?.phase).toBe("ready");
+      await fs.writeFile(path.join(root, "library", "new.png"), "x");
+      await lib.serial(() => lib.scan());
+      expect(changed.mock.calls).toEqual([["library"]]);
+      changed.mockClear();
+      await lib.serial(() => lib.scan({ visible: true }));
+      expect(changed).toHaveBeenCalledTimes(2);
+    } finally {
+      lib.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });

@@ -138,7 +138,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   resourceLibrary: {
     request: (input) => ipcRenderer.invoke(RESOURCES.request, input),
     onChanged: (listener) => {
-      const handler = () => listener();
+      const handler = (_event: unknown, scope: unknown) =>
+        listener(scope === "collections" ? "collections" : "library");
       ipcRenderer.on(RESOURCES.changed, handler);
       return () => ipcRenderer.removeListener(RESOURCES.changed, handler);
     },

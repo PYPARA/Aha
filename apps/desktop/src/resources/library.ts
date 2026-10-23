@@ -23,6 +23,9 @@ import {
   type ResourceBatchResult,
   type ResourceCollectionOperation,
   type ResourceCollectionItem,
+  type ResourceCollectionConflict,
+  type ResourceCollectionConflicts,
+  type ResourceChangeScope,
   type ResourceLinkState,
 } from "@synara/contracts/resourceLibrary";
 
@@ -71,6 +74,7 @@ const CollectionOperations = z.array(
     directoryKey: z.string(),
     createdAt: z.string(),
     released: z.boolean().optional(),
+    onConflict: z.enum(["replace", "keep-both"]).optional(),
     items: z.array(
       z.object({
         resultId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
@@ -82,6 +86,7 @@ const CollectionOperations = z.array(
         resourceId: z.string().optional(),
         path: z.string().optional(),
         fileKey: z.string().optional(),
+        replaced: z.boolean().optional(),
         error: z.string().optional(),
       }),
     ),
@@ -111,6 +116,19 @@ export function safeName(value: string) {
   if (Buffer.byteLength(name) > 240) throw new Error("File name is too long.");
   return name;
 }
+/** JSON with object keys sorted, so field order alone never counts as a change. */
+const canonical = (value: unknown) =>
+  JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.entries(item).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        )
+      : item,
+  );
+/** Same entries regardless of order: a rescan must not rewrite what the app itself just wrote. */
+export const sameEntries = (a: ResourceEntry[], b: ResourceEntry[]) =>
+  a.length === b.length &&
+  a.map(canonical).toSorted().join("\n") === b.map(canonical).toSorted().join("\n");
 const under = (child: string, parent: string) => child === parent || child.startsWith(parent + "/");
 const parentPath = (relative: string) => relative.split("/").slice(0, -1).join("/");
 async function copyResourceExclusive(source: string, destination: string) {
@@ -194,6 +212,8 @@ export class ResourceLibrary {
   private closed = false;
   private index: ResourceIndex | undefined;
   private revision = 0;
+  /** Revision the renderer was last told about; a quiet rescan reports only newer revisions. */
+  private notifiedRevision = -1;
   private published: ResourceEntry[] = [];
   private directoryStats: ResourceDirectoryStats[] = [];
   private scanState: ResourceScanState = {
@@ -209,7 +229,7 @@ export class ResourceLibrary {
   private fail(error: unknown, failedPath: string | null = this.scanState.failedPath) {
     this.error = message(error);
     this.scanState = { ...this.scanState, phase: "failed", failedPath };
-    this.changed();
+    this.notify();
   }
   private updateStats() {
     const active = this.published.filter((e) => !e.deleted);
@@ -252,9 +272,13 @@ export class ResourceLibrary {
   } | null = null;
   constructor(
     readonly configFile: string,
-    readonly changed: () => void = () => {},
+    readonly changed: (scope?: ResourceChangeScope) => void = () => {},
     readonly progress: (name: string, completed: number) => void = () => {},
   ) {}
+  private notify(scope: ResourceChangeScope = "library") {
+    if (scope === "library") this.notifiedRevision = this.revision;
+    this.changed(scope);
+  }
   serial<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.tail.then(fn);
     this.tail = result.catch(() => {});
@@ -273,7 +297,7 @@ export class ResourceLibrary {
       }
       if (!defaultRoot) {
         this.scanState = { ...this.scanState, phase: "ready" };
-        this.changed();
+        this.notify();
         return;
       }
       try {
@@ -374,7 +398,7 @@ export class ResourceLibrary {
     try {
       await fs.mkdir(path.dirname(this.configFile), { recursive: true });
       this.rebuildIndex();
-      this.changed();
+      this.notify();
       await atomicJson(this.configFile, { root: next });
       this.startWatching();
       await this.scan();
@@ -437,6 +461,7 @@ export class ResourceLibrary {
         if (
           filename &&
           (String(filename).split(path.sep)[0] === CONTROL ||
+            path.basename(String(filename)) === ".DS_Store" ||
             path.basename(String(filename)).startsWith(".aha-import-"))
         )
           return;
@@ -450,11 +475,19 @@ export class ResourceLibrary {
     this.poll = setInterval(schedule, 15_000);
     this.poll.unref();
   }
-  async scan() {
+  /**
+   * Reconciles the index with the folder. Watcher, poll and post-write scans run quietly: the
+   * library stays "ready" and the renderer hears only about real changes, so an idle page does
+   * not flash a scanning state every few seconds. Opening and an explicit rescan are visible.
+   */
+  async scan({ visible = false }: { visible?: boolean } = {}) {
     if (!this.root) return this.snapshot();
     if (!this.libraryId) return this.open(this.root);
-    this.scanState = { ...this.scanState, phase: "scanning", failedPath: null };
-    this.changed();
+    const shown = visible || this.scanState.phase !== "ready";
+    if (shown) {
+      this.scanState = { ...this.scanState, phase: "scanning", failedPath: null };
+      this.notify();
+    }
     let scanningPath = "";
     const skipped = { system: 0, temporary: 0, symbolicLinks: 0, unsupported: 0 };
     try {
@@ -563,11 +596,11 @@ export class ResourceLibrary {
           .filter((e) => !used.has(e.id))
           .map((e) => Object.assign({}, e, { deleted: true })),
       ];
-      const changed = JSON.stringify(next) !== JSON.stringify(this.entries) || this.error !== null;
+      const changed = !sameEntries(next, this.entries) || this.error !== null;
       if (changed) await this.persist(next);
       this.error = null;
       this.scanState = { phase: "ready", lastCompletedAt: Date.now(), failedPath: null, skipped };
-      this.changed();
+      if (shown || this.revision !== this.notifiedRevision) this.notify();
     } catch (e) {
       this.fail(e, this.scanState.failedPath ?? scanningPath);
       throw e;
@@ -732,7 +765,7 @@ export class ResourceLibrary {
       this.entries = before;
       throw error;
     }
-    this.changed();
+    this.notify();
   }
   async prepareBatch(
     action: ResourceBatchAction,
@@ -966,7 +999,7 @@ export class ResourceLibrary {
           for (const result of batch.results.values()) result.error ??= message(error);
         }
       }
-      this.changed();
+      this.notify();
     }
     return { planId: plan.id, items: structuredClone([...batch.results.values()]) };
   }
@@ -1001,7 +1034,7 @@ export class ResourceLibrary {
   private async persistCollections() {
     await fs.mkdir(path.dirname(this.configFile), { recursive: true });
     await atomicJson(this.configFile + ".collections.json", this.collections);
-    this.changed();
+    this.notify("collections");
   }
   private async collection(id: string) {
     await this.listCollections();
@@ -1021,11 +1054,31 @@ export class ResourceLibrary {
       throw new Error("The target folder changed. Choose the destination again.");
     return directory;
   }
+  /** Counts destinations already taken by a file, before the user chooses how to handle them. */
+  collectionConflicts(input: {
+    libraryId: string;
+    directoryId: string | null;
+    items: Pick<ResourceCollectionItem, "assetId" | "name" | "folder">[];
+  }): ResourceCollectionConflicts {
+    if (input.libraryId !== this.libraryId)
+      throw new Error("The target library changed. Choose the destination again.");
+    const directory = input.directoryId === null ? "" : this.entry(input.directoryId).path;
+    const result = { different: 0, identical: 0 };
+    for (const item of input.items) {
+      const rel = [directory, item.folder, item.name].filter(Boolean).join("/");
+      const existing = this.entries.find(
+        (entry) => entry.path === rel && entry.kind === "file" && !entry.deleted,
+      );
+      if (existing) result[existing.hash === item.assetId ? "identical" : "different"]++;
+    }
+    return result;
+  }
   async prepareCollection(input: {
     id: string;
     libraryId: string;
     directoryId: string | null;
     items: Pick<ResourceCollectionItem, "resultId" | "assetId" | "name" | "folder" | "origin">[];
+    onConflict?: ResourceCollectionConflict | undefined;
   }) {
     await this.listCollections();
     const existing = this.collections!.find((operation) => operation.id === input.id);
@@ -1033,6 +1086,7 @@ export class ResourceLibrary {
       if (
         existing.libraryId !== input.libraryId ||
         existing.directoryId !== input.directoryId ||
+        (existing.onConflict ?? "keep-both") !== (input.onConflict ?? "keep-both") ||
         JSON.stringify(
           existing.items.map(({ resultId, assetId, name, folder, origin }) => ({
             resultId,
@@ -1079,6 +1133,7 @@ export class ResourceLibrary {
       directoryId: input.directoryId,
       directoryKey: `${stat.dev}:${stat.ino}`,
       createdAt: new Date().toISOString(),
+      ...(input.onConflict ? { onConflict: input.onConflict } : {}),
       items: input.items.map((item) => ({ ...item, status: "queued" })),
     };
     for (const previous of this.collections!)
@@ -1089,7 +1144,12 @@ export class ResourceLibrary {
     await this.persistCollections();
     return structuredClone(operation);
   }
-  async commitCollection(operationId: string, resultId: string, bytes: Uint8Array) {
+  async commitCollection(
+    operationId: string,
+    resultId: string,
+    bytes: Uint8Array,
+    trash?: (file: string) => Promise<void>,
+  ) {
     const operation = await this.collection(operationId),
       item = operation.items.find((item) => item.resultId === resultId);
     if (!item) throw new Error("Collection result is unavailable.");
@@ -1104,11 +1164,13 @@ export class ResourceLibrary {
             entry.origin.projectId === item.origin.projectId &&
             entry.origin.versionId === item.origin.versionId),
       );
-      if (prior?.deleted)
+      const replace = operation.onConflict === "replace";
+      // Replacing collects a removed result again instead of asking to restore the old copy.
+      if (prior?.deleted && !replace)
         throw new Error(
           "This result was removed from the library. Restore it from the system trash first.",
         );
-      if (prior) {
+      if (prior && !prior.deleted) {
         const stat = await fs.lstat(await this.resolve(prior.path));
         if (
           stat.isSymbolicLink() ||
@@ -1132,27 +1194,42 @@ export class ResourceLibrary {
           !stat.isSymbolicLink() &&
           `${stat.dev}:${stat.ino}` === item.fileKey &&
           (await hashFile(destination)) === item.assetId;
-        if (!committed)
+        // A replacement journaled before the old file reached the Trash replaces it again.
+        if (!committed && !(item.replaced && replace))
           throw new Error("The collection destination changed. Choose the destination again.");
       }
       if (!committed) {
+        const folder = await this.ensureFolder(target, item.folder);
+        const exact = [folder, item.name].filter(Boolean).join("/");
+        const taken = await fs.lstat(await this.resolve(exact, true)).catch((error: unknown) => {
+          if (missing(error)) return null;
+          throw error;
+        });
         await fs.rm(temp, { force: true });
         await fs.writeFile(temp, bytes, { flag: "wx", mode: 0o600 });
         const stat = await fs.lstat(temp);
-        item.path = (
-          await this.available(await this.ensureFolder(target, item.folder), item.name)
-        ).path;
+        // Each result keeps its own entry and provenance, so even equal bytes from another result
+        // replace the file (or are numbered) instead of being merged into the existing entry.
+        const replacing = replace && !!taken?.isFile();
+        if (replacing && !trash) throw new Error("System trash is unavailable.");
+        item.path = replacing ? exact : (await this.available(folder, item.name)).path;
         item.fileKey = `${stat.dev}:${stat.ino}`;
         item.resourceId ??= randomUUID();
         item.status = "writing";
+        if (replacing) item.replaced = true;
         // Journal the identity before committing the file. A lost receipt recovers this exact inode.
         await this.persistCollections();
         destination = await this.resolve(item.path, true);
+        // The replaced file goes to the system Trash, so an overwrite can still be undone.
+        if (replacing) await trash!(destination);
         await fs.link(temp, destination);
       }
       const stat = await fs.lstat(destination!);
       const recovered = this.entries.find((entry) => entry.path === item.path && !entry.deleted);
-      if (recovered && recovered.fileKey !== item.fileKey)
+      // The entry of a replaced file stays as removed, so its own result reports the removal.
+      const displaced =
+        recovered && recovered.fileKey !== item.fileKey && item.replaced ? recovered : undefined;
+      if (recovered && !displaced && recovered.fileKey !== item.fileKey)
         throw new Error("The collection destination changed. Choose the destination again.");
       const entry: ResourceEntry = {
         id: item.resourceId!,
@@ -1168,9 +1245,12 @@ export class ResourceLibrary {
         origin: item.origin,
       };
       await this.persist([
-        ...this.entries.filter((existing) => existing.id !== entry.id && existing !== recovered),
+        ...this.entries
+          .filter((existing) => existing.id !== entry.id && existing !== recovered)
+          .concat(displaced ? [{ ...displaced, deleted: true }] : []),
         entry,
       ]);
+      this.notify();
       item.status = "committed";
       delete item.error;
       await this.persistCollections();

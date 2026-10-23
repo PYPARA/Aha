@@ -144,4 +144,13 @@ export const resourceCopy: Record<string, string> = {
   "Subfolders from the task output paths are created here:": "将在此处按任务输出路径创建子目录：",
   "A file already uses this folder name.": "已有同名文件占用了这个目录名。",
   "Folder path is too deep.": "目录层级过深。",
+  "Adding to resource center: {done}/{total}": "正在加入资源中心：{done}/{total}",
+  "Added {count} to the resource center": "已加入资源中心 {count} 张",
+  "{count} replaced": "替换 {count} 张",
+  "{count} images were not added to the resource center": "{count} 张未能加入资源中心",
+  "{count} files with these names are already here with different content.":
+    "目标位置已有 {count} 个同名但内容不同的文件。",
+  "Same-named files": "同名文件",
+  "Replace (old files go to the Trash)": "替换（旧文件移到废纸篓）",
+  "Keep both (number the new files)": "保留两者（新文件自动编号）",
 };

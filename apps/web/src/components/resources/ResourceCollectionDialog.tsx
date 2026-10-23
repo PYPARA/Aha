@@ -3,7 +3,7 @@ import {
   registerResourceMenuAction,
 } from "~/lib/resourceContextMenuExtension";
 import { useContext, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ResourceEntry,
   ResourceImportResult,
@@ -12,6 +12,7 @@ import type {
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { OptionSelect } from "~/components/ui/option-select";
 import { ResourceDestinationSelect } from "./ResourceDestinationSelect";
 import {
   Dialog,
@@ -32,7 +33,11 @@ import {
   type ResourceSource,
 } from "./resourceLibrary";
 import { useBatchCollectionWorker } from "./useBatchCollectionWorker";
-import type { ResourceCollectionOperation } from "@synara/contracts/resourceLibrary";
+import type {
+  ResourceCollectionConflict,
+  ResourceCollectionConflicts,
+  ResourceCollectionOperation,
+} from "@synara/contracts/resourceLibrary";
 import { ensureNativeApi } from "~/nativeApi";
 
 export function ResourceCollectButton({ sources }: { sources: ResourceSource[] }) {
@@ -125,8 +130,109 @@ export function drawingResourceSource(
   };
   return { name: asset.name, url, origin };
 }
+/**
+ * Reports background copies as toasts: they float above every page instead of taking a row of the
+ * window layout, and each operation keeps one toast that moves from progress to its outcome.
+ */
+function useCollectionToasts(collections: ReturnType<typeof useBatchCollectionWorker>) {
+  const tr = useAhaTranslation();
+  const shown = useRef(new Map<string, { toastId: string; state: string }>());
+  const receiptError = useRef<string | null>(null);
+  const { data, error, refetch } = collections;
+  useEffect(() => {
+    for (const operation of data ?? []) {
+      const linked = operation.items.filter((item) => item.status === "linked").length;
+      const failed = operation.items.filter((item) => item.status === "failed");
+      const active = operation.items.some((item) =>
+        ["queued", "writing", "committed"].includes(item.status),
+      );
+      const done = operation.items.every((item) => ["linked", "superseded"].includes(item.status));
+      const known = shown.current.get(operation.id);
+      // Copies finished before this window opened stay quiet.
+      if (!known && done) continue;
+      const state = `${linked}/${failed.length}/${active}`;
+      if (known?.state === state) continue;
+      const replaced = operation.items.filter((item) => item.replaced).length;
+      const toast = active
+        ? {
+            type: "loading" as const,
+            title: tr("Adding to resource center: {done}/{total}")
+              .replace("{done}", String(linked))
+              .replace("{total}", String(operation.items.length)),
+            timeout: 0,
+          }
+        : done
+          ? {
+              type: "success" as const,
+              title:
+                tr("Added {count} to the resource center").replace("{count}", String(linked)) +
+                (replaced
+                  ? " · " + tr("{count} replaced").replace("{count}", String(replaced))
+                  : ""),
+              timeout: 5000,
+            }
+          : {
+              type: "error" as const,
+              title: tr("{count} images were not added to the resource center").replace(
+                "{count}",
+                String(failed.length),
+              ),
+              description: tr(failed[0]?.error ?? ""),
+              timeout: 0,
+              actionProps: {
+                children: tr("Retry failed copies"),
+                onClick: () =>
+                  void resourceApi({ op: "retryCollection", operationId: operation.id })
+                    .then(() => refetch())
+                    .catch((cause) =>
+                      toastManager.add({
+                        type: "error",
+                        title: tr("Collection retry failed"),
+                        description: String(cause),
+                      }),
+                    ),
+              },
+              data: {
+                secondaryActionProps: {
+                  children: tr("Choose destination again"),
+                  onClick: () =>
+                    collectResources(
+                      failed.map((item) => ({
+                        name: item.name,
+                        assetId: item.assetId,
+                        origin: item.origin,
+                        folder: item.folder,
+                      })),
+                    ),
+                },
+              },
+            };
+      if (known) toastManager.update(known.toastId, toast);
+      shown.current.set(operation.id, {
+        toastId: known?.toastId ?? toastManager.add(toast),
+        state,
+      });
+    }
+  }, [data, refetch, tr]);
+  useEffect(() => {
+    const text = error?.message ?? null;
+    if (!text || receiptError.current === text) {
+      receiptError.current = text;
+      return;
+    }
+    receiptError.current = text;
+    toastManager.add({
+      type: "error",
+      title: tr("Resource copy receipts could not be read. Originals are retained."),
+      description: text,
+      timeout: 0,
+      actionProps: { children: tr("Retry"), onClick: () => void refetch() },
+    });
+  }, [error, refetch, tr]);
+}
 export function ResourceCollectionDialog() {
   const collections = useBatchCollectionWorker();
+  useCollectionToasts(collections);
   useEffect(() => {
     if (window.desktopBridge?.resourceLibrary)
       return installResourceContextMenuExtension(window.desktopBridge);
@@ -141,6 +247,38 @@ export function ResourceCollectionDialog() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initialized = useRef<string | null>(null);
+  const [onConflict, setOnConflict] = useState<ResourceCollectionConflict>("replace");
+  // Batch and 3D copies keep their names, so same-named files at the destination are counted first.
+  const durable =
+    !!sources?.length &&
+    sources.every(
+      (source) => source.origin?.kind === "image-batch" || source.origin?.kind === "model3d",
+    );
+  const directoryId =
+    target === "" ? null : (library.data?.directories.find((e) => e.path === target)?.id ?? null);
+  const conflicts = useQuery({
+    queryKey: [
+      ...resourceKey,
+      "collection-conflicts",
+      library.data?.libraryId,
+      directoryId,
+      library.data?.revision,
+      sources?.map((source) => [source.folder, source.name, source.assetId]),
+    ],
+    enabled: durable && target !== null && !!library.data?.libraryId,
+    queryFn: () =>
+      resourceApi<ResourceCollectionConflicts>({
+        op: "collectionConflicts",
+        libraryId: library.data!.libraryId!,
+        directoryId,
+        items: sources!.map((source) => ({
+          assetId: source.assetId!,
+          name: source.name,
+          folder: source.folder || undefined,
+        })),
+      }),
+    retry: false,
+  });
   useEffect(() => {
     if (!isOpen) {
       initialized.current = null;
@@ -241,6 +379,7 @@ export function ResourceCollectionDialog() {
             libraryId: library.data.libraryId!,
             directoryId,
             items,
+            onConflict,
           });
         } catch (cause) {
           // A lost prepare reply may already have created the durable desktop operation.
@@ -320,78 +459,6 @@ export function ResourceCollectionDialog() {
     });
   return (
     <>
-      {collections.isError && (
-        <div
-          role="alert"
-          className="flex items-center gap-2 border-t px-4 py-2 text-ui-sm text-destructive"
-        >
-          <p className="min-w-0 flex-1">
-            {tr("Resource copy receipts could not be read. Originals are retained.")}{" "}
-            {collections.error.message}
-          </p>
-          <Button size="sm" variant="outline" onClick={() => void collections.refetch()}>
-            {tr("Retry")}
-          </Button>
-        </div>
-      )}
-      {collections.data
-        ?.filter((operation) =>
-          operation.items.some((item) => !["linked", "superseded"].includes(item.status)),
-        )
-        .map((operation) => (
-          <div
-            key={operation.id}
-            role="status"
-            className="flex flex-wrap items-center gap-2 border-t bg-background px-4 py-2 text-ui-xs"
-          >
-            <span>
-              {tr("Saving creative assets")}:{" "}
-              {operation.items.filter((item) => item.status === "linked").length}/
-              {operation.items.length}
-            </span>
-            {operation.items.some((item) => item.status === "failed") && (
-              <>
-                <span className="min-w-0 flex-1 break-words text-destructive">
-                  {operation.items.find((item) => item.status === "failed")?.error}
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    void resourceApi({ op: "retryCollection", operationId: operation.id })
-                      .then(() => collections.refetch())
-                      .catch((cause) =>
-                        toastManager.add({
-                          type: "error",
-                          title: tr("Collection retry failed"),
-                          description: String(cause),
-                        }),
-                      )
-                  }
-                >
-                  {tr("Retry failed copies")}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    collectResources(
-                      operation.items
-                        .filter((item) => item.status === "failed")
-                        .map((item) => ({
-                          name: item.name,
-                          assetId: item.assetId,
-                          origin: item.origin,
-                        })),
-                    )
-                  }
-                >
-                  {tr("Choose destination again")}
-                </Button>
-              </>
-            )}
-          </div>
-        ))}
       {
         <Dialog
           open={!!sources}
@@ -472,6 +539,24 @@ export function ResourceCollectionDialog() {
                         ))}
                         {sources.length > 5 && <li>…</li>}
                       </ul>
+                    </div>
+                  )}
+                  {!!conflicts.data?.different && (
+                    <div className="space-y-2 text-ui-sm">
+                      <p>
+                        {tr(
+                          "{count} files with these names are already here with different content.",
+                        ).replace("{count}", String(conflicts.data.different))}
+                      </p>
+                      <OptionSelect
+                        label={tr("Same-named files")}
+                        value={onConflict}
+                        disabled={busy}
+                        onValueChange={(v) => setOnConflict(v as ResourceCollectionConflict)}
+                      >
+                        <option value="replace">{tr("Replace (old files go to the Trash)")}</option>
+                        <option value="keep-both">{tr("Keep both (number the new files)")}</option>
+                      </OptionSelect>
                     </div>
                   )}
                 </>

@@ -73,7 +73,7 @@ it("runs the native choose/import/list lifecycle and broadcasts updates", async 
     (await invoke({ op: "list", query: { path: "Game" } })) as { entries: ResourceEntry[] }
   ).entries;
   expect(entries[0]?.origin?.batchId).toBe("batch");
-  expect(window.webContents.send).toHaveBeenCalledWith(C.changed);
+  expect(window.webContents.send).toHaveBeenCalledWith(C.changed, "library");
 });
 it("does not trash when canceled and propagates a native trash failure without deletion", async () => {
   await invoke({ op: "chooseRoot" });
