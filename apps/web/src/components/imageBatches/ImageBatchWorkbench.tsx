@@ -3,8 +3,10 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   IMAGE_BATCH_MAX_STYLE_PROMPT,
   IMAGE_BATCH_MAX_STYLE_REFERENCES,
+  imageBatchMissingCount,
   imageBatchPlanCounts,
   imageBatchTaskConfiguration,
+  type ImageBatchResult,
   type ImageBatchState,
   type ImageBatchTask,
 } from "@synara/contracts";
@@ -22,10 +24,16 @@ import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } fro
 import { RouteSurfaceHeader } from "../RouteSurface";
 import { confirmDialog } from "../ui/confirm-dialog";
 import { DrawingModelPicker, DrawingParameters } from "../drawing/DrawingPickers";
-import { useImageProviders, useDrawingEvents } from "../drawing/useDrawing";
+import { imageUrl, useImageProviders, useDrawingEvents } from "../drawing/useDrawing";
+import { Switch } from "../ui/switch";
+import { Menu, MenuItem, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { ComposerPickerMenuPopup } from "../chat/ComposerPickerMenuPopup";
+import { EllipsisIcon } from "~/lib/icons";
+import { TaskStatus, attemptInFlight, latestTaskAttempts } from "./BatchTaskStatus";
 import {
   batchApi,
   useBatch,
+  useBatchResults,
   useBatchCommand,
   useBatchEvents,
   useBatchList,
@@ -37,13 +45,13 @@ import { BatchProposals } from "./BatchProposals";
 import { BatchExecution } from "./BatchExecution";
 import { BatchReferenceList } from "./BatchReferenceList";
 import { BatchBulkParameters } from "./BatchBulkParameters";
+import { outputGroup } from "./resultNames";
 import { useResourceAttachments, type ResourceReceiveResult } from "../resources/resourceLibrary";
 import { uploadDrawingImage } from "../drawing/useDrawing";
 import { drawingResourceError } from "@synara/contracts/resourceLibrary";
 
 /** Tasks group by the first folder of their output path, e.g. heroes/ember.png → heroes. */
-const taskGroup = (t: ImageBatchTask) =>
-  t.output?.includes("/") ? t.output.slice(0, t.output.indexOf("/")) : "";
+const taskGroup = (t: ImageBatchTask) => outputGroup(t.output);
 
 export default function ImageBatchWorkbench({
   batchId,
@@ -300,6 +308,24 @@ function BatchWorkspace({
   const [taskQuery, setTaskQuery] = useState("");
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const [reviewVersion, setReviewVersion] = useState<number | null>(null);
+  const [retryRequest, setRetryRequest] = useState<{
+    attemptIds: string[];
+    mode: "missing" | "regenerate";
+  } | null>(null);
+  const [resultTask, setResultTask] = useState("");
+  const openResults = (id: string) => {
+    setResultTask(id);
+    setTab("results");
+  };
+  const activeExecution = batch.executions.some((e) => !e.finishedAt);
+  const runs = latestTaskAttempts(batch);
+  // Row thumbnails: the adopted candidate when there is one, otherwise the newest result.
+  const recent = useBatchResults({ batchId: batch.id });
+  const thumbnails = new Map<string, ImageBatchResult>();
+  for (const r of recent.data?.pages.flatMap((p) => p.results) ?? []) {
+    const current = thumbnails.get(r.taskId);
+    if (!current || (r.adopted && !current.adopted)) thumbnails.set(r.taskId, r);
+  }
   const [retainedResults, setRetainedResults] = useState(false);
   const focusTask = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -310,7 +336,6 @@ function BatchWorkspace({
     if (tab === "tasks" && taskId) focusTask.current?.scrollIntoView({ block: "nearest" });
   }, [tab, taskId]);
   const counts = imageBatchPlanCounts(batch.tasks, batch.defaults);
-  const hasStyle = !!batch.defaults.stylePrompt?.trim() || !!batch.defaults.styleReferences?.length;
   const pending = batch.proposals.filter((p) => p.status === "pending").length;
   const query = taskQuery.trim().toLowerCase();
   const visibleTasks = batch.tasks.filter(
@@ -775,6 +800,15 @@ function BatchWorkspace({
                       <span className="text-ui-xs font-normal text-muted-foreground">
                         {group.tasks.filter((t) => t.enabled).length}/{group.tasks.length}{" "}
                         {tr("enabled")}
+                        {group.tasks.some((t) => runs.has(t.id)) &&
+                          " · " +
+                            tr("{count} done").replace(
+                              "{count}",
+                              String(
+                                group.tasks.filter((t) => runs.get(t.id)?.status === "succeeded")
+                                  .length,
+                              ),
+                            )}
                       </span>
                     </button>
                   </div>
@@ -783,15 +817,38 @@ function BatchWorkspace({
                   group.tasks.map((t) => {
                     const index = batch.tasks.indexOf(t);
                     const c = imageBatchTaskConfiguration(t, batch.defaults);
-                    const custom = !!(t.providerId || t.model || t.parameters);
+                    const attempt = runs.get(t.id);
+                    const thumbnail = thumbnails.get(t.id);
+                    const missing = attempt ? imageBatchMissingCount(batch, attempt) : 0;
+                    const idle = !activeExecution && !(attempt && attemptInFlight(attempt.status));
+                    const move = (offset: -1 | 1) =>
+                      action(() => {
+                        const next = [...batch.tasks];
+                        [next[index], next[index + offset]] = [next[index + offset]!, next[index]!];
+                        return saveTasks(next);
+                      });
+                    // The spec line shows what will be sent; the model only when it differs.
+                    const spec = [
+                      t.output,
+                      c.parameters.size,
+                      c.parameters.n + " " + tr("images"),
+                      c.parameters.quality && tr("Quality") + " " + tr(c.parameters.quality),
+                      c.parameters.background &&
+                        tr("Background") + " " + tr(c.parameters.background),
+                      (c.model !== batch.defaults.model ||
+                        c.providerId !== batch.defaults.providerId) &&
+                        (c.model || tr("No model")),
+                      t.references.length > 0 && t.references.length + " " + tr("references"),
+                    ].filter(Boolean);
                     return (
                       <div
                         key={t.id}
                         ref={t.id === taskId ? focusTask : undefined}
                         tabIndex={t.id === taskId ? 0 : undefined}
-                        className="flex flex-wrap items-start gap-3 border-b px-2 py-3 text-ui outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="flex items-start gap-3 border-b px-2 py-2.5 text-ui outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <Checkbox
+                          className="mt-1"
                           aria-label={tr("Select task") + ": " + t.name}
                           checked={selected.includes(t.id)}
                           onCheckedChange={(v) =>
@@ -800,145 +857,177 @@ function BatchWorkspace({
                             )
                           }
                         />
-                        <div className="min-w-0 flex-1 basis-48">
+                        {thumbnail ? (
                           <button
                             type="button"
-                            className="max-w-full truncate text-left font-medium underline-offset-4 hover:underline focus-visible:outline-ring"
-                            onClick={() =>
-                              setEditor({ task: structuredClone(t), base: structuredClone(batch) })
-                            }
+                            aria-label={tr("View results") + ": " + t.name}
+                            className="shrink-0 rounded-md focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => openResults(t.id)}
                           >
-                            {index + 1}. {t.name}
+                            <img
+                              src={imageUrl(thumbnail.asset, "thumbnail")}
+                              alt=""
+                              className="size-10 rounded-md bg-muted object-contain"
+                            />
                           </button>
-                          <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-ui-sm text-muted-foreground">
+                        ) : (
+                          <span aria-hidden className="size-10 shrink-0 rounded-md bg-muted/40" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                            <button
+                              type="button"
+                              className="min-w-0 max-w-full truncate text-left font-medium underline-offset-4 hover:underline focus-visible:outline-ring"
+                              onClick={() =>
+                                setEditor({
+                                  task: structuredClone(t),
+                                  base: structuredClone(batch),
+                                })
+                              }
+                            >
+                              {index + 1}. {t.name}
+                            </button>
+                            <TaskStatus attempt={attempt} />
+                          </div>
+                          <p
+                            className="mt-0.5 truncate text-ui-sm text-muted-foreground"
+                            title={t.prompt}
+                          >
                             {t.prompt || tr("No prompt")}
                           </p>
-                          {t.output && (
-                            <p className="mt-1 truncate text-ui-xs text-muted-foreground">
-                              {t.output}
-                            </p>
-                          )}
-                          <p className="mt-1 text-ui-xs text-muted-foreground">
-                            {[
-                              c.model || tr("No model"),
-                              c.parameters.n + " " + tr("images"),
-                              c.parameters.size,
-                              c.parameters.quality &&
-                                tr("Quality") + " " + tr(c.parameters.quality),
-                              c.parameters.background &&
-                                tr("Background") + " " + tr(c.parameters.background),
-                              t.references.length + " " + tr("references"),
-                              hasStyle && tr("Uses batch style"),
-                              custom && tr("Own settings"),
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
+                          <p className="mt-0.5 truncate text-ui-xs text-muted-foreground">
+                            {spec.join(" · ")}
                           </p>
                         </div>
-                        <div className="flex flex-wrap items-center gap-1">
-                          <label className="mr-2 flex items-center gap-1 text-ui-xs">
-                            <Checkbox
+                        <Switch
+                          className="mt-1"
+                          aria-label={tr("Enabled") + ": " + t.name}
+                          disabled={busy}
+                          checked={t.enabled}
+                          onCheckedChange={(v) =>
+                            action(() =>
+                              saveTasks(
+                                batch.tasks.map((x) => (x.id === t.id ? { ...x, enabled: v } : x)),
+                              ),
+                            )
+                          }
+                        />
+                        <Menu>
+                          <MenuTrigger
+                            render={
+                              <Button
+                                size="icon-sm"
+                                variant="ghost"
+                                aria-label={tr("Task actions") + ": " + t.name}
+                              >
+                                <EllipsisIcon />
+                              </Button>
+                            }
+                          />
+                          <ComposerPickerMenuPopup align="end">
+                            <MenuItem
+                              onClick={() =>
+                                setEditor({
+                                  task: structuredClone(t),
+                                  base: structuredClone(batch),
+                                })
+                              }
+                            >
+                              {tr("Edit task")}
+                            </MenuItem>
+                            {thumbnail && (
+                              <MenuItem onClick={() => openResults(t.id)}>
+                                {tr("View results")}
+                              </MenuItem>
+                            )}
+                            {attempt && (
+                              <MenuItem
+                                disabled={!idle}
+                                onClick={() =>
+                                  setRetryRequest({ attemptIds: [attempt.id], mode: "regenerate" })
+                                }
+                              >
+                                {tr("Regenerate")}
+                              </MenuItem>
+                            )}
+                            {attempt && missing > 0 && (
+                              <MenuItem
+                                disabled={!idle}
+                                onClick={() =>
+                                  setRetryRequest({ attemptIds: [attempt.id], mode: "missing" })
+                                }
+                              >
+                                {tr("Fill missing images")} ({missing})
+                              </MenuItem>
+                            )}
+                            <MenuSeparator />
+                            <MenuItem
                               disabled={busy}
-                              checked={t.enabled}
-                              onCheckedChange={(v) =>
+                              onClick={() =>
                                 action(() =>
-                                  saveTasks(
-                                    batch.tasks.map((x) =>
-                                      x.id === t.id ? { ...x, enabled: v === true } : x,
-                                    ),
-                                  ),
+                                  saveTasks([
+                                    ...batch.tasks.slice(0, index + 1),
+                                    {
+                                      ...structuredClone(t),
+                                      id: crypto.randomUUID(),
+                                      name: tr("{name} copy").replace("{name}", t.name),
+                                    },
+                                    ...batch.tasks.slice(index + 1),
+                                  ]),
                                 )
                               }
-                            />
-                            {tr("Enabled")}
-                          </label>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            aria-label={tr("Move task up") + ": " + t.name}
-                            disabled={busy || index === 0}
-                            onClick={() =>
-                              action(() => {
-                                const next = [...batch.tasks];
-                                [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
-                                return saveTasks(next);
-                              })
-                            }
-                          >
-                            ↑
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            aria-label={tr("Move task down") + ": " + t.name}
-                            disabled={busy || index === batch.tasks.length - 1}
-                            onClick={() =>
-                              action(() => {
-                                const next = [...batch.tasks];
-                                [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
-                                return saveTasks(next);
-                              })
-                            }
-                          >
-                            ↓
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={busy}
-                            onClick={() =>
-                              action(() =>
-                                saveTasks([
-                                  ...batch.tasks.slice(0, index + 1),
-                                  {
-                                    ...structuredClone(t),
-                                    id: crypto.randomUUID(),
-                                    name: tr("{name} copy").replace("{name}", t.name),
-                                  },
-                                  ...batch.tasks.slice(index + 1),
-                                ]),
-                              )
-                            }
-                          >
-                            {tr("Duplicate")}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={busy}
-                            onClick={() =>
-                              action(async () => {
-                                if (
-                                  await confirmDialog({
-                                    title: tr('Remove task "{name}"?').replace("{name}", t.name),
-                                    description: tr(
-                                      "The task leaves the draft. Images it already generated are kept in the results.",
-                                    ),
-                                    confirmLabel: tr("Remove"),
-                                    destructive: true,
-                                  })
-                                ) {
-                                  await saveTasks(batch.tasks.filter((x) => x.id !== t.id));
-                                  setSelected(selected.filter((id) => id !== t.id));
-                                }
-                              })
-                            }
-                          >
-                            {tr("Remove")}
-                          </Button>
-                        </div>
+                            >
+                              {tr("Duplicate")}
+                            </MenuItem>
+                            <MenuItem disabled={busy || index === 0} onClick={() => move(-1)}>
+                              {tr("Move up")}
+                            </MenuItem>
+                            <MenuItem
+                              disabled={busy || index === batch.tasks.length - 1}
+                              onClick={() => move(1)}
+                            >
+                              {tr("Move down")}
+                            </MenuItem>
+                            <MenuSeparator />
+                            <MenuItem
+                              variant="destructive"
+                              disabled={busy}
+                              onClick={() =>
+                                action(async () => {
+                                  if (
+                                    await confirmDialog({
+                                      title: tr('Remove task "{name}"?').replace("{name}", t.name),
+                                      description: tr(
+                                        "The task leaves the draft. Images it already generated are kept in the results.",
+                                      ),
+                                      confirmLabel: tr("Remove"),
+                                      destructive: true,
+                                    })
+                                  ) {
+                                    await saveTasks(batch.tasks.filter((x) => x.id !== t.id));
+                                    setSelected(selected.filter((id) => id !== t.id));
+                                  }
+                                })
+                              }
+                            >
+                              {tr("Remove")}
+                            </MenuItem>
+                          </ComposerPickerMenuPopup>
+                        </Menu>
                       </div>
                     );
                   })}
               </div>
             ))}
           </div>
-          <div className="max-h-[45%] shrink-0 overflow-auto">
+          <div className="shrink-0">
             <BatchExecution
               batch={batch}
               onError={onError}
               reviewVersion={reviewVersion}
               onReviewOpened={() => setReviewVersion(null)}
+              retryRequest={retryRequest}
+              onRetryHandled={() => setRetryRequest(null)}
             />
           </div>
         </div>
@@ -950,7 +1039,13 @@ function BatchWorkspace({
           aria-labelledby="batch-tab-results"
           className="flex min-h-0 flex-1 flex-col"
         >
-          <BatchResults batch={batch} focusResultId={resultId} onError={onError} />
+          <BatchResults
+            key={resultTask}
+            batch={batch}
+            focusResultId={resultId}
+            initialTaskId={resultTask}
+            onError={onError}
+          />
         </div>
       )}
       {bulkParameters && selected.length > 0 && (

@@ -73,3 +73,15 @@ export function resultFileNames(results: readonly ImageBatchResult[]) {
   }
   return names;
 }
+
+/** The requested size when the saved image differs from it; providers may scale or snap sizes. */
+export function resultSizeMismatch(r: ImageBatchResult) {
+  const size = r.parameters.size;
+  if (!size || size === "auto") return null;
+  const [width, height] = size.split("x").map(Number);
+  return width === r.asset.width && height === r.asset.height ? null : size.replace("x", "×");
+}
+
+/** First folder of an output path, used to group tasks and results the same way. */
+export const outputGroup = (output: string | undefined) =>
+  output?.includes("/") ? output.slice(0, output.indexOf("/")) : "";

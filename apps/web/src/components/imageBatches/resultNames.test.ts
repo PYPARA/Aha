@@ -69,3 +69,16 @@ describe("result delivery names", () => {
     expect(names.get("plain")).toEqual({ name: "焰 · 先锋_attempt-_1.png" });
   });
 });
+describe("result size check", () => {
+  it("reports the requested size only when the saved image differs", async () => {
+    const { resultSizeMismatch } = await import("./resultNames");
+    const r = result("one", { parameters: { n: 1, size: "1024x1536" } });
+    expect(resultSizeMismatch({ ...r, asset: { ...r.asset, width: 832, height: 1248 } })).toBe(
+      "1024×1536",
+    );
+    expect(resultSizeMismatch({ ...r, asset: { ...r.asset, width: 1024, height: 1536 } })).toBe(
+      null,
+    );
+    expect(resultSizeMismatch(result("auto", { parameters: { n: 1, size: "auto" } }))).toBe(null);
+  });
+});

@@ -14,6 +14,7 @@ import {
   ImageBatchResultsPage,
   ImageBatchResult,
   ImageBatchPreflight,
+  ImageBatchPreflightInput,
   ImageBatchImportSources,
 } from "./imageBatches";
 import {
@@ -2248,7 +2249,7 @@ const WsImageBatchGetRpc = Rpc.make(WS_METHODS.imageBatchGet, {
   error: WsRpcError,
 });
 const WsImageBatchPreflightRpc = Rpc.make(WS_METHODS.imageBatchPreflight, {
-  payload: Schema.Struct({ id: Schema.String }),
+  payload: ImageBatchPreflightInput,
   success: ImageBatchPreflight,
   error: WsRpcError,
 });

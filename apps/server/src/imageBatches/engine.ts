@@ -53,6 +53,10 @@ const frozenStyle = (attempt: ImageBatchAttempt): BatchStyle => ({
   references: [],
 });
 
+/** The batch as one run sees it on another channel; tasks with their own channel keep it. */
+const onChannel = (state: ImageBatchState, providerId: string | undefined): ImageBatchState =>
+  providerId ? { ...state, defaults: { ...state.defaults, providerId } } : state;
+
 export class ImageBatchEngine {
   private tail: Promise<unknown> = Promise.resolve();
   constructor(
@@ -107,9 +111,9 @@ export class ImageBatchEngine {
       );
     for (const t of tasks) Schema.decodeUnknownSync(ImageBatchTask)(t);
   }
-  async preflight(id: string): Promise<ImageBatchPreflight> {
+  async preflight(id: string, providerId?: string): Promise<ImageBatchPreflight> {
     const state = await this.get(id);
-    return this.check(state, state.tasks, batchStyle(state));
+    return this.check(onChannel(state, providerId), state.tasks, batchStyle(state));
   }
   /** `style` is the batch style a confirm would freeze; retries pass none (it is already frozen). */
   private async check(
@@ -386,10 +390,11 @@ export class ImageBatchEngine {
         let attempts: ImageBatchAttempt[];
         if (input.operation === "confirm") {
           const style = batchStyle(state);
-          const check = await this.check(state, state.tasks, style);
+          const run = onChannel(state, input.providerId);
+          const check = await this.check(run, state.tasks, style);
           if (check.issues.length) throw new Error(check.issues.map((i) => i.message).join("\n"));
           attempts = await Promise.all(
-            state.tasks.filter((t) => t.enabled).map((t) => this.attempt(t, state, style)),
+            state.tasks.filter((t) => t.enabled).map((t) => this.attempt(t, run, style)),
           );
         } else {
           const selected = input.attemptIds.map((id) =>

@@ -238,6 +238,11 @@ export const ImageBatchResultsPage = Schema.Struct({
 });
 export type ImageBatchResultsPage = typeof ImageBatchResultsPage.Type;
 export const ImageBatchIssue = Schema.Struct({ taskId: Schema.String, message: Schema.String });
+/** `providerId` previews a run on another channel for tasks that inherit the batch default. */
+export const ImageBatchPreflightInput = Schema.Struct({
+  id: Id,
+  providerId: Schema.optional(Schema.String),
+});
 export const ImageBatchPreflight = Schema.Struct({
   version: Version,
   tasks: Version,
@@ -281,6 +286,8 @@ export const ImageBatchCommand = Schema.Union([
     batchId: Id,
     version: Version,
     requestId: Id,
+    /** Channel for this run only, for tasks that inherit the batch default; the draft keeps its own. */
+    providerId: Schema.optional(Schema.String),
   }),
   Schema.Struct({
     operation: Schema.Literals(["pause", "resume", "cancel"]),
@@ -340,7 +347,7 @@ export interface ImageBatchesApi {
   list(input: typeof ImageBatchListInput.Type): Promise<typeof ImageBatchListResult.Type>;
   get(input: { id: string }): Promise<ImageBatchState>;
   command(input: ImageBatchCommand): Promise<ImageBatchState>;
-  preflight(input: { id: string }): Promise<ImageBatchPreflight>;
+  preflight(input: typeof ImageBatchPreflightInput.Type): Promise<ImageBatchPreflight>;
   results(input: typeof ImageBatchResultsInput.Type): Promise<ImageBatchResultsPage>;
   result(input: { id: string }): Promise<ImageBatchResult>;
   importSources(input: typeof ImageBatchImportSources.Type): Promise<ImageBatchState>;

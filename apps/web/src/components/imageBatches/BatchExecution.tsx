@@ -19,6 +19,9 @@ import { Button } from "../ui/button";
 import { confirmDialog } from "../ui/confirm-dialog";
 import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
+import { Sheet, SheetPopup, SheetTitle } from "../ui/sheet";
+import { OptionSelect } from "../ui/option-select";
+import { outputGroup } from "./resultNames";
 import { batchApi, useBatchCommand } from "./useImageBatches";
 
 const activeStatus = (s: string) => ["prepared", "queued", "running", "saving"].includes(s);
@@ -32,8 +35,11 @@ type Confirmation = {
   summaries: {
     id: string;
     name: string;
+    output?: string | undefined;
     prompt: string;
     model: string;
+    /** Whether the task follows the batch channel, so the run's channel choice applies to it. */
+    inherits: boolean;
     parameters: ImageGenerationParameters;
     references: number;
   }[];
@@ -43,12 +49,17 @@ export function BatchExecution({
   onError,
   reviewVersion,
   onReviewOpened,
+  retryRequest,
+  onRetryHandled,
 }: {
   batch: ImageBatchState;
   onError: (e: unknown) => void;
   /** Opens the generation check once this draft version is loaded (after "Apply and review"). */
   reviewVersion?: number | null;
   onReviewOpened?: () => void;
+  /** A retry asked for from a task row; it opens the same confirmation as the records drawer. */
+  retryRequest?: { attemptIds: string[]; mode: "missing" | "regenerate" } | null;
+  onRetryHandled?: () => void;
 }) {
   const tr = useAhaTranslation(),
     command = useBatchCommand();
@@ -57,11 +68,12 @@ export function BatchExecution({
   const [busy, setBusy] = useState(false),
     [ack, setAck] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [records, setRecords] = useState(false);
   const submitting = useRef(false);
   const active = batch.executions.find((e) => !e.finishedAt);
   const latest = active ?? batch.executions.at(-1);
   const attempts = latest?.attempts ?? [];
-  const prepare = async (mode?: "missing" | "regenerate") => {
+  const prepare = async (mode?: "missing" | "regenerate", attemptIds = selected) => {
     setBusy(true);
     setAck(false);
     try {
@@ -94,6 +106,7 @@ export function BatchExecution({
             .map((t) => ({
               ...t,
               ...imageBatchTaskConfiguration(t, batch.defaults),
+              inherits: !t.providerId,
               prompt: imageBatchComposePrompt(batch.defaults.stylePrompt, t.prompt),
               references: imageBatchTaskReferences(t, batch.defaults.styleReferences).length,
             })),
@@ -101,7 +114,7 @@ export function BatchExecution({
       } else {
         const targets = batch.executions
           .flatMap((execution) => execution.attempts)
-          .filter((a) => selected.includes(a.id));
+          .filter((a) => attemptIds.includes(a.id));
         if (new Set(targets.map((a) => a.taskId)).size !== targets.length)
           throw new Error(tr("Select one attempt per task to retry."));
         if (!targets.length) throw new Error(tr("Select attempts to retry."));
@@ -130,6 +143,8 @@ export function BatchExecution({
           summaries: targets.map((a, index) => ({
             id: a.id,
             name: a.taskName,
+            output: a.output,
+            inherits: false,
             prompt: a.requestPrompt ?? a.prompt,
             model: a.model,
             parameters: { ...a.parameters, n: amounts[index]! },
@@ -143,6 +158,41 @@ export function BatchExecution({
       setBusy(false);
     }
   };
+  // Channels that offer the batch model; switching re-runs the check for this run only.
+  const channels = (providers.data ?? []).filter(
+    (p) =>
+      p.id === batch.defaults.providerId ||
+      (p.enabled && p.models.some((m) => m.id === batch.defaults.model)),
+  );
+  const switchChannel = async (providerId: string) => {
+    if (!confirm || confirm.command.operation !== "confirm") return;
+    setBusy(true);
+    try {
+      const p = await batchApi().preflight({ id: batch.id, providerId });
+      const { providerId: _, ...base } = confirm.command;
+      setConfirm({
+        ...confirm,
+        command: providerId === batch.defaults.providerId ? base : { ...base, providerId },
+        tasks: p.tasks,
+        images: p.images,
+        issues: p.issues.map(
+          (i) => (batch.tasks.find((t) => t.id === i.taskId)?.name ?? "") + ": " + i.message,
+        ),
+        providers: [
+          ...new Set(batch.tasks.filter((t) => t.enabled).map((t) => t.providerId ?? providerId)),
+        ],
+      });
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // One model for every task is shown once instead of on each row.
+  const sharedModel =
+    confirm && new Set(confirm.summaries.map((task) => task.model)).size === 1
+      ? confirm.summaries[0]!.model
+      : null;
   const start = async () => {
     if (!confirm || submitting.current) return;
     submitting.current = true;
@@ -155,6 +205,7 @@ export function BatchExecution({
       );
       setConfirm(null);
       setSelected([]);
+      setRecords(false);
     } catch (e) {
       onError(e);
     } finally {
@@ -171,6 +222,14 @@ export function BatchExecution({
   useEffect(() => {
     if (reviewRequested) openReview();
   }, [reviewRequested]);
+  const openRetry = useEffectEvent(() => {
+    if (!retryRequest) return;
+    onRetryHandled?.();
+    if (!active) void prepare(retryRequest.mode, retryRequest.attemptIds);
+  });
+  useEffect(() => {
+    if (retryRequest) openRetry();
+  }, [retryRequest]);
   const control = async (operation: "pause" | "resume" | "cancel") => {
     if (!active) return;
     if (
@@ -195,12 +254,23 @@ export function BatchExecution({
       setBusy(false);
     }
   };
+  const finished = attempts.filter((a) => !activeStatus(a.status)).length;
+  const issues = attempts.filter((a) =>
+    ["failed", "partial", "uncertain", "interrupted"].includes(a.status),
+  ).length;
+  const enabled = batch.tasks.filter((t) => t.enabled);
+  const plannedImages = enabled.reduce(
+    (n, t) => n + imageBatchTaskConfiguration(t, batch.defaults).parameters.n,
+    0,
+  );
+  const toggle = (id: string, value: boolean) =>
+    setSelected(value ? [...selected, id] : selected.filter((x) => x !== id));
   return (
-    <div className="space-y-3 border-t p-4 text-ui-sm">
+    <div className="space-y-2 border-t px-4 py-3 text-ui-sm">
       <div className="flex flex-wrap items-center gap-2">
         {active ? (
           <>
-            <span className="mr-auto" role="status">
+            <span role="status">
               {tr(
                 active.cancelled
                   ? "Cancelling remaining items"
@@ -209,6 +279,24 @@ export function BatchExecution({
                     : "Execution in progress",
               )}
             </span>
+            <div
+              role="progressbar"
+              aria-label={tr("Tasks finished")}
+              aria-valuemin={0}
+              aria-valuemax={attempts.length}
+              aria-valuenow={finished}
+              className="h-1.5 w-32 overflow-hidden rounded-full bg-muted"
+            >
+              <div
+                className="h-full rounded-full bg-primary transition-[width]"
+                style={{ width: `${attempts.length ? (finished / attempts.length) * 100 : 0}%` }}
+              />
+            </div>
+            <span className="text-ui-xs text-muted-foreground">
+              {finished}/{attempts.length}
+              {issues ? " · " + tr("Issues") + ": " + issues : ""}
+            </span>
+            <span className="flex-1" />
             {!active.cancelled && (
               <>
                 <Button
@@ -231,24 +319,32 @@ export function BatchExecution({
             )}
           </>
         ) : (
-          <Button
-            disabled={busy || batch.archived || !batch.tasks.some((t) => t.enabled)}
-            onClick={() => void prepare()}
-          >
-            {tr("Review and generate")}
-          </Button>
+          <>
+            <Button
+              disabled={busy || batch.archived || !enabled.length}
+              onClick={() => void prepare()}
+            >
+              {tr("Review and generate")}
+            </Button>
+            {enabled.length > 0 && (
+              <span className="text-ui-xs">
+                {enabled.length} {tr("tasks")} · {plannedImages} {tr("images")}
+              </span>
+            )}
+            {latest && (
+              <span className="text-ui-xs text-muted-foreground">
+                {tr("Last run")}: {tr("Tasks finished")} {finished}/{attempts.length} ·{" "}
+                {tr("Images saved")} {attempts.reduce((n, a) => n + a.outputs, 0)}
+                {issues ? " · " + tr("Issues") + " " + issues : ""}
+              </span>
+            )}
+            <span className="flex-1" />
+          </>
         )}
         {latest && (
-          <span className="text-ui-xs text-muted-foreground">
-            {tr("Tasks finished")}: {attempts.filter((a) => !activeStatus(a.status)).length}/
-            {attempts.length} · {tr("Images saved")}: {attempts.reduce((n, a) => n + a.outputs, 0)}{" "}
-            · {tr("Issues")}:{" "}
-            {
-              attempts.filter((a) =>
-                ["failed", "partial", "uncertain", "interrupted"].includes(a.status),
-              ).length
-            }
-          </span>
+          <Button size="sm" variant="ghost" onClick={() => setRecords(true)}>
+            {tr("Generation records")}
+          </Button>
         )}
       </div>
       {(active?.blockedProviders?.length ?? 0) > 0 && (
@@ -261,81 +357,82 @@ export function BatchExecution({
             .join(", ")}
         </p>
       )}
-      {latest && (
-        <details>
-          <summary className="cursor-pointer py-1">
-            {tr("Generation records")} · {new Date(latest.createdAt).toLocaleString()}
-          </summary>
-          <div className="max-h-80 space-y-2 overflow-auto py-2">
-            {attempts.map((a) => (
-              <AttemptRow
-                key={a.id}
-                attempt={a}
-                selected={selected.includes(a.id)}
-                onSelected={(value) =>
-                  setSelected(value ? [...selected, a.id] : selected.filter((id) => id !== a.id))
-                }
-              />
-            ))}
-          </div>
-        </details>
-      )}
-      {batch.executions.length > 1 && (
-        <details>
-          <summary className="cursor-pointer">
-            {tr("Previous executions")} ({batch.executions.length - 1})
-          </summary>
-          {batch.executions
-            .slice(0, -1)
-            .toReversed()
-            .map((e) => (
-              <details key={e.id} className="mt-2">
-                <summary className="cursor-pointer">
-                  {new Date(e.createdAt).toLocaleString()} · {e.attempts.length} {tr("tasks")}
-                </summary>
-                {e.attempts.map((a) => (
+      <Sheet open={records} onOpenChange={setRecords}>
+        <SheetPopup side="right" className="w-full max-w-md">
+          <SheetTitle className="border-b p-4 text-ui font-medium">
+            {tr("Generation records")}
+          </SheetTitle>
+          <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4 text-ui-sm">
+            {latest && (
+              <section>
+                <h3 className="text-ui-xs text-muted-foreground">
+                  {new Date(latest.createdAt).toLocaleString()}
+                </h3>
+                {attempts.map((a) => (
                   <AttemptRow
                     key={a.id}
                     attempt={a}
                     selected={selected.includes(a.id)}
-                    onSelected={(value) =>
-                      setSelected(
-                        value ? [...selected, a.id] : selected.filter((id) => id !== a.id),
-                      )
-                    }
+                    onSelected={(value) => toggle(a.id, value)}
                   />
                 ))}
+              </section>
+            )}
+            {batch.executions.length > 1 && (
+              <details>
+                <summary className="cursor-pointer">
+                  {tr("Previous executions")} ({batch.executions.length - 1})
+                </summary>
+                {batch.executions
+                  .slice(0, -1)
+                  .toReversed()
+                  .map((e) => (
+                    <details key={e.id} className="mt-2">
+                      <summary className="cursor-pointer">
+                        {new Date(e.createdAt).toLocaleString()} · {e.attempts.length} {tr("tasks")}
+                      </summary>
+                      {e.attempts.map((a) => (
+                        <AttemptRow
+                          key={a.id}
+                          attempt={a}
+                          selected={selected.includes(a.id)}
+                          onSelected={(value) => toggle(a.id, value)}
+                        />
+                      ))}
+                    </details>
+                  ))}
               </details>
-            ))}
-        </details>
-      )}
-      {!active && selected.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => void prepare("missing")}
-          >
-            {tr("Fill missing images")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => void prepare("regenerate")}
-          >
-            {tr("Regenerate selected")}
-          </Button>
-        </div>
-      )}{" "}
+            )}
+          </div>
+          {!active && selected.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-2 border-t p-4">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void prepare("missing")}
+              >
+                {tr("Fill missing images")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void prepare("regenerate")}
+              >
+                {tr("Regenerate selected")}
+              </Button>
+            </div>
+          )}
+        </SheetPopup>
+      </Sheet>
       <Dialog
         open={!!confirm}
         onOpenChange={(open) => {
           if (!open && !busy) setConfirm(null);
         }}
       >
-        <DialogPopup>
+        <DialogPopup className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{tr("Confirm image generation")}</DialogTitle>
             <DialogDescription>
@@ -350,27 +447,98 @@ export function BatchExecution({
                 <p className="text-ui font-medium">
                   {confirm.tasks} {tr("tasks")} · {confirm.images} {tr("images")}
                 </p>
-                <p>
-                  {tr("Channels")}:{" "}
-                  {confirm.providers
-                    .map((id) => providers.data?.find((provider) => provider.id === id)?.name ?? id)
-                    .join(", ") || "—"}
-                </p>
+                {confirm.command.operation === "confirm" &&
+                confirm.summaries.some((task) => task.inherits) &&
+                channels.length > 1 ? (
+                  <div className="w-64">
+                    <OptionSelect
+                      label={tr("Channel for this run")}
+                      value={confirm.command.providerId ?? batch.defaults.providerId}
+                      disabled={busy}
+                      onValueChange={(value) => void switchChannel(value)}
+                    >
+                      {channels.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </OptionSelect>
+                  </div>
+                ) : (
+                  <p>
+                    {tr("Channels")}:{" "}
+                    {confirm.providers
+                      .map(
+                        (id) => providers.data?.find((provider) => provider.id === id)?.name ?? id,
+                      )
+                      .join(", ") || "—"}
+                  </p>
+                )}
+                {confirm.command.operation === "confirm" &&
+                  confirm.summaries.some((task) => !task.inherits) &&
+                  confirm.summaries.some((task) => task.inherits) && (
+                    <p className="text-ui-xs text-muted-foreground">
+                      {tr("Tasks with their own channel keep it.")}
+                    </p>
+                  )}
+                {sharedModel && (
+                  <p>
+                    {tr("Model")}: {sharedModel}
+                  </p>
+                )}
                 <p>
                   {tr("Estimated cost")}: {tr("Unknown")}
                 </p>
-                {confirm.summaries?.map((task) => (
-                  <details key={task.id} className="border-t pt-2">
-                    <summary className="cursor-pointer">
-                      {task.name} · {task.parameters.n} {tr("images")} · {task.model} ·{" "}
-                      {task.references} {tr("references")}
-                    </summary>
-                    <p className="my-2 whitespace-pre-wrap break-words">{task.prompt}</p>
-                    <pre className="overflow-auto whitespace-pre-wrap break-all text-ui-xs text-muted-foreground">
-                      {JSON.stringify(task.parameters, null, 2)}
-                    </pre>
-                  </details>
-                ))}
+                {confirm.command.operation === "confirm" &&
+                  (!!batch.defaults.stylePrompt?.trim() ||
+                    !!batch.defaults.styleReferences?.length) && (
+                    <p className="text-ui-xs text-muted-foreground">
+                      {tr("Batch style is added to every task")}
+                      {batch.defaults.styleReferences?.length
+                        ? " · " +
+                          batch.defaults.styleReferences.length +
+                          " " +
+                          tr("Style reference images")
+                        : ""}
+                    </p>
+                  )}
+                {[...new Set(confirm.summaries.map((task) => outputGroup(task.output)))].map(
+                  (group) => (
+                    <section key={group} className="border-t pt-2">
+                      {confirm.summaries.some((task) => outputGroup(task.output)) && (
+                        <h3 className="text-ui-xs font-medium text-muted-foreground">
+                          {group || tr("Ungrouped")}
+                        </h3>
+                      )}
+                      {confirm.summaries
+                        .filter((task) => outputGroup(task.output) === group)
+                        .map((task) => (
+                          <details key={task.id} className="py-1">
+                            <summary className="cursor-pointer">
+                              {task.name}
+                              <span className="text-muted-foreground">
+                                {" · " +
+                                  [
+                                    task.output,
+                                    task.parameters.size,
+                                    task.parameters.n + " " + tr("images"),
+                                    task.parameters.quality &&
+                                      tr("Quality") + " " + tr(task.parameters.quality),
+                                    task.parameters.background &&
+                                      tr("Background") + " " + tr(task.parameters.background),
+                                    !sharedModel && task.model,
+                                    task.references + " " + tr("references"),
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                              </span>
+                            </summary>
+                            <p className="my-2 whitespace-pre-wrap break-words">{task.prompt}</p>
+                          </details>
+                        ))}
+                    </section>
+                  ),
+                )}
                 {confirm.command.operation === "retry" && (
                   <p>
                     {tr(

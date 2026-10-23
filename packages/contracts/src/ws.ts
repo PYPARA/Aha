@@ -4,6 +4,7 @@ import {
   ImageBatchListInput,
   ImageBatchResultsInput,
   ImageBatchImportSources,
+  ImageBatchPreflightInput,
 } from "./imageBatches";
 import { SpriteCommand, SpritePlanConfirmInput, SpriteRetryConfirmInput } from "./spriteAnimation";
 import { Schema, Struct } from "effect";
@@ -726,7 +727,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.imageBatchCommand, Schema.Struct({ command: ImageBatchCommand })),
   tagRequestBody(WS_METHODS.imageBatchList, ImageBatchListInput),
   tagRequestBody(WS_METHODS.imageBatchGet, ImageIdInput),
-  tagRequestBody(WS_METHODS.imageBatchPreflight, ImageIdInput),
+  tagRequestBody(WS_METHODS.imageBatchPreflight, ImageBatchPreflightInput),
   tagRequestBody(WS_METHODS.imageBatchResults, ImageBatchResultsInput),
   tagRequestBody(WS_METHODS.imageBatchResult, ImageIdInput),
   tagRequestBody(WS_METHODS.imageBatchImportSources, ImageBatchImportSources),
