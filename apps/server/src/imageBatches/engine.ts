@@ -57,10 +57,23 @@ const frozenStyle = (attempt: ImageBatchAttempt): BatchStyle => ({
  * The batch as one run sees it on another channel or model. Tasks that set their own channel or
  * model are pinned to their current configuration first, so only fully inheriting tasks move.
  */
-const onChannel = (
-  state: ImageBatchState,
-  run: { providerId?: string | undefined; model?: string | undefined },
-): ImageBatchState => {
+type RunScope = {
+  providerId?: string | undefined;
+  model?: string | undefined;
+  taskIds?: readonly string[] | undefined;
+};
+/** A run limited to some tasks: exactly those, with their current settings, enabled or not. */
+const onTasks = (state: ImageBatchState, taskIds: readonly string[] | undefined) => {
+  if (!taskIds) return state;
+  if (taskIds.some((id) => !state.tasks.some((t) => t.id === id)))
+    throw new Error("Task is no longer in the draft.");
+  return {
+    ...state,
+    tasks: state.tasks.filter((t) => taskIds.includes(t.id)).map((t) => ({ ...t, enabled: true })),
+  };
+};
+const onChannel = (state: ImageBatchState, run: RunScope): ImageBatchState => {
+  state = onTasks(state, run.taskIds);
   if (!run.providerId && !run.model) return state;
   const { defaults } = state;
   return {
@@ -136,10 +149,7 @@ export class ImageBatchEngine {
       );
     for (const t of tasks) Schema.decodeUnknownSync(ImageBatchTask)(t);
   }
-  async preflight(
-    id: string,
-    run: { providerId?: string | undefined; model?: string | undefined } = {},
-  ): Promise<ImageBatchPreflight> {
+  async preflight(id: string, run: RunScope = {}): Promise<ImageBatchPreflight> {
     const state = await this.get(id);
     const view = onChannel(state, run);
     return this.check(view, view.tasks, batchStyle(state));

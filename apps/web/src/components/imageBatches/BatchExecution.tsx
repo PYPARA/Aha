@@ -59,8 +59,14 @@ export function BatchExecution({
   /** Opens the generation check once this draft version is loaded (after "Apply and review"). */
   reviewVersion?: number | null;
   onReviewOpened?: () => void;
-  /** A retry asked for from a task row; it opens the same confirmation as the records drawer. */
-  retryRequest?: { attemptIds: string[]; mode: "missing" | "regenerate" } | null;
+  /**
+   * A run asked for from a task row or a result: fill an attempt's missing images, or regenerate
+   * tasks with their current settings. It opens the same confirmation as the bottom bar.
+   */
+  retryRequest?:
+    | { attemptIds: string[]; mode: "missing" | "regenerate" }
+    | { taskIds: string[] }
+    | null;
   onRetryHandled?: () => void;
 }) {
   const tr = useAhaTranslation(),
@@ -77,43 +83,47 @@ export function BatchExecution({
   const active = batch.executions.find((e) => !e.finishedAt);
   const latest = active ?? batch.executions.at(-1);
   const attempts = latest?.attempts ?? [];
-  const prepare = async (mode?: "missing" | "regenerate", attemptIds = selected) => {
+  const prepare = async (
+    mode?: "missing" | "regenerate",
+    attemptIds = selected,
+    /** Only these tasks, with their current settings (regenerating from a row or a result). */
+    taskIds?: string[],
+  ) => {
     setBusy(true);
     setAck(false);
     try {
       if (!mode) {
-        const p: ImageBatchPreflight = await batchApi().preflight({ id: batch.id });
+        const p: ImageBatchPreflight = await batchApi().preflight({
+          id: batch.id,
+          ...(taskIds ? { taskIds } : {}),
+        });
         if (p.version !== batch.version)
           throw new Error(tr("Batch changed. Reload before applying your changes."));
+        const scope = taskIds
+          ? batch.tasks.filter((t) => taskIds.includes(t.id))
+          : batch.tasks.filter((t) => t.enabled);
         setConfirm({
           command: {
             operation: "confirm",
             batchId: batch.id,
             version: p.version,
             requestId: crypto.randomUUID(),
+            ...(taskIds ? { taskIds } : {}),
           },
           tasks: p.tasks,
           images: p.images,
           issues: p.issues.map(
             (i) => (batch.tasks.find((t) => t.id === i.taskId)?.name ?? "") + ": " + i.message,
           ),
-          providers: [
-            ...new Set(
-              batch.tasks
-                .filter((t) => t.enabled)
-                .map((t) => t.providerId ?? batch.defaults.providerId),
-            ),
-          ],
+          providers: [...new Set(scope.map((t) => t.providerId ?? batch.defaults.providerId))],
           uncertain: false,
-          summaries: batch.tasks
-            .filter((t) => t.enabled)
-            .map((t) => ({
-              ...t,
-              ...imageBatchTaskConfiguration(t, batch.defaults),
-              inherits: !t.providerId && !t.model,
-              prompt: imageBatchComposePrompt(batch.defaults.stylePrompt, t.prompt),
-              references: imageBatchTaskReferences(t, batch.defaults.styleReferences).length,
-            })),
+          summaries: scope.map((t) => ({
+            ...t,
+            ...imageBatchTaskConfiguration(t, batch.defaults),
+            inherits: !t.providerId && !t.model,
+            prompt: imageBatchComposePrompt(batch.defaults.stylePrompt, t.prompt),
+            references: imageBatchTaskReferences(t, batch.defaults.styleReferences).length,
+          })),
         });
       } else {
         const targets = batch.executions
@@ -175,7 +185,13 @@ export function BatchExecution({
     if (!confirm || confirm.command.operation !== "confirm") return;
     setBusy(true);
     try {
-      const p = await batchApi().preflight({ id: batch.id, providerId, model });
+      const taskIds = confirm.command.taskIds;
+      const p = await batchApi().preflight({
+        id: batch.id,
+        providerId,
+        model,
+        ...(taskIds ? { taskIds: [...taskIds] } : {}),
+      });
       const { providerId: _p, model: _m, ...base } = confirm.command;
       setConfirm({
         ...confirm,
@@ -192,7 +208,7 @@ export function BatchExecution({
         providers: [
           ...new Set(
             batch.tasks
-              .filter((t) => t.enabled)
+              .filter((t) => (taskIds ? taskIds.includes(t.id) : t.enabled))
               .map((t) =>
                 t.providerId || t.model ? (t.providerId ?? batch.defaults.providerId) : providerId,
               ),
@@ -278,7 +294,9 @@ export function BatchExecution({
   const openRetry = useEffectEvent(() => {
     if (!retryRequest) return;
     onRetryHandled?.();
-    if (!active) void prepare(retryRequest.mode, retryRequest.attemptIds);
+    if (active) return;
+    if ("taskIds" in retryRequest) void prepare(undefined, [], retryRequest.taskIds);
+    else void prepare(retryRequest.mode, retryRequest.attemptIds);
   });
   useEffect(() => {
     if (retryRequest) openRetry();
@@ -606,6 +624,9 @@ export function BatchExecution({
                     </section>
                   ),
                 )}
+                {confirm.command.operation === "confirm" && confirm.command.taskIds && (
+                  <p>{tr("Only the chosen tasks are generated, with their current settings.")}</p>
+                )}
                 {confirm.command.operation === "retry" && (
                   <p>
                     {tr(
@@ -624,26 +645,28 @@ export function BatchExecution({
                       : ""}
                   </p>
                 </details>
-                {confirm.command.operation === "confirm" && alreadyDone.length > 0 && (
-                  <div
-                    role="status"
-                    className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 p-2 text-ui-sm"
-                  >
-                    <p className="min-w-0 flex-1">
-                      {tr(
-                        "{count} enabled tasks already have results and will be generated again.",
-                      ).replace("{count}", String(alreadyDone.length))}
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => void skipDone()}
+                {confirm.command.operation === "confirm" &&
+                  !confirm.command.taskIds &&
+                  alreadyDone.length > 0 && (
+                    <div
+                      role="status"
+                      className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 p-2 text-ui-sm"
                     >
-                      {tr("Disable them")}
-                    </Button>
-                  </div>
-                )}
+                      <p className="min-w-0 flex-1">
+                        {tr(
+                          "{count} enabled tasks already have results and will be generated again.",
+                        ).replace("{count}", String(alreadyDone.length))}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => void skipDone()}
+                      >
+                        {tr("Disable them")}
+                      </Button>
+                    </div>
+                  )}
                 {[...new Set(confirm.issues)].map((issue) => (
                   <p role="alert" key={issue} className="text-destructive">
                     {issue}

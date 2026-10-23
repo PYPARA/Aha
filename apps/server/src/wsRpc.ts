@@ -3361,6 +3361,7 @@ const makeWsRpcHandlersLayer = () =>
               imageGenerationService.batches.preflight(input.id, {
                 providerId: input.providerId,
                 model: input.model,
+                taskIds: input.taskIds,
               }),
             ),
             "Batch preflight failed",

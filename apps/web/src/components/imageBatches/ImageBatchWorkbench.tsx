@@ -45,6 +45,7 @@ import { BatchProposals } from "./BatchProposals";
 import { BatchExecution } from "./BatchExecution";
 import { BatchReferenceList } from "./BatchReferenceList";
 import { BatchBulkParameters } from "./BatchBulkParameters";
+import { BatchTaskResults } from "./BatchTaskResults";
 import { outputGroup } from "./resultNames";
 import { useResourceAttachments, type ResourceReceiveResult } from "../resources/resourceLibrary";
 import { uploadDrawingImage } from "../drawing/useDrawing";
@@ -308,15 +309,30 @@ function BatchWorkspace({
   const [taskQuery, setTaskQuery] = useState("");
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const [reviewVersion, setReviewVersion] = useState<number | null>(null);
-  const [retryRequest, setRetryRequest] = useState<{
-    attemptIds: string[];
-    mode: "missing" | "regenerate";
-  } | null>(null);
+  const [retryRequest, setRetryRequest] = useState<
+    { attemptIds: string[]; mode: "missing" | "regenerate" } | { taskIds: string[] } | null
+  >(null);
   const [resultTask, setResultTask] = useState("");
-  const openResults = (id: string) => {
+  // A task's results open in a drawer beside the list; the full page stays one link away.
+  const [taskResults, setTaskResults] = useState<string | null>(null);
+  const openResults = (id: string) => setTaskResults(id);
+  const openAllResults = (id: string) => {
+    setTaskResults(null);
     setResultTask(id);
     setTab("results");
   };
+  const execution = (
+    <div className="shrink-0">
+      <BatchExecution
+        batch={batch}
+        onError={onError}
+        reviewVersion={reviewVersion}
+        onReviewOpened={() => setReviewVersion(null)}
+        retryRequest={retryRequest}
+        onRetryHandled={() => setRetryRequest(null)}
+      />
+    </div>
+  );
   const activeExecution = batch.executions.some((e) => !e.finishedAt);
   const runs = latestTaskAttempts(batch);
   // Row thumbnails: the adopted candidate when there is one, otherwise the newest result.
@@ -940,16 +956,12 @@ function BatchWorkspace({
                                 {tr("View results")}
                               </MenuItem>
                             )}
-                            {attempt && (
-                              <MenuItem
-                                disabled={!idle}
-                                onClick={() =>
-                                  setRetryRequest({ attemptIds: [attempt.id], mode: "regenerate" })
-                                }
-                              >
-                                {tr("Regenerate")}
-                              </MenuItem>
-                            )}
+                            <MenuItem
+                              disabled={!idle}
+                              onClick={() => setRetryRequest({ taskIds: [t.id] })}
+                            >
+                              {tr(attempt ? "Regenerate" : "Generate this task")}
+                            </MenuItem>
                             {attempt && missing > 0 && (
                               <MenuItem
                                 disabled={!idle}
@@ -1020,16 +1032,7 @@ function BatchWorkspace({
               </div>
             ))}
           </div>
-          <div className="shrink-0">
-            <BatchExecution
-              batch={batch}
-              onError={onError}
-              reviewVersion={reviewVersion}
-              onReviewOpened={() => setReviewVersion(null)}
-              retryRequest={retryRequest}
-              onRetryHandled={() => setRetryRequest(null)}
-            />
-          </div>
+          {execution}
         </div>
       )}
       {tab === "results" && (
@@ -1044,10 +1047,32 @@ function BatchWorkspace({
             batch={batch}
             focusResultId={resultId}
             initialTaskId={resultTask}
+            onRegenerate={(taskIds) => setRetryRequest({ taskIds })}
             onError={onError}
           />
+          {execution}
         </div>
       )}
+      <BatchTaskResults
+        batch={batch}
+        taskId={taskResults}
+        onClose={() => setTaskResults(null)}
+        onEdit={(id) => {
+          const task = batch.tasks.find((t) => t.id === id);
+          setTaskResults(null);
+          if (task) setEditor({ task: structuredClone(task), base: structuredClone(batch) });
+        }}
+        onRegenerate={(id) => {
+          setTaskResults(null);
+          setRetryRequest({ taskIds: [id] });
+        }}
+        onFillMissing={(attemptId) => {
+          setTaskResults(null);
+          setRetryRequest({ attemptIds: [attemptId], mode: "missing" });
+        }}
+        onOpenAll={openAllResults}
+        onError={onError}
+      />
       {bulkParameters && selected.length > 0 && (
         <BatchBulkParameters
           tasks={batch.tasks.filter((t) => selected.includes(t.id))}

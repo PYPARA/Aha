@@ -138,6 +138,17 @@ export const imageBatchCopy: Record<string, string> = {
   "{count} enabled tasks already have results and will be generated again.":
     "{count} 项已启用的任务已有生成结果，确认后会再次生成。",
   "Disable them": "停用这些任务",
+  "Regenerate these tasks": "重新生成所选任务",
+  Task: "任务",
+  "Generate this task": "生成此任务",
+  "Output folder": "输出目录",
+  "All folders": "全部目录",
+  "Search results": "搜索结果",
+  "Open in Generated results": "在生成结果中查看",
+  "Regenerate uses the task's current prompt and settings. Edit the task first to change them.":
+    "重新生成会使用任务当前的提示词和参数；需要调整时先编辑任务。",
+  "Only the chosen tasks are generated, with their current settings.":
+    "只生成所选任务，并使用它们当前的设置。",
   "Only this run changes. The batch settings keep their channel and model.":
     "只影响本次生成，批次设置中的渠道和模型不变。",
   "Tasks with their own channel or model keep them.": "单独设置了渠道或模型的任务保持不变。",

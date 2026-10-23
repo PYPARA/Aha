@@ -382,6 +382,27 @@ describe("run channel", () => {
     expect(s.defaults).toMatchObject({ providerId: f.provider.id, model: "mock" });
   });
 });
+describe("task regeneration", () => {
+  it("generates only the chosen tasks with their current settings, even when disabled", async () => {
+    let s = await f.save(await f.create(), [
+      { ...f.task("sample", 1), enabled: false, prompt: "edited prompt" },
+      f.task("other", 1),
+    ]);
+    expect((await f.engine.preflight(s.id, { taskIds: ["sample"] })).tasks).toBe(1);
+    await expect(f.engine.preflight(s.id, { taskIds: ["gone"] })).rejects.toThrow("no longer");
+    s = await f.engine.command({
+      operation: "confirm",
+      batchId: s.id,
+      version: s.version,
+      requestId: randomUUID(),
+      taskIds: ["sample"],
+    });
+    const attempts = s.executions.at(-1)!.attempts;
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({ taskId: "sample", prompt: "edited prompt" });
+    expect(s.tasks.find((t) => t.id === "sample")!.enabled).toBe(false);
+  });
+});
 describe("proposal defaults", () => {
   it("applies a proposed style and default parameters and counts images with them", async () => {
     let s = await f.create();

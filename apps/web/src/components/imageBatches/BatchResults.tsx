@@ -6,6 +6,7 @@ import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "../ui/button";
 import { confirmDialog } from "../ui/confirm-dialog";
 import { OptionSelect } from "../ui/option-select";
+import { SearchInput } from "../ui/search-input";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
 import { PreviewSurface } from "../ui/preview-surface";
 import { imageUrl, drawingApi } from "../drawing/useDrawing";
@@ -35,9 +36,12 @@ export function BatchResults({
   batch,
   focusResultId,
   initialTaskId = "",
+  onRegenerate,
   onError,
   readOnly = false,
 }: {
+  /** Regenerates tasks with their current settings (opens the generation check). */
+  onRegenerate?: (taskIds: string[]) => void;
   batch: ImageBatchState;
   focusResultId?: string | undefined;
   /** Opens filtered to one task, e.g. from a task row's thumbnail. */
@@ -50,6 +54,9 @@ export function BatchResults({
     command = useBatchCommand();
   const [filter, setFilter] = useState<"all" | "adopted" | "unadopted" | "uncollected">("all");
   const [taskId, setTaskId] = useState(initialTaskId);
+  const [folder, setFolder] = useState("*");
+  const [query, setQuery] = useState("");
+  const folders = [...new Set(batch.tasks.map((t) => outputGroup(t.output)))];
   const [selection, setSelection] = useState(emptyResourceSelection);
   const [multiple, setMultiple] = useState(false);
   const [spriteTarget, setSpriteTarget] = useState(false);
@@ -87,6 +94,8 @@ export function BatchResults({
       ),
     retry: false,
   });
+  // Names come from the whole view, so the name on a card is the name that is exported.
+  const names = resultFileNames(results);
   // Results follow the task list: task order, grouped by the first folder of the output path.
   const order = new Map(batch.tasks.map((t, i) => [t.id, i]));
   const sorted = results.toSorted(
@@ -96,20 +105,28 @@ export function BatchResults({
       a.attemptId.localeCompare(b.attemptId) ||
       a.position - b.position,
   );
+  // Folder and search narrow what is loaded; the task filter (from a task) is applied by the server.
+  const needle = query.trim().toLowerCase();
+  const filtered = sorted.filter(
+    (r) =>
+      (folder === "*" || outputGroup(r.output) === folder) &&
+      (!needle ||
+        [r.taskName, r.output ?? "", names.get(r.id)?.name ?? ""].some((text) =>
+          text.toLowerCase().includes(needle),
+        )),
+  );
   const foldered = sorted.some((r) => outputGroup(r.output));
   const groups = foldered
-    ? [...new Set(sorted.map((r) => outputGroup(r.output)))].map((id) => ({
+    ? [...new Set(filtered.map((r) => outputGroup(r.output)))].map((id) => ({
         id,
-        results: sorted.filter((r) => outputGroup(r.output) === id),
+        results: filtered.filter((r) => outputGroup(r.output) === id),
       }))
-    : [{ id: "", results: sorted }];
+    : [{ id: "", results: filtered }];
   const visibleIds = groups.flatMap((group) => group.results.map((result) => result.id));
   useEffect(() => {
     setSelection((previous) => reconcileResourceSelection(previous, visibleIds));
   }, [visibleIds.join(",")]);
   const chosen = results.filter((r) => selection.ids.includes(r.id));
-  // Names come from the whole view, so the name on a card is the name that is exported.
-  const names = resultFileNames(results);
   const [referenceFor, setReferenceFor] = useState<ImageBatchResult[] | null>(null);
   const [adoptedOffer, setAdoptedOffer] = useState<{
     result: ImageBatchResult;
@@ -228,20 +245,31 @@ export function BatchResults({
             <option value="uncollected">{tr("Not collected")}</option>
           </OptionSelect>
         </div>
+        {folders.length > 1 && (
+          <div className="w-36">
+            <OptionSelect label={tr("Output folder")} value={folder} onValueChange={setFolder}>
+              <option value="*">{tr("All folders")}</option>
+              {folders.map((id) => (
+                <option key={id} value={id}>
+                  {id || tr("Ungrouped")}
+                </option>
+              ))}
+            </OptionSelect>
+          </div>
+        )}
         <div className="w-44">
-          <OptionSelect label={tr("Result task")} value={taskId} onValueChange={setTaskId}>
-            <option value="">{tr("All tasks")}</option>
-            {[
-              ...new Map(
-                batch.executions.flatMap((e) => e.attempts).map((a) => [a.taskId, a.taskName]),
-              ).entries(),
-            ].map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
-              </option>
-            ))}
-          </OptionSelect>
+          <SearchInput
+            aria-label={tr("Search results")}
+            placeholder={tr("Search results")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
         </div>
+        {taskId && (
+          <Button size="sm" variant="secondary" onClick={() => setTaskId("")}>
+            {batch.tasks.find((t) => t.id === taskId)?.name ?? tr("Task")} ×
+          </Button>
+        )}
         <span className="text-ui-xs text-muted-foreground">
           {page.data?.pages[0]?.total ?? "—"} {tr("images")}
         </span>
@@ -343,7 +371,7 @@ export function BatchResults({
               {tr("Retry")}
             </Button>
           </p>
-        ) : !results.length ? (
+        ) : !filtered.length ? (
           <div className="py-12 text-center text-ui text-muted-foreground">
             {tr("No image results in this view.")}
           </div>
@@ -468,6 +496,17 @@ export function BatchResults({
                       >
                         {tr("Use as reference")}
                       </Button>
+                      {onRegenerate && batch.tasks.some((t) => t.id === r.taskId) && (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          aria-label={tr("Regenerate") + ": " + r.taskName}
+                          disabled={batch.executions.some((e) => !e.finishedAt)}
+                          onClick={() => onRegenerate([r.taskId])}
+                        >
+                          {tr("Regenerate")}
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -533,6 +572,22 @@ export function BatchResults({
               onClick={() => perform(() => useInDrawing(chosen[0]!))}
             >
               {tr("Continue in drawing")}
+            </Button>
+          )}
+          {!readOnly && onRegenerate && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={batch.executions.some((e) => !e.finishedAt)}
+              onClick={() =>
+                onRegenerate(
+                  [...new Set(chosen.map((r) => r.taskId))].filter((id) =>
+                    batch.tasks.some((t) => t.id === id),
+                  ),
+                )
+              }
+            >
+              {tr("Regenerate these tasks")}
             </Button>
           )}
           {!readOnly && (

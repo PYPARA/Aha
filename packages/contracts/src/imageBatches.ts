@@ -243,6 +243,8 @@ export const ImageBatchPreflightInput = Schema.Struct({
   id: Id,
   providerId: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
+  /** Only these tasks, with their current settings, whether or not they are enabled. */
+  taskIds: Schema.optional(Schema.Array(Id).check(Schema.isMinLength(1))),
 });
 export const ImageBatchPreflight = Schema.Struct({
   version: Version,
@@ -290,6 +292,8 @@ export const ImageBatchCommand = Schema.Union([
     /** Channel and model for this run only, for tasks that inherit both; the draft keeps its own. */
     providerId: Schema.optional(Schema.String),
     model: Schema.optional(Schema.String),
+    /** Regenerates just these tasks with their current settings, enabled or not. */
+    taskIds: Schema.optional(Schema.Array(Id).check(Schema.isMinLength(1))),
   }),
   Schema.Struct({
     operation: Schema.Literals(["pause", "resume", "cancel"]),
