@@ -7,7 +7,7 @@ import { ResourceLibrary } from "./library";
 const ids = z.array(z.string().min(1).max(128)).min(1).max(10000);
 const text = z.string().max(4096);
 const origin = z.object({
-  kind: z.enum(["drawing", "chat", "local", "game", "image-batch", "sprite"]),
+  kind: z.enum(["drawing", "chat", "local", "game", "image-batch", "sprite", "model3d"]),
   threadId: text.optional(),
   messageId: text.optional(),
   jobId: text.optional(),
@@ -16,6 +16,7 @@ const origin = z.object({
   attemptId: text.optional(),
   resultId: text.optional(),
   projectId: text.optional(),
+  versionId: text.optional(),
   prompt: z.string().max(100000).optional(),
   model: text.optional(),
   parameters: z.record(z.string(), z.unknown()).optional(),
@@ -62,8 +63,10 @@ const Command = z.discriminatedUnion("op", [
       query: text.optional(),
       searchIn: z.enum(["name", "nameAndPath"]).optional(),
       tag: text.optional(),
-      originKind: z.enum(["drawing", "chat", "local", "game", "image-batch", "sprite"]).optional(),
-      type: z.enum(["all", "image", "audio", "video", "document", "other"]).optional(),
+      originKind: z
+        .enum(["drawing", "chat", "local", "game", "image-batch", "sprite", "model3d"])
+        .optional(),
+      type: z.enum(["all", "image", "audio", "video", "document", "model3d", "other"]).optional(),
       sort: z.enum(["name", "modified"]).optional(),
       offset: z.number().int().nonnegative().optional(),
     }),

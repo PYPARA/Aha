@@ -110,6 +110,7 @@ const RAIL_ITEM_GLYPH_NAMES: Record<Exclude<RailItemId, HugeiconRailItemId>, str
   drawing: "images-sparkle",
   imageBatches: "images-sparkle",
   spriteAnimation: "clapboard",
+  model3d: "building-blocks",
   resources: "folder-2",
   kanban: "columns-3-wide",
   settings: "settings-gear-4",

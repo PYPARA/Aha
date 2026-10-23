@@ -4,7 +4,7 @@
 
 Aha 是基于 [Synara](https://github.com/Emanuele-web04/synara) 二次开发的本地编程 Agent 工作台，当前源码已合入 **Synara v1.0.7**。原基线、历次合并提交和数据库兼容信息见 [UPSTREAM.md](UPSTREAM.md)。
 
-支持项目与聊天、供应商会话、Git、编辑器、终端、浏览器及自动化，并提供 Aha 中文界面、五区背景与内置皮肤、绘图、批量生图、精灵动画工作台和资源中心。供应商能力取决于本地运行时、账号和权限。
+支持项目与聊天、供应商会话、Git、编辑器、终端、浏览器及自动化，并提供 Aha 中文界面、五区背景与内置皮肤、绘图、批量生图、精灵动画工作台、3D 工坊和资源中心。供应商能力取决于本地运行时、账号和权限。
 
 ## 开发与构建
 
@@ -42,7 +42,7 @@ bun run lint
 
 ## 文档
 
-功能使用说明与开发约定统一放在 [docs](docs/README.md)，包括 [精灵动画工作台](docs/guides/SPRITE_WORKFLOW.md)、[资源中心](docs/guides/RESOURCE_CENTER.md) 和 [UI 实现规则](docs/UI_GUIDELINES.md)。上游版本及精简边界见 [UPSTREAM.md](UPSTREAM.md)。
+功能使用说明与开发约定统一放在 [docs](docs/README.md)，包括 [精灵动画工作台](docs/guides/SPRITE_WORKFLOW.md)、[3D 工坊](docs/guides/MODEL3D_WORKSHOP.md)、[资源中心](docs/guides/RESOURCE_CENTER.md) 和 [UI 实现规则](docs/UI_GUIDELINES.md)。上游版本及精简边界见 [UPSTREAM.md](UPSTREAM.md)。
 
 ## 来源与许可
 

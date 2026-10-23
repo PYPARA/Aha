@@ -5,7 +5,7 @@ export const RESOURCE_CHANNELS = {
   progress: "aha:resources:progress",
 } as const;
 export interface ResourceOrigin {
-  kind: "drawing" | "chat" | "local" | "game" | "image-batch" | "sprite";
+  kind: "drawing" | "chat" | "local" | "game" | "image-batch" | "sprite" | "model3d";
   threadId?: string | undefined;
   messageId?: string | undefined;
   jobId?: string | undefined;
@@ -15,6 +15,7 @@ export interface ResourceOrigin {
   resultId?: string | undefined;
   /** Sprite project that exported the file (kind "sprite"). */
   projectId?: string | undefined;
+  versionId?: string | undefined;
   prompt?: string | undefined;
   model?: string | undefined;
   parameters?: Record<string, unknown> | undefined;
@@ -64,7 +65,7 @@ export interface ResourceQuery {
   searchIn?: "name" | "nameAndPath" | undefined;
   tag?: string | undefined;
   originKind?: ResourceOrigin["kind"] | undefined;
-  type?: "all" | "image" | "audio" | "video" | "document" | "other" | undefined;
+  type?: "all" | "image" | "audio" | "video" | "document" | "model3d" | "other" | undefined;
   sort?: "name" | "modified" | undefined;
   offset?: number | undefined;
 }
@@ -230,6 +231,7 @@ export function resourceType(name: string): NonNullable<ResourceQuery["type"]> {
   if (["png", "jpg", "jpeg", "webp", "gif", "avif", "bmp", "tiff", "svg"].includes(ext))
     return "image";
   if (["mp3", "wav", "ogg", "flac", "m4a"].includes(ext)) return "audio";
+  if (["glb", "gltf"].includes(ext)) return "model3d";
   if (["mp4", "mov", "webm", "mkv"].includes(ext)) return "video";
   if (["pdf", "txt", "md", "json", "csv", "docx", "xlsx", "yaml", "xml"].includes(ext))
     return "document";

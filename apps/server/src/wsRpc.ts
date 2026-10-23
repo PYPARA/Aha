@@ -58,6 +58,8 @@ import { RpcMiddleware, RpcSchema, RpcSerialization, RpcServer } from "effect/un
 import { AutomationService } from "./automation/Services/AutomationService";
 import { TodoService } from "./todo/Services/TodoService";
 import { ImageGenerationService } from "./imageGeneration/Services/ImageGenerationService";
+import { model3DEngine, model3DForThread } from "./model3d/engine";
+import type { Model3DEvent } from "@synara/contracts";
 import { ImageApiError } from "./imageGeneration/imageApi";
 import { isServerBetaFeatureEnabled } from "./betaFeatureGate";
 import { readInlineVisual } from "./inlineVisualStore";
@@ -418,6 +420,12 @@ export function toWsRpcError(cause: unknown, fallbackMessage: string) {
     cause,
   });
 }
+
+const model3dEffect = <A>(run: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: run,
+    catch: (cause) => toWsRpcError(cause, "Model operation failed"),
+  });
 
 // Process-wide so a subscriber's restart chain survives its own reconnects
 // (the client id is stable across a socket reconnect), but keyed per
@@ -3199,10 +3207,92 @@ const makeWsRpcHandlersLayer = () =>
         [WS_METHODS.spriteConfirm]: (input) =>
           rpcEffect(imageGenerationService.spriteConfirm(input), "Sprite confirmation failed"),
         [WS_METHODS.spriteCommand]: (input) =>
-          rpcEffect(imageGenerationService.spriteCommand(input), "Sprite request failed"),
+          rpcEffect(
+            Effect.gen(function* () {
+              if (input.operation === "sync")
+                for (const threadId of new Set([
+                  ...(input.threadIds ?? []),
+                  ...(input.context?.threadId ? [input.context.threadId] : []),
+                ])) {
+                  if (yield* Effect.promise(() => model3DForThread(threadId)))
+                    return yield* Effect.fail(
+                      new Error("Conversation already belongs to a 3D project."),
+                    );
+                }
+              return yield* imageGenerationService.spriteCommand(input);
+            }),
+            "Sprite request failed",
+          ),
+        [WS_METHODS.model3dList]: () =>
+          rpcEffect(
+            model3dEffect(async () => (await model3DEngine()).list()),
+            "Could not list model projects",
+          ),
+        [WS_METHODS.model3dGet]: (input) =>
+          rpcEffect(
+            model3dEffect(async () => (await model3DEngine()).get(input.id)),
+            "Could not read model project",
+          ),
+        [WS_METHODS.model3dForThread]: (input) =>
+          rpcEffect(
+            model3dEffect(async () => (await model3DEngine()).forThread(input.threadId)),
+            "Could not read model conversation",
+          ),
+        [WS_METHODS.model3dCommand]: (input) =>
+          requireWsOwnerSession.pipe(
+            Effect.andThen(
+              rpcEffect(
+                model3dEffect(async () => {
+                  if (input.command.operation === "bind-thread" && input.command.threadId) {
+                    const batch = await imageGenerationService.batches.repository.forThread(
+                      input.command.threadId,
+                    );
+                    const sprite = await Effect.runPromise(
+                      imageGenerationService.spriteForThread(input.command.threadId),
+                    );
+                    if (batch || sprite)
+                      throw new Error(
+                        "Conversation already belongs to another creative workbench.",
+                      );
+                  }
+                  return (await model3DEngine()).command(input.command);
+                }),
+                "Model operation failed",
+              ),
+            ),
+          ),
+        [WS_METHODS.subscribeModel3D]: (_, { clientId }) =>
+          streamAdmission.guard(
+            clientId,
+            { key: "model3d.events" },
+            bufferLiveUiStream(
+              Stream.callback<Model3DEvent>((queue) =>
+                Effect.gen(function* () {
+                  const engine = yield* Effect.promise(model3DEngine);
+                  const listener = (event: Model3DEvent) => {
+                    Effect.runFork(Queue.offer(queue, event).pipe(Effect.asVoid));
+                  };
+                  engine.events.on("changed", listener);
+                  yield* Effect.addFinalizer(() =>
+                    Effect.sync(() => {
+                      engine.events.off("changed", listener);
+                    }),
+                  );
+                }),
+              ),
+              { label: "model3d.events" },
+            ),
+          ),
         [WS_METHODS.imageBatchCommand]: (input) =>
           rpcEffect(
-            Effect.tryPromise(() => imageGenerationService.batches.command(input.command)),
+            Effect.tryPromise(async () => {
+              if (
+                input.command.operation === "bind-thread" &&
+                (await model3DForThread(input.command.threadId))
+              )
+                throw new Error("Conversation already belongs to a 3D project.");
+              return imageGenerationService.batches.command(input.command);
+            }),
             "Batch request failed",
           ),
         [WS_METHODS.imageBatchGet]: (input) =>

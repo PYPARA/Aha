@@ -50,6 +50,7 @@ import {
   type AutomationStreamEvent,
   type TodoStreamEvent,
   type ImageJobEvent,
+  type Model3DEvent,
   DEVICE_WS_CHANNELS,
   DEVICE_WS_METHODS,
   type DeviceEvent,
@@ -171,6 +172,7 @@ const terminalEventListeners = createListenerRegistry<TerminalEvent>();
 const projectDevServerEventListeners = createListenerRegistry<ProjectDevServerEvent>();
 const automationEventListeners = createListenerRegistry<AutomationStreamEvent>();
 const todoEventListeners = createListenerRegistry<TodoStreamEvent>();
+const model3dEventListeners = createListenerRegistry<Model3DEvent>();
 const imageJobEventListeners = createListenerRegistry<ImageJobEvent>();
 const deviceEventListeners = createListenerRegistry<DeviceEvent>();
 const projectAgentEventListeners = createListenerRegistry<ProjectAgentStreamEvent>();
@@ -197,6 +199,7 @@ function clearWsNativeApiListeners(): void {
   projectDevServerEventListeners.clear();
   automationEventListeners.clear();
   todoEventListeners.clear();
+  model3dEventListeners.clear();
   imageJobEventListeners.clear();
   deviceEventListeners.clear();
   projectAgentEventListeners.clear();
@@ -533,6 +536,9 @@ export function createWsNativeApi(): NativeApi {
       todoEventListeners.emit(message.data);
     });
   }
+  transport.subscribe(WS_CHANNELS.model3dEvent, (message) =>
+    model3dEventListeners.emit(message.data),
+  );
   transport.subscribe(WS_CHANNELS.imageJobEvent, (message) =>
     imageJobEventListeners.emit(message.data),
   );
@@ -993,6 +999,13 @@ export function createWsNativeApi(): NativeApi {
       update: (input) => transport.request(WS_METHODS.todoUpdate, input),
       delete: (input) => transport.request(WS_METHODS.todoDelete, input),
       onEvent: todoEventListeners.subscribe,
+    },
+    model3d: {
+      onEvent: model3dEventListeners.subscribe,
+      list: () => transport.request(WS_METHODS.model3dList, {}),
+      get: (input) => transport.request(WS_METHODS.model3dGet, input),
+      command: (input) => transport.request(WS_METHODS.model3dCommand, { command: input }),
+      forThread: (input) => transport.request(WS_METHODS.model3dForThread, input),
     },
     imageBatches: {
       list: (input) => transport.request(WS_METHODS.imageBatchList, input),

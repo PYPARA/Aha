@@ -52,7 +52,11 @@ export function useBatchCollectionWorker() {
             try {
               const { bytes } = await fetchResource({
                 name: item.name,
-                url: resolveWsHttpUrl(`/api/drawing/assets/${item.assetId}`),
+                url: resolveWsHttpUrl(
+                  item.origin.kind === "model3d"
+                    ? `/api/model3d/assets/${encodeURIComponent(item.origin.projectId!)}/${encodeURIComponent(item.origin.versionId!)}/model.glb`
+                    : `/api/drawing/assets/${item.assetId}`,
+                ),
               });
               item = await resourceApi<ResourceCollectionItem>({
                 op: "commitCollection",
@@ -71,15 +75,17 @@ export function useBatchCollectionWorker() {
               continue;
             }
           }
-          if (!item.resourceId || !item.origin.batchId) continue;
+          if (!item.resourceId || (item.origin.kind !== "model3d" && !item.origin.batchId))
+            continue;
           try {
-            await ensureNativeApi().imageBatches.command({
-              operation: "collection",
-              batchId: item.origin.batchId,
-              resultId: item.resultId,
-              libraryId: operation.libraryId,
-              resourceId: item.resourceId,
-            });
+            if (item.origin.kind !== "model3d")
+              await ensureNativeApi().imageBatches.command({
+                operation: "collection",
+                batchId: item.origin.batchId!,
+                resultId: item.resultId,
+                libraryId: operation.libraryId,
+                resourceId: item.resourceId,
+              });
             await resourceApi({
               op: "linkCollection",
               operationId: operation.id,

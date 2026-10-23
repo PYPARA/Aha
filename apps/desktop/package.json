@@ -14,6 +14,7 @@
     "typecheck:legacy": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "betterwright": "2.7.3",
     "effect": "catalog:",
     "electron": "43.4.1",

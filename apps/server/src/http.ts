@@ -1,4 +1,5 @@
 import { ImageEditDocumentCreateInput } from "@synara/contracts";
+import { model3DEngine } from "./model3d/engine";
 import { readEventLoopStatus } from "./eventLoopMonitor";
 import { ImageGenerationService } from "./imageGeneration/Services/ImageGenerationService";
 import { IMAGE_INPUT_MAX_BYTES } from "@synara/contracts";
@@ -248,11 +249,50 @@ export function makeEffectHttpRouteLayer(
     editorIconEffectRouteLayer,
     localImageEffectRouteLayer,
     drawingAssetEffectRouteLayer,
+    model3dAssetEffectRouteLayer,
     binaryUploadEffectRouteLayer,
     attachmentsEffectRouteLayer,
     staticAndDevEffectRouteLayer,
   );
 }
+
+export const model3dAssetEffectRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/model3d/assets/*",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (!url) return HttpServerResponse.text("Bad Request", { status: 400 });
+    const config = yield* ServerConfig;
+    if (!isLegacyTokenAuthorized({ config, url })) yield* requireAuthenticatedRequest;
+    const parts = url.pathname.split("/").slice(4);
+    if (parts.length !== 3) return HttpServerResponse.text("Not Found", { status: 404 });
+    const [projectId, versionId, file] = parts as [string, string, string];
+    const bytes = yield* Effect.tryPromise(async () =>
+      (await model3DEngine()).read(projectId, versionId, file),
+    );
+    return HttpServerResponse.uint8Array(bytes, {
+      headers: {
+        ...localPreviewCorsHeaders({ config, request, url }),
+        "Content-Type": file.endsWith(".png")
+          ? "image/png"
+          : file.endsWith(".json")
+            ? "application/json"
+            : "model/gltf-binary",
+        "Cache-Control": "private, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed(
+        error instanceof AuthError
+          ? authErrorResponse(error)
+          : HttpServerResponse.text("Not Found", { status: 404 }),
+      ),
+    ),
+  ),
+);
 
 export const drawingAssetEffectRouteLayer = Layer.mergeAll(
   HttpRouter.add(

@@ -119,3 +119,38 @@ it("keeps identical bytes from separate result IDs separate, validates checksum,
     /no longer exists|target folder changed/,
   );
 });
+
+it("retains 3D version provenance and recovers copies using the same durable receipts", async () => {
+  const lib = await open();
+  const item = {
+    resultId: "project_version",
+    assetId,
+    name: "prop.glb",
+    origin: { kind: "model3d" as const, projectId: "project", versionId: "version" },
+  };
+  const operation = await lib.prepareCollection({
+    id: randomUUID(),
+    libraryId: lib.libraryId!,
+    directoryId: null,
+    items: [item],
+  });
+  const committed = await lib.commitCollection(operation.id, item.resultId, bytes);
+  await lib.linkCollection(operation.id, item.resultId);
+  await lib.finishCollection(operation.id);
+  lib.close();
+  const restored = await open();
+  const entry = restored.entry(committed.resourceId!);
+  expect(entry.origin).toEqual(item.origin);
+  expect(
+    restored.list({ path: "", type: "model3d", originKind: "model3d" }).entries.map((e) => e.id),
+  ).toContain(entry.id);
+  const repeat = await restored.prepareCollection({
+    id: randomUUID(),
+    libraryId: restored.libraryId!,
+    directoryId: null,
+    items: [item],
+  });
+  expect((await restored.commitCollection(repeat.id, item.resultId, bytes)).resourceId).toBe(
+    entry.id,
+  );
+});

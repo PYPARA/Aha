@@ -16,6 +16,7 @@ import { Route as ChatSettingsRouteImport } from './routes/_chat.settings'
 import { Route as ChatResourcesRouteImport } from './routes/_chat.resources'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatPluginsRouteImport } from './routes/_chat.plugins'
+import { Route as ChatModel3dRouteImport } from './routes/_chat.model3d'
 import { Route as ChatInboxRouteImport } from './routes/_chat.inbox'
 import { Route as ChatImageBatchesRouteImport } from './routes/_chat.image-batches'
 import { Route as ChatDrawingRouteImport } from './routes/_chat.drawing'
@@ -63,6 +64,11 @@ const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
 const ChatPluginsRoute = ChatPluginsRouteImport.update({
   id: '/plugins',
   path: '/plugins',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatModel3dRoute = ChatModel3dRouteImport.update({
+  id: '/model3d',
+  path: '/model3d',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatInboxRoute = ChatInboxRouteImport.update({
@@ -144,6 +150,7 @@ export interface FileRoutesByFullPath {
   '/drawing': typeof ChatDrawingRoute
   '/image-batches': typeof ChatImageBatchesRoute
   '/inbox': typeof ChatInboxRoute
+  '/model3d': typeof ChatModel3dRoute
   '/plugins': typeof ChatPluginsRoute
   '/pull-requests': typeof ChatPullRequestsRouteWithChildren
   '/resources': typeof ChatResourcesRoute
@@ -164,6 +171,7 @@ export interface FileRoutesByTo {
   '/drawing': typeof ChatDrawingRoute
   '/image-batches': typeof ChatImageBatchesRoute
   '/inbox': typeof ChatInboxRoute
+  '/model3d': typeof ChatModel3dRoute
   '/plugins': typeof ChatPluginsRoute
   '/resources': typeof ChatResourcesRoute
   '/settings': typeof ChatSettingsRoute
@@ -187,6 +195,7 @@ export interface FileRoutesById {
   '/_chat/drawing': typeof ChatDrawingRoute
   '/_chat/image-batches': typeof ChatImageBatchesRoute
   '/_chat/inbox': typeof ChatInboxRoute
+  '/_chat/model3d': typeof ChatModel3dRoute
   '/_chat/plugins': typeof ChatPluginsRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRouteWithChildren
   '/_chat/resources': typeof ChatResourcesRoute
@@ -212,6 +221,7 @@ export interface FileRouteTypes {
     | '/drawing'
     | '/image-batches'
     | '/inbox'
+    | '/model3d'
     | '/plugins'
     | '/pull-requests'
     | '/resources'
@@ -232,6 +242,7 @@ export interface FileRouteTypes {
     | '/drawing'
     | '/image-batches'
     | '/inbox'
+    | '/model3d'
     | '/plugins'
     | '/resources'
     | '/settings'
@@ -254,6 +265,7 @@ export interface FileRouteTypes {
     | '/_chat/drawing'
     | '/_chat/image-batches'
     | '/_chat/inbox'
+    | '/_chat/model3d'
     | '/_chat/plugins'
     | '/_chat/pull-requests'
     | '/_chat/resources'
@@ -324,6 +336,13 @@ declare module '@tanstack/react-router' {
       path: '/plugins'
       fullPath: '/plugins'
       preLoaderRoute: typeof ChatPluginsRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/model3d': {
+      id: '/_chat/model3d'
+      path: '/model3d'
+      fullPath: '/model3d'
+      preLoaderRoute: typeof ChatModel3dRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/inbox': {
@@ -458,6 +477,7 @@ interface ChatRouteChildren {
   ChatDrawingRoute: typeof ChatDrawingRoute
   ChatImageBatchesRoute: typeof ChatImageBatchesRoute
   ChatInboxRoute: typeof ChatInboxRoute
+  ChatModel3dRoute: typeof ChatModel3dRoute
   ChatPluginsRoute: typeof ChatPluginsRoute
   ChatPullRequestsRoute: typeof ChatPullRequestsRouteWithChildren
   ChatResourcesRoute: typeof ChatResourcesRoute
@@ -478,6 +498,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatDrawingRoute: ChatDrawingRoute,
   ChatImageBatchesRoute: ChatImageBatchesRoute,
   ChatInboxRoute: ChatInboxRoute,
+  ChatModel3dRoute: ChatModel3dRoute,
   ChatPluginsRoute: ChatPluginsRoute,
   ChatPullRequestsRoute: ChatPullRequestsRouteWithChildren,
   ChatResourcesRoute: ChatResourcesRoute,

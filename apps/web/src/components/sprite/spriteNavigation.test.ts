@@ -17,11 +17,13 @@ it("adds the sprite rail item after Drawing without moving existing user items",
     "automations",
     "studio",
   ]);
-  expect(order.slice(0, 6)).toEqual([
+  expect(order.slice(0, 8)).toEqual([
     "spaces",
     "home",
     "drawing",
+    "imageBatches",
     "spriteAnimation",
+    "model3d",
     "resources",
     "tasks",
   ]);

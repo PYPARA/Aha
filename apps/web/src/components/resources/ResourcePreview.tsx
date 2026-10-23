@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from "react";
+import { lazy, Suspense, useContext, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   resourceType,
@@ -8,6 +8,7 @@ import {
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { FileIcon, FolderIcon } from "~/lib/icons";
 import { resourceApi, resourceKey, ResourceLibraryIdContext } from "./resourceLibrary";
+const ModelViewer = lazy(() => import("../model3d/ModelViewer"));
 
 // Keep IPC and image decoding responsive when a full page mounts at once. Waiting
 // reads are removed when their query is disposed (page/library changes).
@@ -66,22 +67,32 @@ export function ResourcePreview({
   const [decodeError, setDecodeError] = useState(false);
   const libraryId = useContext(ResourceLibraryIdContext);
   const isImage = entry.kind === "file" && resourceType(entry.name) === "image";
+  const isModel = large && entry.kind === "file" && resourceType(entry.name) === "model3d";
   const preview = useQuery({
     queryKey: [...resourceKey, "preview", libraryId, entry.id, entry.hash, large],
     queryFn: ({ signal }) => readPreview(entry.id, !large, signal),
-    enabled: isImage,
+    enabled: isImage || isModel,
     retry: false,
     staleTime: Infinity,
   });
   useEffect(() => {
-    if (!preview.data) return;
+    if (!preview.data || isModel) return;
     setDecodeError(false);
     const url = URL.createObjectURL(
       new Blob([new Uint8Array(preview.data.bytes)], { type: preview.data.mimeType }),
     );
     setImage({ data: preview.data, url });
     return () => URL.revokeObjectURL(url);
-  }, [preview.data]);
+  }, [preview.data, isModel]);
+
+  if (isModel && preview.data)
+    return (
+      <div className="flex h-[min(60vh,32rem)] w-full min-w-0">
+        <Suspense fallback={<p className="p-3 text-ui-sm">{tr("Loading model…")}</p>}>
+          <ModelViewer bytes={preview.data.bytes} />
+        </Suspense>
+      </div>
+    );
 
   if (image && image.data === preview.data && !decodeError)
     return (
@@ -95,7 +106,7 @@ export function ResourcePreview({
         onError={() => setDecodeError(true)}
       />
     );
-  if (isImage && (large || preview.error || decodeError))
+  if ((isImage || isModel) && (large || preview.error || decodeError))
     return (
       <span
         role={large && (preview.error || decodeError) ? "alert" : "status"}

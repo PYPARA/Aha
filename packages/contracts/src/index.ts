@@ -1,3 +1,4 @@
+export * from "./model3d";
 export * from "./imageBatches";
 export * from "./auth";
 export * from "./automation";

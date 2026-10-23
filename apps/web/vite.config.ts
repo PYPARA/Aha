@@ -199,6 +199,10 @@ export default defineConfig({
     // terminal runtime code, and the chat route—not initial-load bundles.
     chunkSizeWarningLimit: 850,
     rolldownOptions: {
+      input: {
+        main: path.resolve(import.meta.dirname, "index.html"),
+        model3dRuntime: path.resolve(import.meta.dirname, "model3d-runtime.html"),
+      },
       checks: {
         // React Compiler is expected to dominate transform time in this app.
         pluginTimings: false,

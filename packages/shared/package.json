@@ -463,6 +463,10 @@
     "./wsRequestClass": {
       "types": "./src/wsRequestClass.ts",
       "import": "./src/wsRequestClass.ts"
+    },
+    "./model3dFiles": {
+      "types": "./src/model3dFiles.ts",
+      "import": "./src/model3dFiles.ts"
     }
   },
   "scripts": {

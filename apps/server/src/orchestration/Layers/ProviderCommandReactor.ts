@@ -1,4 +1,6 @@
 import { IMAGE_BATCH_GUIDANCE } from "../../agentGateway/imageBatchTools";
+import { MODEL3D_GUIDANCE } from "../../agentGateway/model3dTools";
+import { model3DForThread } from "../../model3d/engine";
 import { makeSpriteReferenceReader } from "../../agentGateway/spriteReferences";
 import { createHash } from "node:crypto";
 import { ImageGenerationService } from "../../imageGeneration/Services/ImageGenerationService";
@@ -3138,7 +3140,8 @@ const make = Effect.gen(function* () {
     const batch = spriteImages?.batches
       ? yield* Effect.promise(() => spriteImages.batches.repository.forThread(input.threadId))
       : null;
-    if (batch && spritePrompt)
+    const model3d = yield* Effect.promise(() => model3DForThread(input.threadId));
+    if ((batch && spritePrompt) || (model3d && (batch || spritePrompt)))
       return yield* Effect.fail(new Error("Conversation is bound to two creative workbenches."));
     if (batch && spriteImages)
       yield* Effect.promise(async () => {
@@ -3185,6 +3188,9 @@ const make = Effect.gen(function* () {
       ? `<image_batch_instructions>\n${IMAGE_BATCH_GUIDANCE}\n</image_batch_instructions>`
       : "";
     const projectContext = [
+      model3d
+        ? `<model3d_instructions>\n${MODEL3D_GUIDANCE}\nProject: ${model3d.id}, mode: ${model3d.mode}. Call model3d get for current source, versions and objects.\n</model3d_instructions>`
+        : "",
       spritePrompt,
       batchPrompt,
       projectContextPacket,
@@ -3273,7 +3279,14 @@ const make = Effect.gen(function* () {
               ),
             )
           : "";
-      const steerMessageWithSkills = [spritePrompt, messageText, steerSkillInlineText]
+      const steerMessageWithSkills = [
+        spritePrompt,
+        model3d
+          ? `<model3d_instructions>\n${MODEL3D_GUIDANCE}\nRead model3d get for the current project and preview version.\n</model3d_instructions>`
+          : "",
+        messageText,
+        steerSkillInlineText,
+      ]
         .filter(Boolean)
         .join("\n\n");
       const composedSteerInput = withProviderThreadStatePrompts({

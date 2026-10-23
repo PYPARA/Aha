@@ -78,9 +78,15 @@ export function collectResources(sources: ResourceSource[]) {
       ...source,
       origin: {
         kind: "chat",
-        ...(!["drawing", "image-batches", "sprite-animation", "resources", "settings", ""].includes(
-          segment ?? "",
-        )
+        ...(![
+          "drawing",
+          "image-batches",
+          "sprite-animation",
+          "model3d",
+          "resources",
+          "settings",
+          "",
+        ].includes(segment ?? "")
           ? { threadId: segment }
           : {}),
         ...source.origin,

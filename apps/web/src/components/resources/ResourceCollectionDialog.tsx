@@ -195,21 +195,32 @@ export function ResourceCollectionDialog() {
         (target !== "" && !library.data.directories.some((e) => e.path === target))
       )
         throw new Error("Choose a project or folder.");
-      if (sources.every((source) => source.origin?.kind === "image-batch")) {
+      if (
+        sources.every(
+          (source) => source.origin?.kind === "image-batch" || source.origin?.kind === "model3d",
+        )
+      ) {
         const directoryId =
           target === ""
             ? null
             : library.data.directories.find((entry) => entry.path === target)!.id;
         const operationId = crypto.randomUUID();
-        const batchIds = [...new Set(sources.map((source) => source.origin!.batchId!))];
+        const batchIds = [
+          ...new Set(
+            sources.flatMap((source) => (source.origin!.batchId ? [source.origin!.batchId] : [])),
+          ),
+        ];
         const items = sources.map((source) => {
-          if (!source.assetId || !source.origin?.resultId)
-            throw new Error("Batch original is unavailable.");
+          const resultId =
+            source.origin?.kind === "model3d"
+              ? source.origin.projectId + "_" + source.origin.versionId
+              : source.origin?.resultId;
+          if (!source.assetId || !resultId) throw new Error("Batch original is unavailable.");
           return {
-            resultId: source.origin.resultId,
+            resultId,
             assetId: source.assetId,
             name: source.name,
-            origin: source.origin,
+            origin: source.origin!,
           };
         });
         try {
@@ -333,7 +344,7 @@ export function ResourceCollectionDialog() {
             className="flex flex-wrap items-center gap-2 border-t bg-background px-4 py-2 text-ui-xs"
           >
             <span>
-              {tr("Saving batch results")}:{" "}
+              {tr("Saving creative assets")}:{" "}
               {operation.items.filter((item) => item.status === "linked").length}/
               {operation.items.length}
             </span>

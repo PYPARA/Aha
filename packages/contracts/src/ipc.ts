@@ -1,3 +1,4 @@
+import type { Model3DApi } from "./model3d";
 import type { ImageBatchesApi } from "./imageBatches";
 import type { SpriteLibraryBridge } from "./spriteLibrary";
 import type {
@@ -1535,6 +1536,7 @@ export interface NativeApi {
     delete: (input: TodoDeleteInput) => Promise<void>;
     onEvent: (callback: (event: TodoStreamEvent) => void) => () => void;
   };
+  model3d: Model3DApi;
   imageBatches: ImageBatchesApi;
   imageGeneration: {
     spriteForThread: (input: { threadId: string }) => Promise<SpriteState | null>;

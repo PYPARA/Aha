@@ -269,10 +269,12 @@ export function ResourceToolbar({
             label={tr("File type")}
             value={type ?? "all"}
             onChange={(value) => onType(value as ResourceQuery["type"])}
-            options={["all", "image", "audio", "video", "document", "other"].map((value) => ({
-              value,
-              label: tr(value),
-            }))}
+            options={["all", "image", "audio", "video", "document", "model3d", "other"].map(
+              (value) => ({
+                value,
+                label: tr(value),
+              }),
+            )}
           />
         </div>
         <div className="w-28">
@@ -297,10 +299,12 @@ export function ResourceToolbar({
               }
               options={[
                 { value: "all", label: tr("All sources") },
-                ...["image-batch", "sprite", "drawing", "chat", "local", "game"].map((value) => ({
-                  value,
-                  label: tr(value),
-                })),
+                ...["image-batch", "sprite", "model3d", "drawing", "chat", "local", "game"].map(
+                  (value) => ({
+                    value,
+                    label: tr(value),
+                  }),
+                ),
               ]}
             />
           </div>

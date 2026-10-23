@@ -6806,6 +6806,7 @@ export default function Sidebar() {
   // Home and Spaces switch the panel; route items navigate (prewarm included). The store's
   // active item keeps one item selected.
   const isOnThreadsSection =
+    !pathname.startsWith("/model3d") &&
     !pathname.startsWith("/sprite-animation") &&
     !pathname.startsWith("/resources") &&
     !pathname.startsWith("/drawing") &&
@@ -6858,15 +6859,17 @@ export default function Sidebar() {
       ? RAIL_PANEL_ITEM_LABELS[id]
       : id === "imageBatches"
         ? "Batch images"
-        : id === "spriteAnimation"
-          ? "Sprite animation"
-          : id === "resources"
-            ? "Resource center"
-            : id === "drawing"
-              ? "Drawing"
-              : id === "studio"
-                ? "Hubs"
-                : sidebarNavDescriptors[id].label;
+        : id === "model3d"
+          ? "3D Workshop"
+          : id === "spriteAnimation"
+            ? "Sprite animation"
+            : id === "resources"
+              ? "Resource center"
+              : id === "drawing"
+                ? "Drawing"
+                : id === "studio"
+                  ? "Hubs"
+                  : sidebarNavDescriptors[id].label;
   const railItemFor = (id: RailOrderableItemId): AppRailItem => {
     const base = { id, glyphs: railItemGlyphs(id), label: railItemLabel(id) };
     if (id === "home" || id === "spaces") {
@@ -6893,6 +6896,16 @@ export default function Sidebar() {
         onSelect: () => {
           selectRailRouteItem("imageBatches");
           void navigate({ to: "/image-batches", search: {} });
+        },
+      };
+    if (id === "model3d")
+      return {
+        ...base,
+        badge: null,
+        active: railActiveItem === "model3d",
+        onSelect: () => {
+          selectRailRouteItem("model3d");
+          void navigate({ to: "/model3d", search: {} });
         },
       };
     if (id === "spriteAnimation")
@@ -6959,6 +6972,7 @@ export default function Sidebar() {
       "drawing",
       "imageBatches",
       "spriteAnimation",
+      "model3d",
       "resources",
       "inbox",
       "kanban",

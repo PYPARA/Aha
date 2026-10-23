@@ -45,7 +45,7 @@ const Metadata = z.object({
       deleted: z.boolean().optional(),
       origin: z
         .object({
-          kind: z.enum(["drawing", "chat", "local", "game", "image-batch", "sprite"]),
+          kind: z.enum(["drawing", "chat", "local", "game", "image-batch", "sprite", "model3d"]),
           threadId: z.string().optional(),
           messageId: z.string().optional(),
           jobId: z.string().optional(),
@@ -54,6 +54,7 @@ const Metadata = z.object({
           attemptId: z.string().optional(),
           resultId: z.string().optional(),
           projectId: z.string().optional(),
+          versionId: z.string().optional(),
           prompt: z.string().optional(),
           model: z.string().optional(),
           parameters: z.record(z.string(), z.unknown()).optional(),
@@ -1022,13 +1023,19 @@ export class ResourceLibrary {
     for (const item of input.items) {
       safeName(item.name);
       if (
-        item.origin.kind !== "image-batch" ||
-        item.origin.resultId !== item.resultId ||
-        !item.origin.batchId ||
-        !item.origin.taskId ||
-        !item.origin.attemptId
+        !(
+          (item.origin.kind === "image-batch" &&
+            item.origin.resultId === item.resultId &&
+            item.origin.batchId &&
+            item.origin.taskId &&
+            item.origin.attemptId) ||
+          (item.origin.kind === "model3d" &&
+            item.origin.projectId &&
+            item.origin.versionId &&
+            item.resultId === item.origin.projectId + "_" + item.origin.versionId)
+        )
       )
-        throw new Error("Invalid batch result source.");
+        throw new Error("Invalid collection source.");
     }
     const operation: ResourceCollectionOperation = {
       id: input.id,
@@ -1053,9 +1060,13 @@ export class ResourceLibrary {
     try {
       const target = await this.collectionTarget(operation);
       if (createHash("sha256").update(bytes).digest("hex") !== item.assetId)
-        throw new Error("Original image checksum does not match the result.");
+        throw new Error("Original asset checksum does not match the result.");
       const prior = this.entries.find(
-        (entry) => entry.origin?.kind === "image-batch" && entry.origin.resultId === resultId,
+        (entry) =>
+          (entry.origin?.kind === "image-batch" && entry.origin.resultId === resultId) ||
+          (entry.origin?.kind === "model3d" &&
+            entry.origin.projectId === item.origin.projectId &&
+            entry.origin.versionId === item.origin.versionId),
       );
       if (prior?.deleted)
         throw new Error(
@@ -1272,6 +1283,8 @@ export class ResourceLibrary {
     const full = await this.resolve(e.path);
     const extension = path.extname(e.name).toLowerCase();
     const mime: Record<string, string> = {
+      ".glb": "model/gltf-binary",
+      ".gltf": "model/gltf+json",
       ".png": "image/png",
       ".jpg": "image/jpeg",
       ".jpeg": "image/jpeg",

@@ -1,4 +1,5 @@
 import { registerSpriteLibrary } from "./sprites/ipc";
+import { Model3DHost } from "./model3d/host";
 import { attachNativeContextMenu } from "./nativeContextMenuBridge";
 import { ahaUserDirectories } from "@synara/shared/ahaUserDirectories";
 import { registerResourceLibrary } from "./resources/ipc";
@@ -712,6 +713,23 @@ async function ensureBrowserHostPipeServer(): Promise<void> {
   });
   await server.start();
   browserHostPipeServer = server;
+}
+
+let model3dHost: Model3DHost | null = null;
+async function ensureModel3DHost(): Promise<void> {
+  if (model3dHost) return;
+  const host = new Model3DHost(
+    ahaUserDirectories(app.getPath("home"), app.getPath("documents")).models3d,
+    Path.join(BASE_DIR, "model3d-runtime"),
+    () =>
+      new URL(
+        "model3d-runtime.html",
+        isDevelopment ? process.env.VITE_DEV_SERVER_URL! : backendHttpUrl + "/",
+      ).href,
+    Path.join(__dirname, "model3dPreload.js"),
+  );
+  await host.start();
+  model3dHost = host;
 }
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
@@ -4155,6 +4173,9 @@ function backendEnv(): NodeJS.ProcessEnv {
     SYNARA_HOME: BASE_DIR,
     AHA_HOME: BASE_DIR,
     AHA_DOCUMENTS_DIR: app.getPath("documents"),
+    ...(model3dHost
+      ? { AHA_MODEL3D_HOST_PIPE: model3dHost.pipe, AHA_MODEL3D_HOST_TOKEN: model3dHost.token }
+      : {}),
     SYNARA_AUTH_TOKEN: backendAuthToken,
     SYNARA_DESKTOP_SHUTDOWN_TOKEN: DESKTOP_BACKEND_SHUTDOWN_TOKEN,
   };
@@ -4927,6 +4948,8 @@ async function shutdownDesktopRuntime(reason: string): Promise<void> {
       cancelBackendReadinessWait();
       appSnapManager?.dispose();
       appSnapManager = null;
+      await model3dHost?.dispose();
+      model3dHost = null;
       await shutdownBrowserServices({
         revokeHost: () => disposeBrowserHostPipeServerForShutdown(reason),
         closePages: () => browserManager.dispose(),
@@ -6134,6 +6157,11 @@ async function bootstrap(): Promise<void> {
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
+  try {
+    await ensureModel3DHost();
+  } catch (error) {
+    console.warn("[Aha 3D] Local execution host is unavailable", error);
+  }
   try {
     await ensureBrowserHostPipeServer();
   } catch (error) {
