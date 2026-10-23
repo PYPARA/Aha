@@ -433,7 +433,8 @@ export class ImageGenerationEngine {
         )
           continue;
         if (queued.origin?.kind === "batch") {
-          const limit = Math.min(2, Math.max(1, provider.concurrency - 1));
+          // Batches may fill the channel except one slot kept for direct drawing.
+          const limit = Math.max(1, provider.concurrency - 1);
           const activeJobs = [...this.active.keys()].map((id) => jobs.find((j) => j.id === id));
           if (
             activeJobs.filter((j) => j?.providerId === provider.id && j.origin?.kind === "batch")

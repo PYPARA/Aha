@@ -617,6 +617,51 @@ describe("batch execution consistency", () => {
       }),
     ).rejects.toThrow("Verify");
   });
+  it("lets a batch use the channel concurrency except one slot for direct drawing", async () => {
+    const wide = await f.images.upsertProvider({
+      name: "Wide",
+      baseUrl: "http://127.0.0.1:9773/v1",
+      enabled: true,
+      models: [{ id: "mock", source: "manual", lastTestAt: null, lastTestStatus: null }],
+      defaultModel: "mock",
+      concurrency: 5,
+      timeoutSeconds: 30,
+    });
+    const pending: ((value: Response) => void)[] = [];
+    f.fetcher.mockImplementation(() => new Promise<Response>((resolve) => pending.push(resolve)));
+    let s = await f.save(
+      await f.create(),
+      Array.from({ length: 6 }, (_, i) => ({
+        ...f.task("t" + i, 1),
+        providerId: wide.id,
+        model: "mock",
+      })),
+    );
+    s = await f.confirm(s);
+    await f.engine.tick();
+    await f.images.tick();
+    await vi.waitFor(() => expect(f.fetcher).toHaveBeenCalledTimes(4));
+    await f.images.createJob({
+      clientRequestId: randomUUID(),
+      providerId: wide.id,
+      model: "mock",
+      prompt: "direct",
+      parameters: { n: 1 },
+      inputAssetIds: [],
+      maskAssetId: null,
+      sourceJobId: null,
+    });
+    await f.images.tick();
+    await vi.waitFor(() => expect(f.fetcher).toHaveBeenCalledTimes(5));
+    for (const resolve of pending.splice(0)) resolve(f.response());
+    await f.engine.command({
+      operation: "cancel",
+      batchId: s.id,
+      executionId: s.executions[0]!.id,
+    });
+    f.fetcher.mockImplementation(async () => f.response());
+    await f.settle(s.id);
+  });
   it("pauses unsent requests, reserves direct drawing capacity and retains results when cancelling", async () => {
     let release: ((value: Response) => void) | undefined;
     f.fetcher.mockImplementationOnce(
