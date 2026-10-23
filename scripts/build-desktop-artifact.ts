@@ -7,7 +7,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { cp } from "node:fs/promises";
+import { cp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
@@ -943,7 +943,8 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     platform,
     target,
     signed,
-    adHocSign: artifactIdentity.identity.usesScriptedUpdates && !signed,
+    // Aha: local builds without a Developer ID are ad-hoc sealed too, so the bundle verifies.
+    adHocSign: !signed,
     flavor,
     useIconComposer: process.env.AHA_ICON_COMPOSER === "1",
     ...(windowsAzureSignOptions ? { windowsAzureSignOptions } : {}),
@@ -1507,7 +1508,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     const to = path.join(options.outputDir, outputEntry);
     if (stat.type === "Directory")
       yield* Effect.tryPromise({
-        try: () => cp(from, to, { recursive: true, verbatimSymlinks: true }),
+        // Aha: replace the previous bundle; merging would keep stale files and a stale seal.
+        try: async () => {
+          await rm(to, { recursive: true, force: true });
+          await cp(from, to, { recursive: true, verbatimSymlinks: true });
+        },
         catch: (cause) =>
           new BuildScriptError({ message: "Failed to copy unpacked desktop bundle.", cause }),
       });
