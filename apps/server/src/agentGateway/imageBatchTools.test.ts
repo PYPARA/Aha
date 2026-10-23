@@ -164,3 +164,23 @@ it("requires an active owned conversation and refuses foreign result previews", 
     true,
   );
 });
+it("returns the engine's rejection reason so the model can correct a proposal", async () => {
+  const f = fixture();
+  f.propose.mockRejectedValueOnce(
+    new Error("A batch supports at most 500 planned images across enabled tasks."),
+  );
+  const result = await Effect.runPromise(
+    f.tool.handler(
+      {
+        operation: "propose",
+        baseVersion: 4,
+        requestId: "too-many",
+        tasks: [{ id: "one", name: "One", prompt: "Generate", enabled: true }],
+      },
+      context,
+    ),
+  );
+  expect(result.isError).toBe(true);
+  expect(JSON.stringify(result)).toContain("at most 500 planned images");
+  expect(JSON.stringify(result)).not.toContain("Effect.tryPromise");
+});

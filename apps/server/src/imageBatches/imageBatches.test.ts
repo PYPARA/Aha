@@ -157,8 +157,13 @@ afterEach(async () => {
 });
 
 describe("batch drafts and proposals", () => {
-  it("enforces the 100 task / 500 image boundary and pages 500 distinct result identities", async () => {
+  it("allows more than 100 tasks, enforces the 500 image boundary and pages 500 distinct result identities", async () => {
     let s = await f.create();
+    s = await f.save(
+      s,
+      Array.from({ length: 120 }, (_, i) => ({ ...f.task("staged" + i, 5), enabled: false })),
+    );
+    expect(s.tasks).toHaveLength(120);
     s = await f.save(
       s,
       Array.from({ length: 100 }, (_, i) => f.task("task" + i, 5)),
@@ -168,7 +173,7 @@ describe("batch drafts and proposals", () => {
       imageBatchPlanCounts([{ ...f.task("inherit"), parameters: { quality: "high" } }], s.defaults)
         .images,
     ).toBe(2);
-    await expect(f.save(s, [...s.tasks, f.task("extra", 1)])).rejects.toThrow("100");
+    await expect(f.save(s, [...s.tasks, f.task("extra", 1)])).rejects.toThrow("500");
     await expect(
       f.save(
         s,

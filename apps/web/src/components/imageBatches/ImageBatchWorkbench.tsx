@@ -580,7 +580,7 @@ function BatchWorkspace({
           <div className="flex flex-wrap gap-2 border-b p-3">
             <Button
               size="sm"
-              disabled={busy || batch.tasks.length >= 100}
+              disabled={busy}
               onClick={() =>
                 setEditor({
                   base: structuredClone(batch),
@@ -672,6 +672,19 @@ function BatchWorkspace({
               </>
             )}
           </div>
+          {pending > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-ui-sm">
+              <p className="min-w-0 flex-1">
+                {tr("{count} pending changes from AI are not in the task list yet.").replace(
+                  "{count}",
+                  String(pending),
+                )}
+              </p>
+              <Button size="sm" variant="outline" onClick={() => setTab("brief")}>
+                {tr("Review pending changes")}
+              </Button>
+            </div>
+          )}
           <div className="min-h-0 flex-1 overflow-auto p-3">
             {!batch.tasks.length && (
               <div className="space-y-3 py-10 text-center text-ui text-muted-foreground">
@@ -775,7 +788,7 @@ function BatchWorkspace({
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={busy || batch.tasks.length >= 100}
+                      disabled={busy}
                       onClick={() =>
                         action(() =>
                           saveTasks([

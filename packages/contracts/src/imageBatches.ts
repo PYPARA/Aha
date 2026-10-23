@@ -6,7 +6,6 @@ import {
   ImageJobStatus,
 } from "./imageGeneration";
 
-export const IMAGE_BATCH_MAX_TASKS = 100;
 export const IMAGE_BATCH_MAX_IMAGES = 500;
 const Id = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,128}$/));
 const Text = Schema.String.check(Schema.isMaxLength(32000));

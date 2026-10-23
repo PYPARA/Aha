@@ -5,7 +5,6 @@ import { Effect, Schema } from "effect";
 import { stableJsonStringify } from "@synara/shared/browserAutomationCatalogue";
 import {
   IMAGE_BATCH_MAX_IMAGES,
-  IMAGE_BATCH_MAX_TASKS,
   ImageBatchTask,
   imageBatchComposePrompt,
   imageBatchPlanCounts,
@@ -99,12 +98,12 @@ export class ImageBatchEngine {
     };
   }
   private validateTasks(state: ImageBatchState, tasks = state.tasks) {
-    if (tasks.length > IMAGE_BATCH_MAX_TASKS)
-      throw new Error("A batch supports at most 100 tasks.");
     if (new Set(tasks.map((t) => t.id)).size !== tasks.length)
       throw new Error("Task IDs must be unique.");
     if (imageBatchPlanCounts(tasks, state.defaults).images > IMAGE_BATCH_MAX_IMAGES)
-      throw new Error("A batch supports at most 500 planned images.");
+      throw new Error(
+        "A batch supports at most 500 planned images across enabled tasks. Disable tasks or lower image counts.",
+      );
     for (const t of tasks) Schema.decodeUnknownSync(ImageBatchTask)(t);
   }
   async preflight(id: string): Promise<ImageBatchPreflight> {
@@ -416,8 +415,8 @@ export class ImageBatchEngine {
           }
           if (!attempts.length) throw new Error("No missing images to generate.");
         }
-        if (attempts.length > 100 || attempts.reduce((n, a) => n + a.parameters.n, 0) > 500)
-          throw new Error("Execution exceeds 100 tasks or 500 images.");
+        if (attempts.reduce((n, a) => n + a.parameters.n, 0) > IMAGE_BATCH_MAX_IMAGES)
+          throw new Error("Execution exceeds 500 images.");
         if (new Set(attempts.map((a) => a.taskId)).size !== attempts.length)
           throw new Error("Select one attempt per task to retry.");
         const execution: ImageBatchExecution = {
