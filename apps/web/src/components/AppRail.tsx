@@ -108,7 +108,7 @@ const RAIL_HUGEICON_GLYPHS: Record<HugeiconRailItemId, AppRailGlyphs> = {
 /** Central glyphs matching the Codex rail for the remaining fixed rail items. */
 const RAIL_ITEM_GLYPH_NAMES: Record<Exclude<RailItemId, HugeiconRailItemId>, string> = {
   drawing: "images-sparkle",
-  imageBatches: "images-sparkle",
+  imageBatches: "albums",
   spriteAnimation: "clapboard",
   model3d: "building-blocks",
   resources: "folder-2",

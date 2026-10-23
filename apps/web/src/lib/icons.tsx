@@ -107,7 +107,7 @@ export const SkillCubeIcon: LucideIcon = centralIconWrapper("building-blocks");
 export const NewThreadIcon: LucideIcon = centralIconWrapper("compose-pencil");
 // Command palette (⌘K) action glyphs: one Central outline set so the rows read as a family.
 export const ImportThreadIcon: LucideIcon = centralIconWrapper("import");
-export const BatchImagesIcon: LucideIcon = centralIconWrapper("images-sparkle");
+export const BatchImagesIcon: LucideIcon = centralIconWrapper("albums");
 export const UsageGaugeIcon: LucideIcon = centralIconWrapper("gauge");
 export const BugReportIcon: LucideIcon = centralIconWrapper("bug");
 export const UserIcon: LucideIcon = centralIconWrapper("user");
