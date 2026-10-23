@@ -22,6 +22,49 @@ export const model3dCopy: Record<string, string> = {
   "Blender dependencies need preparation": "Blender 依赖尚未准备",
   "Blender executable": "Blender 可执行文件",
   "Blender runtime prepared": "Blender 运行环境已准备",
+  "Model with Blender": "使用 Blender 建模",
+  "AI models in a dedicated Blender window and returns the result to this workshop for preview and export.":
+    "AI 会在专用 Blender 窗口中建模，结果将返回工坊供你预览和导出。",
+  "Blender modeling opens a dedicated window. Keep it open while the task runs, then review the candidate in Aha.":
+    "建模时会打开 Aha 管理的专用 Blender 窗口，请在任务运行期间保持窗口打开，完成后回到 Aha 查看候选。",
+  "Detecting Blender runtime…": "正在检测 Blender 运行环境…",
+  "Preparing Blender dependencies…": "正在准备 Blender 建模依赖…",
+  "Checking Blender connection…": "正在检查 Blender 连接…",
+  "Runtime status unavailable": "暂时无法读取运行环境状态",
+  "Open Aha desktop to use Blender": "请使用 Aha 桌面版运行 Blender",
+  "Blender was not found": "未找到 Blender",
+  "uvx was not found": "未找到 uvx",
+  "Prepare Blender dependencies": "需要准备 Blender 建模依赖",
+  "Blender connection verified": "Blender 连接检查通过",
+  "The first preparation downloads modeling dependencies. This may take a few minutes.":
+    "首次准备会下载建模依赖，可能需要几分钟。",
+  "A dedicated Blender window will open briefly for the connection check.":
+    "连接检查会临时打开专用 Blender 窗口，完成后自动关闭。",
+  "Install Blender, then select its executable below.":
+    "请先安装 Blender，再在下方选择可执行文件。",
+  "Install uv with uvx, then select the uvx executable below.":
+    "请先安装包含 uvx 的 uv，再在下方选择 uvx 可执行文件。",
+  "Your applications were found. Prepare the modeling dependencies before building.":
+    "已找到所需应用，准备建模依赖后即可开始。",
+  "Executable paths": "可执行文件路径",
+  "Choose Blender executable": "选择 Blender 可执行文件",
+  "Choose uvx executable": "选择 uvx 可执行文件",
+  "Runtime setup failed": "运行环境配置未完成",
+  "Executable paths have changed. Save and check before modeling.":
+    "路径已修改，请保存并检查后再开始建模。",
+  "Runtime details": "运行环境详情",
+  "Use Blender": "开始使用 Blender",
+  "Check connection": "检查连接",
+  "Set up later": "稍后设置",
+  "Could not detect the 3D runtime. Try again.": "无法检测 3D 运行环境，请重试。",
+  "Retry detection to read the local Blender environment.":
+    "请重试检测，读取本机 Blender 运行环境。",
+  "Blender was not found. Select its executable.": "未找到 Blender，请选择可执行文件。",
+  "uvx was not found. Select its executable.": "未找到 uvx，请选择可执行文件。",
+  "Select an absolute executable path.": "请选择可执行文件的绝对路径。",
+  "A Blender task is running.": "Blender 任务正在运行，请完成任务后再检查运行环境。",
+  "Wait for the Blender task to finish before changing its runtime.":
+    "请等待 Blender 任务完成后再修改运行环境。",
   "Blender safe mode is enabled. The dedicated instance isolates projects; it is not an operating-system Python sandbox.":
     "已启用 Blender 安全模式。专用实例用于工程隔离，不是操作系统级 Python 沙箱。",
   Bounds: "包围盒",

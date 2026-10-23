@@ -119,6 +119,10 @@ export const imageBatchCopy: Record<string, string> = {
   "Requested {size}": "请求尺寸 {size}",
   "Use this sample as the reference for the other {count} tasks in {group}?":
     "将这张样张设为 {group} 组其余 {count} 项任务的参考图？",
+  "The sample's own task will be disabled so it is not generated again.":
+    "样张所在任务会同时停用，避免再次生成。",
+  "Disable the sample's own task ({count}) so it is not generated again":
+    "停用样张所在的任务（{count} 项），避免再次生成",
   "Adopted. You can use it as a reference for later tasks.": "已采用，可将它设为后续任务的参考图。",
   "Set as reference and enable": "设为参考并启用",
   "Choose tasks…": "选择任务…",
@@ -130,8 +134,13 @@ export const imageBatchCopy: Record<string, string> = {
   "Batch style (every task)": "批次风格（所有任务）",
   "Added to the batch style reference images. At confirmation they are placed before every task's own references, including tasks added later.":
     "加入批次风格参考图。确认生成时会放在每项任务自身参考图之前，之后新增的任务也会使用。",
-  "Channel for this run": "本次使用渠道",
-  "Tasks with their own channel keep it.": "单独设置了渠道的任务保持原渠道。",
+  "Channel and model for this run": "本次使用的渠道与模型",
+  "{count} enabled tasks already have results and will be generated again.":
+    "{count} 项已启用的任务已有生成结果，确认后会再次生成。",
+  "Disable them": "停用这些任务",
+  "Only this run changes. The batch settings keep their channel and model.":
+    "只影响本次生成，批次设置中的渠道和模型不变。",
+  "Tasks with their own channel or model keep them.": "单独设置了渠道或模型的任务保持不变。",
   "Batch style is added to every task": "每项任务都会叠加批次风格",
   "{count} done": "已完成 {count}",
   "Not generated": "未生成",

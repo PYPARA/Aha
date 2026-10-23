@@ -262,7 +262,9 @@ export function BatchResults({
             {adoptedOffer.taskIds.length
               ? tr("Use this sample as the reference for the other {count} tasks in {group}?")
                   .replace("{count}", String(adoptedOffer.taskIds.length))
-                  .replace("{group}", outputGroup(adoptedOffer.result.output))
+                  .replace("{group}", outputGroup(adoptedOffer.result.output)) +
+                " " +
+                tr("The sample's own task will be disabled so it is not generated again.")
               : tr("Adopted. You can use it as a reference for later tasks.")}
           </p>
           {adoptedOffer.taskIds.length > 0 && (
@@ -289,17 +291,20 @@ export function BatchResults({
                     name: batch.name,
                     brief: batch.brief,
                     defaults: batch.defaults,
+                    // The sample's own task is done, so it is disabled to avoid generating it again.
                     tasks: batch.tasks.map((t) =>
-                      ids.includes(t.id)
-                        ? {
-                            ...t,
-                            enabled: true,
-                            references: [
-                              ...t.references,
-                              { id: crypto.randomUUID(), assetId, documentId: null },
-                            ],
-                          }
-                        : t,
+                      t.id === adoptedOffer.result.taskId
+                        ? { ...t, enabled: false }
+                        : ids.includes(t.id)
+                          ? {
+                              ...t,
+                              enabled: true,
+                              references: [
+                                ...t.references,
+                                { id: crypto.randomUUID(), assetId, documentId: null },
+                              ],
+                            }
+                          : t,
                     ),
                   });
                   setAdoptedOffer(null);

@@ -47,6 +47,12 @@ export function ReferenceTargetDialog({
   }));
   const [selected, setSelected] = useState<string[]>(() => [...initialTaskIds]);
   const [enable, setEnable] = useState(true);
+  // The samples' own tasks are done; leaving them enabled would generate them again next run.
+  const sourceTasks = [...new Set(results.map((r) => r.taskId))].filter((id) =>
+    batch.tasks.some((t) => t.id === id && t.enabled),
+  );
+  const [retire, setRetire] = useState(true);
+  const retired = (id: string) => retire && sourceTasks.includes(id) && !selected.includes(id);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const max = 16 - (batch.defaults.styleReferences?.length ?? 0);
@@ -71,11 +77,14 @@ export function ReferenceTargetDialog({
         name: batch.name,
         brief: batch.brief,
         defaults: { ...batch.defaults, styleReferences: [...current, ...added] },
-        tasks: batch.tasks,
+        tasks: batch.tasks.map((task) =>
+          retire && sourceTasks.includes(task.id) ? { ...task, enabled: false } : task,
+        ),
       });
       return;
     }
     const tasks = batch.tasks.map((task) => {
+      if (retired(task.id)) return { ...task, enabled: false };
       if (!selected.includes(task.id)) return task;
       const added = assetIds
         .filter((id) => !task.references.some((r) => r.assetId === id))
@@ -209,6 +218,19 @@ export function ReferenceTargetDialog({
                 {tr("Enable the chosen tasks")}
               </label>
             </>
+          )}
+          {sourceTasks.length > 0 && (
+            <label className="flex items-center gap-2 text-ui-sm">
+              <Checkbox
+                checked={retire}
+                disabled={busy}
+                onCheckedChange={(v) => setRetire(v === true)}
+              />
+              {tr("Disable the sample's own task ({count}) so it is not generated again").replace(
+                "{count}",
+                String(sourceTasks.length),
+              )}
+            </label>
           )}
           <p className="text-ui-xs text-muted-foreground">
             {tr("This only updates the draft. Nothing is generated until you confirm generation.")}

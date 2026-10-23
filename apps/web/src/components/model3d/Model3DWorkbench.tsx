@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Model3DBuild,
   Model3DCommand,
@@ -20,6 +20,11 @@ import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } fro
 import { Sheet, SheetPopup, SheetTitle } from "../ui/sheet";
 import { confirmDialog } from "../ui/confirm-dialog";
 import { RouteSurfaceHeader } from "../RouteSurface";
+import {
+  ModelRuntimeDialog,
+  shouldRemindBlender,
+  type RuntimeDialogIntent,
+} from "./ModelRuntimeDialog";
 import { collectResources } from "../resources/resourceLibrary";
 const ModelChat = lazy(() =>
   import("./ModelChat").then((module) => ({ default: module.ModelChat })),
@@ -41,13 +46,14 @@ export default function Model3DWorkbench({ projectId }: { projectId?: string }) 
   useModel3DEvents();
   const tr = useAhaTranslation(),
     navigate = useNavigate(),
+    queryClient = useQueryClient(),
     command = useModel3DCommand(),
     narrow = useMediaQuery("(max-width: 900px)");
   const [query, setQuery] = useState(""),
     [archived, setArchived] = useState(false),
     [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
-    [settings, setSettings] = useState(false);
+    [settings, setSettings] = useState<RuntimeDialogIntent | null>(null);
   const list = useQuery({ queryKey: [...model3dKey, "list"], queryFn: () => model3dApi().list() });
   const detail = useModel3D(projectId ?? null);
   const environment = useQuery({
@@ -79,7 +85,7 @@ export default function Model3DWorkbench({ projectId }: { projectId?: string }) 
           <SkillCubeIcon className="size-4" />
           <h1 className="text-ui font-medium">{tr("3D Workshop")}</h1>
           <div className="no-drag ms-auto flex items-center gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setSettings(true)}>
+            <Button size="sm" variant="ghost" onClick={() => setSettings("settings")}>
               {tr("Runtime settings")}
             </Button>
             <Button size="sm" disabled={busy} onClick={() => void create()}>
@@ -129,7 +135,14 @@ export default function Model3DWorkbench({ projectId }: { projectId?: string }) 
             desktop={environment.data?.desktop === true}
             onBack={() => select()}
             onError={showError}
-            onSettings={() => setSettings(true)}
+            onSettings={() => setSettings("settings")}
+            onBlenderSelected={() => {
+              const current = queryClient.getQueryData<Model3DEnvironment>([
+                ...model3dKey,
+                "environment",
+              ]);
+              if (shouldRemindBlender(current)) setSettings("blender");
+            }}
           />
         ) : (
           <div className="p-5 text-ui-sm" role="status">
@@ -221,13 +234,14 @@ export default function Model3DWorkbench({ projectId }: { projectId?: string }) 
           </div>
         </div>
       )}
-      <RuntimeDialog
-        open={settings}
-        onOpenChange={setSettings}
-        initial={environment.data}
-        onChanged={() => void environment.refetch()}
-        onError={showError}
-      />
+      {settings && (
+        <ModelRuntimeDialog
+          intent={settings}
+          initial={environment.data}
+          onClose={() => setSettings(null)}
+          onChanged={(value) => queryClient.setQueryData([...model3dKey, "environment"], value)}
+        />
+      )}
     </>
   );
 }
@@ -239,6 +253,7 @@ function ProjectWorkspace({
   onBack,
   onError,
   onSettings,
+  onBlenderSelected,
 }: {
   project: Model3DProject;
   narrow: boolean;
@@ -246,6 +261,7 @@ function ProjectWorkspace({
   onBack: () => void;
   onError: (e: unknown) => void;
   onSettings: () => void;
+  onBlenderSelected: () => void;
 }) {
   const tr = useAhaTranslation(),
     command = useModel3DCommand();
@@ -404,9 +420,15 @@ function ProjectWorkspace({
             label={tr("Modeling route")}
             value={project.mode}
             disabled={busy || !!activeJob || project.archived}
-            onValueChange={(mode) =>
-              void act({ operation: "update", mode: mode === "blender" ? "blender" : "threejs" })
-            }
+            onValueChange={(mode) => {
+              if (mode === project.mode) return;
+              void act({
+                operation: "update",
+                mode: mode === "blender" ? "blender" : "threejs",
+              }).then((result) => {
+                if (result?.project?.mode === "blender") onBlenderSelected();
+              });
+            }}
           >
             <option value="threejs">Three.js</option>
             <option value="blender">Blender MCP</option>
@@ -1152,148 +1174,5 @@ function ValidationReport({ version }: { version: Model3DVersion }) {
         </p>
       ))}
     </section>
-  );
-}
-function RuntimeDialog({
-  open,
-  onOpenChange,
-  initial,
-  onChanged,
-  onError,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  initial: Model3DEnvironment | undefined;
-  onChanged: () => void;
-  onError: (error: unknown) => void;
-}) {
-  const tr = useAhaTranslation(),
-    [blenderPath, setBlenderPath] = useState(""),
-    [uvxPath, setUvxPath] = useState(""),
-    [busy, setBusy] = useState(false),
-    [result, setResult] = useState<Model3DEnvironment | undefined>(initial);
-  useEffect(() => {
-    if (open) {
-      setBlenderPath(initial?.blenderPath ?? "");
-      setUvxPath(initial?.uvxPath ?? "");
-      setResult(initial);
-    }
-  }, [open, initial]);
-  const choose = async (key: "blenderPath" | "uvxPath") => {
-    setBusy(true);
-    try {
-      const response = await model3dApi().command({
-        operation: "blender-settings",
-        [key]: ":choose:",
-      });
-      setResult(response.environment);
-      if (response.environment) {
-        setBlenderPath(response.environment.blenderPath ?? "");
-        setUvxPath(response.environment.uvxPath ?? "");
-      }
-      onChanged();
-    } catch (error) {
-      onError(error);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const run = async (prepare: boolean) => {
-    setBusy(true);
-    try {
-      await model3dApi().command({
-        operation: "blender-settings",
-        ...(blenderPath ? { blenderPath } : {}),
-        ...(uvxPath ? { uvxPath } : {}),
-      });
-      const response = await model3dApi().command({
-        operation: prepare ? "prepare-runtime" : "check-runtime",
-      });
-      setResult(response.environment);
-      onChanged();
-    } catch (error) {
-      onError(error);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup>
-        <DialogHeader>
-          <DialogTitle>{tr("3D runtime settings")}</DialogTitle>
-          <DialogDescription>
-            {tr(
-              "Three.js runs offline inside an isolated compiler. Blender uses a visible Aha-managed instance and private configuration.",
-            )}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3 text-ui-sm">
-          <label className="block space-y-1">
-            <span>{tr("Blender executable")}</span>
-            <Button
-              size="xs"
-              variant="ghost"
-              disabled={busy || !initial?.desktop}
-              onClick={() => void choose("blenderPath")}
-            >
-              {tr("Choose executable")}
-            </Button>
-            <Input
-              value={blenderPath}
-              onChange={(e) => setBlenderPath(e.target.value)}
-              placeholder="/Applications/Blender.app/Contents/MacOS/Blender"
-            />
-          </label>
-          <label className="block space-y-1">
-            <span>{tr("uvx executable")}</span>
-            <Button
-              size="xs"
-              variant="ghost"
-              disabled={busy || !initial?.desktop}
-              onClick={() => void choose("uvxPath")}
-            >
-              {tr("Choose executable")}
-            </Button>
-            <Input
-              value={uvxPath}
-              onChange={(e) => setUvxPath(e.target.value)}
-              placeholder="~/.local/bin/uvx"
-            />
-          </label>
-          <p className="text-ui-xs text-muted-foreground">
-            {tr(
-              "Pinned mcp-for-blender 2.2.2. Preparation downloads dependencies into Aha's private runtime, without changing other clients or global Blender settings.",
-            )}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              disabled={busy || !initial?.desktop}
-              onClick={() => void run(false)}
-            >
-              {tr("Save and check")}
-            </Button>
-            <Button disabled={busy || !initial?.desktop} onClick={() => void run(true)}>
-              {tr(busy ? "Preparing…" : "Prepare Blender runtime")}
-            </Button>
-          </div>
-          <div role="status" className="text-ui-xs">
-            {result?.blenderVersion}
-            <p>
-              {result?.prepared
-                ? tr("Blender runtime prepared")
-                : tr("Blender dependencies need preparation")}
-            </p>
-            {result?.error && <p className="text-destructive">{result.error}</p>}
-          </div>
-          <p className="text-ui-xs text-muted-foreground">
-            {tr(
-              "Blender safe mode is enabled. The dedicated instance isolates projects; it is not an operating-system Python sandbox.",
-            )}
-          </p>
-        </div>
-      </DialogPopup>
-    </Dialog>
   );
 }

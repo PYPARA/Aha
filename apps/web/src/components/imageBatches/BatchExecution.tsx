@@ -20,8 +20,10 @@ import { confirmDialog } from "../ui/confirm-dialog";
 import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
 import { Sheet, SheetPopup, SheetTitle } from "../ui/sheet";
-import { OptionSelect } from "../ui/option-select";
+import { DrawingModelPicker } from "../drawing/DrawingPickers";
+import { useNavigate } from "@tanstack/react-router";
 import { outputGroup } from "./resultNames";
+import { latestTaskAttempts } from "./BatchTaskStatus";
 import { batchApi, useBatchCommand } from "./useImageBatches";
 
 const activeStatus = (s: string) => ["prepared", "queued", "running", "saving"].includes(s);
@@ -64,11 +66,13 @@ export function BatchExecution({
   const tr = useAhaTranslation(),
     command = useBatchCommand();
   const providers = useImageProviders();
+  const navigate = useNavigate();
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const [busy, setBusy] = useState(false),
     [ack, setAck] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [records, setRecords] = useState(false);
+  const [reopenAt, setReopenAt] = useState<number | null>(null);
   const submitting = useRef(false);
   const active = batch.executions.find((e) => !e.finishedAt);
   const latest = active ?? batch.executions.at(-1);
@@ -106,7 +110,7 @@ export function BatchExecution({
             .map((t) => ({
               ...t,
               ...imageBatchTaskConfiguration(t, batch.defaults),
-              inherits: !t.providerId,
+              inherits: !t.providerId && !t.model,
               prompt: imageBatchComposePrompt(batch.defaults.stylePrompt, t.prompt),
               references: imageBatchTaskReferences(t, batch.defaults.styleReferences).length,
             })),
@@ -158,29 +162,43 @@ export function BatchExecution({
       setBusy(false);
     }
   };
-  // Channels that offer the batch model; switching re-runs the check for this run only.
-  const channels = (providers.data ?? []).filter(
-    (p) =>
-      p.id === batch.defaults.providerId ||
-      (p.enabled && p.models.some((m) => m.id === batch.defaults.model)),
-  );
-  const switchChannel = async (providerId: string) => {
+  // A run may use another channel or model for fully inheriting tasks; switching re-runs the check.
+  const runProvider =
+    confirm?.command.operation === "confirm"
+      ? (confirm.command.providerId ?? batch.defaults.providerId)
+      : batch.defaults.providerId;
+  const runModel =
+    confirm?.command.operation === "confirm"
+      ? (confirm.command.model ?? batch.defaults.model)
+      : batch.defaults.model;
+  const switchRun = async (providerId: string, model: string) => {
     if (!confirm || confirm.command.operation !== "confirm") return;
     setBusy(true);
     try {
-      const p = await batchApi().preflight({ id: batch.id, providerId });
-      const { providerId: _, ...base } = confirm.command;
+      const p = await batchApi().preflight({ id: batch.id, providerId, model });
+      const { providerId: _p, model: _m, ...base } = confirm.command;
       setConfirm({
         ...confirm,
-        command: providerId === batch.defaults.providerId ? base : { ...base, providerId },
+        command: {
+          ...base,
+          ...(providerId !== batch.defaults.providerId ? { providerId } : {}),
+          ...(model !== batch.defaults.model ? { model } : {}),
+        },
         tasks: p.tasks,
         images: p.images,
         issues: p.issues.map(
           (i) => (batch.tasks.find((t) => t.id === i.taskId)?.name ?? "") + ": " + i.message,
         ),
         providers: [
-          ...new Set(batch.tasks.filter((t) => t.enabled).map((t) => t.providerId ?? providerId)),
+          ...new Set(
+            batch.tasks
+              .filter((t) => t.enabled)
+              .map((t) =>
+                t.providerId || t.model ? (t.providerId ?? batch.defaults.providerId) : providerId,
+              ),
+          ),
         ],
+        summaries: confirm.summaries.map((task) => (task.inherits ? { ...task, model } : task)),
       });
     } catch (e) {
       onError(e);
@@ -222,6 +240,41 @@ export function BatchExecution({
   useEffect(() => {
     if (reviewRequested) openReview();
   }, [reviewRequested]);
+  // Enabled tasks whose last run already succeeded would be generated again by a new confirmation.
+  const runs = latestTaskAttempts(batch);
+  const alreadyDone = batch.tasks.filter(
+    (t) => t.enabled && runs.get(t.id)?.status === "succeeded",
+  );
+  const skipDone = async () => {
+    setBusy(true);
+    try {
+      const state = await command({
+        operation: "save",
+        batchId: batch.id,
+        version: batch.version,
+        name: batch.name,
+        brief: batch.brief,
+        defaults: batch.defaults,
+        tasks: batch.tasks.map((t) =>
+          alreadyDone.some((done) => done.id === t.id) ? { ...t, enabled: false } : t,
+        ),
+      });
+      setConfirm(null);
+      setReopenAt(state.version);
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // The check reopens once the saved draft version arrives, so it reads the new task list.
+  const reopen = useEffectEvent(() => {
+    setReopenAt(null);
+    void prepare();
+  });
+  useEffect(() => {
+    if (reopenAt !== null && batch.version === reopenAt) reopen();
+  }, [reopenAt, batch.version]);
   const openRetry = useEffectEvent(() => {
     if (!retryRequest) return;
     onRetryHandled?.();
@@ -448,21 +501,33 @@ export function BatchExecution({
                   {confirm.tasks} {tr("tasks")} · {confirm.images} {tr("images")}
                 </p>
                 {confirm.command.operation === "confirm" &&
-                confirm.summaries.some((task) => task.inherits) &&
-                channels.length > 1 ? (
-                  <div className="w-64">
-                    <OptionSelect
-                      label={tr("Channel for this run")}
-                      value={confirm.command.providerId ?? batch.defaults.providerId}
-                      disabled={busy}
-                      onValueChange={(value) => void switchChannel(value)}
-                    >
-                      {channels.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </OptionSelect>
+                confirm.summaries.some((task) => task.inherits) ? (
+                  <div className="space-y-1">
+                    <p className="text-ui-xs text-muted-foreground">
+                      {tr("Channel and model for this run")}
+                    </p>
+                    <DrawingModelPicker
+                      providers={providers.data ?? []}
+                      providerId={runProvider}
+                      model={runModel}
+                      onChange={(providerId, model) => void switchRun(providerId, model)}
+                      onSettings={() =>
+                        void navigate({ to: "/settings", search: { section: "imageProviders" } })
+                      }
+                    />
+                    {(runProvider !== batch.defaults.providerId ||
+                      runModel !== batch.defaults.model) && (
+                      <p className="text-ui-xs text-muted-foreground">
+                        {tr(
+                          "Only this run changes. The batch settings keep their channel and model.",
+                        )}
+                      </p>
+                    )}
+                    {confirm.summaries.some((task) => !task.inherits) && (
+                      <p className="text-ui-xs text-muted-foreground">
+                        {tr("Tasks with their own channel or model keep them.")}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <p>
@@ -474,13 +539,6 @@ export function BatchExecution({
                       .join(", ") || "—"}
                   </p>
                 )}
-                {confirm.command.operation === "confirm" &&
-                  confirm.summaries.some((task) => !task.inherits) &&
-                  confirm.summaries.some((task) => task.inherits) && (
-                    <p className="text-ui-xs text-muted-foreground">
-                      {tr("Tasks with their own channel keep it.")}
-                    </p>
-                  )}
                 {sharedModel && (
                   <p>
                     {tr("Model")}: {sharedModel}
@@ -557,6 +615,26 @@ export function BatchExecution({
                       : ""}
                   </p>
                 </details>
+                {confirm.command.operation === "confirm" && alreadyDone.length > 0 && (
+                  <div
+                    role="status"
+                    className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 p-2 text-ui-sm"
+                  >
+                    <p className="min-w-0 flex-1">
+                      {tr(
+                        "{count} enabled tasks already have results and will be generated again.",
+                      ).replace("{count}", String(alreadyDone.length))}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => void skipDone()}
+                    >
+                      {tr("Disable them")}
+                    </Button>
+                  </div>
+                )}
                 {[...new Set(confirm.issues)].map((issue) => (
                   <p role="alert" key={issue} className="text-destructive">
                     {issue}

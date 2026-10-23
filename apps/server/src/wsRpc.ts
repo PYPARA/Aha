@@ -3358,7 +3358,10 @@ const makeWsRpcHandlersLayer = () =>
         [WS_METHODS.imageBatchPreflight]: (input) =>
           rpcEffect(
             Effect.tryPromise(() =>
-              imageGenerationService.batches.preflight(input.id, input.providerId),
+              imageGenerationService.batches.preflight(input.id, {
+                providerId: input.providerId,
+                model: input.model,
+              }),
             ),
             "Batch preflight failed",
           ),

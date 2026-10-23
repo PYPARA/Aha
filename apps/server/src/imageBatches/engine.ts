@@ -53,9 +53,34 @@ const frozenStyle = (attempt: ImageBatchAttempt): BatchStyle => ({
   references: [],
 });
 
-/** The batch as one run sees it on another channel; tasks with their own channel keep it. */
-const onChannel = (state: ImageBatchState, providerId: string | undefined): ImageBatchState =>
-  providerId ? { ...state, defaults: { ...state.defaults, providerId } } : state;
+/**
+ * The batch as one run sees it on another channel or model. Tasks that set their own channel or
+ * model are pinned to their current configuration first, so only fully inheriting tasks move.
+ */
+const onChannel = (
+  state: ImageBatchState,
+  run: { providerId?: string | undefined; model?: string | undefined },
+): ImageBatchState => {
+  if (!run.providerId && !run.model) return state;
+  const { defaults } = state;
+  return {
+    ...state,
+    tasks: state.tasks.map((t) =>
+      t.providerId || t.model
+        ? {
+            ...t,
+            providerId: t.providerId ?? defaults.providerId,
+            model: t.model ?? defaults.model,
+          }
+        : t,
+    ),
+    defaults: {
+      ...defaults,
+      providerId: run.providerId ?? defaults.providerId,
+      model: run.model ?? defaults.model,
+    },
+  };
+};
 
 export class ImageBatchEngine {
   private tail: Promise<unknown> = Promise.resolve();
@@ -111,9 +136,13 @@ export class ImageBatchEngine {
       );
     for (const t of tasks) Schema.decodeUnknownSync(ImageBatchTask)(t);
   }
-  async preflight(id: string, providerId?: string): Promise<ImageBatchPreflight> {
+  async preflight(
+    id: string,
+    run: { providerId?: string | undefined; model?: string | undefined } = {},
+  ): Promise<ImageBatchPreflight> {
     const state = await this.get(id);
-    return this.check(onChannel(state, providerId), state.tasks, batchStyle(state));
+    const view = onChannel(state, run);
+    return this.check(view, view.tasks, batchStyle(state));
   }
   /** `style` is the batch style a confirm would freeze; retries pass none (it is already frozen). */
   private async check(
@@ -390,11 +419,11 @@ export class ImageBatchEngine {
         let attempts: ImageBatchAttempt[];
         if (input.operation === "confirm") {
           const style = batchStyle(state);
-          const run = onChannel(state, input.providerId);
-          const check = await this.check(run, state.tasks, style);
+          const run = onChannel(state, input);
+          const check = await this.check(run, run.tasks, style);
           if (check.issues.length) throw new Error(check.issues.map((i) => i.message).join("\n"));
           attempts = await Promise.all(
-            state.tasks.filter((t) => t.enabled).map((t) => this.attempt(t, run, style)),
+            run.tasks.filter((t) => t.enabled).map((t) => this.attempt(t, run, style)),
           );
         } else {
           const selected = input.attemptIds.map((id) =>

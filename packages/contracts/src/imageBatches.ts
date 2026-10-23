@@ -238,10 +238,11 @@ export const ImageBatchResultsPage = Schema.Struct({
 });
 export type ImageBatchResultsPage = typeof ImageBatchResultsPage.Type;
 export const ImageBatchIssue = Schema.Struct({ taskId: Schema.String, message: Schema.String });
-/** `providerId` previews a run on another channel for tasks that inherit the batch default. */
+/** `providerId`/`model` preview a run on another channel or model for tasks that inherit both. */
 export const ImageBatchPreflightInput = Schema.Struct({
   id: Id,
   providerId: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
 });
 export const ImageBatchPreflight = Schema.Struct({
   version: Version,
@@ -286,8 +287,9 @@ export const ImageBatchCommand = Schema.Union([
     batchId: Id,
     version: Version,
     requestId: Id,
-    /** Channel for this run only, for tasks that inherit the batch default; the draft keeps its own. */
+    /** Channel and model for this run only, for tasks that inherit both; the draft keeps its own. */
     providerId: Schema.optional(Schema.String),
+    model: Schema.optional(Schema.String),
   }),
   Schema.Struct({
     operation: Schema.Literals(["pause", "resume", "cancel"]),

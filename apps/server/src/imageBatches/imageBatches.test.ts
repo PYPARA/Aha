@@ -338,12 +338,15 @@ describe("staged references", () => {
   });
 });
 describe("run channel", () => {
-  it("runs inheriting tasks on the chosen channel without changing the draft", async () => {
+  it("runs inheriting tasks on the chosen channel and model without changing the draft", async () => {
     const other = await f.images.upsertProvider({
       name: "Other",
       baseUrl: "http://127.0.0.1:9772/v1",
       enabled: true,
-      models: [{ id: "mock", source: "manual", lastTestAt: null, lastTestStatus: null }],
+      models: [
+        { id: "mock", source: "manual", lastTestAt: null, lastTestStatus: null },
+        { id: "mock-b", source: "manual", lastTestAt: null, lastTestStatus: null },
+      ],
       defaultModel: "mock",
       concurrency: 1,
       timeoutSeconds: 30,
@@ -352,19 +355,31 @@ describe("run channel", () => {
       f.task("inherits", 1),
       { ...f.task("own", 1), providerId: f.provider.id, model: "mock" },
     ]);
-    expect((await f.engine.preflight(s.id, "missing-channel")).issues).toHaveLength(1);
-    expect((await f.engine.preflight(s.id, other.id)).issues).toEqual([]);
+    expect((await f.engine.preflight(s.id, { providerId: "missing-channel" })).issues).toHaveLength(
+      1,
+    );
+    expect((await f.engine.preflight(s.id, { providerId: other.id })).issues).toEqual([]);
+    expect(
+      (await f.engine.preflight(s.id, { providerId: other.id, model: "absent" })).issues,
+    ).toHaveLength(1);
     s = await f.engine.command({
       operation: "confirm",
       batchId: s.id,
       version: s.version,
       requestId: randomUUID(),
       providerId: other.id,
+      model: "mock-b",
     });
     const attempts = s.executions.at(-1)!.attempts;
-    expect(attempts.find((a) => a.taskId === "inherits")!.providerId).toBe(other.id);
-    expect(attempts.find((a) => a.taskId === "own")!.providerId).toBe(f.provider.id);
-    expect(s.defaults.providerId).toBe(f.provider.id);
+    expect(attempts.find((a) => a.taskId === "inherits")).toMatchObject({
+      providerId: other.id,
+      model: "mock-b",
+    });
+    expect(attempts.find((a) => a.taskId === "own")).toMatchObject({
+      providerId: f.provider.id,
+      model: "mock",
+    });
+    expect(s.defaults).toMatchObject({ providerId: f.provider.id, model: "mock" });
   });
 });
 describe("proposal defaults", () => {
