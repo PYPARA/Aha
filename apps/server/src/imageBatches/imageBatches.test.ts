@@ -540,6 +540,12 @@ describe("batch execution consistency", () => {
     expect((await Effect.runPromise(f.repository.listJobs({ origin: "all" }))).jobs).toHaveLength(
       1,
     );
+    expect((await Effect.runPromise(f.repository.listJobs({ origin: "batch" }))).jobs).toHaveLength(
+      1,
+    );
+    expect(
+      (await Effect.runPromise(f.repository.listJobs({ origin: "sprite" }))).jobs,
+    ).toHaveLength(0);
     await f.engine.command({
       operation: "adopt",
       batchId: s.id,

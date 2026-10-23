@@ -252,6 +252,13 @@ export const imageBatchCopy: Record<string, string> = {
   "Choose the text and attachments to copy into an independent batch conversation. Generation starts only after reviewing and confirming its task list.":
     "明确选择要复制到独立批次会话的文本和附件。审阅并确认任务清单后才会出图。",
   "Drawing records": "直接绘图记录",
+  "Batch image records": "批量生图记录",
+  "Sprite animation records": "精灵动画记录",
+  "Open in batch images": "在批量生图中打开",
+  "Open in sprite animation": "在精灵动画中打开",
+  "From batch images. Adopt, collect and regenerate it there.":
+    "来自批量生图，采用、入库和重新生成请在批量生图中进行。",
+  "From sprite animation. Manage it in the sprite project.": "来自精灵动画，请在精灵项目中管理。",
   "All source records": "全部来源记录",
   "Image history sources": "绘图记录来源",
   "Resource source": "资源来源",

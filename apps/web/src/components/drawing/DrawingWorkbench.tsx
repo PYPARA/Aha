@@ -78,6 +78,12 @@ function draftId() {
   }
   return id;
 }
+const ORIGIN_LABELS = {
+  drawing: "Drawing records",
+  batch: "Batch image records",
+  sprite: "Sprite animation records",
+} as const;
+
 async function getAsset(id: string): Promise<ImageAsset> {
   const response = await fetch(resolveWsHttpUrl(`/api/drawing/assets/${id}?metadata=1`), {
     credentials: "include",
@@ -93,7 +99,8 @@ export default function DrawingWorkbench() {
   const [search, setSearch] = useState(""),
     [query, setQuery] = useState("");
   const [statusGroup, setStatusGroup] = useState<"all" | "active" | "completed" | "issues">("all");
-  const [origin, setOrigin] = useState<"drawing" | "all">("drawing");
+  // Each source module is listed on its own; batches can add hundreds of records at once.
+  const [origin, setOrigin] = useState<"drawing" | "batch" | "sprite">("drawing");
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 300);
     return () => clearTimeout(timer);
@@ -316,6 +323,13 @@ export default function DrawingWorkbench() {
     return task;
   };
   useResourceAttachments("drawing", addFiles, hydrated);
+  // Batch and sprite records are owned by their workbench; opening it is an explicit action.
+  const openSource = (job: ImageJob) => {
+    if (job.origin?.kind === "batch" && job.origin.ownerId)
+      void navigate({ to: "/image-batches", search: { batchId: job.origin.ownerId } });
+    else if (job.origin?.kind === "sprite" && job.origin.ownerId)
+      void navigate({ to: "/sprite-animation", search: { projectId: job.origin.ownerId } });
+  };
   const reuse = (job: ImageJob) => {
     setPrompt(job.prompt);
     setProviderId(job.providerId);
@@ -358,13 +372,18 @@ export default function DrawingWorkbench() {
       const signature = JSON.stringify(body);
       if (pendingRequest.current?.signature !== signature)
         pendingRequest.current = { signature, id: crypto.randomUUID() };
-      const job = await drawingApi().createJob({
+      await drawingApi().createJob({
         ...body,
         clientRequestId: pendingRequest.current.id,
       });
       pendingRequest.current = null;
       await client.invalidateQueries({ queryKey: drawingJobsKey });
-      setSourceJobId(job.id);
+      // A sent request leaves an empty composer, as chat does; channel, model and parameters stay.
+      // "Reuse parameters" on the new task brings the prompt and images back.
+      setPrompt("");
+      setReferences([]);
+      setMask(null);
+      setSourceJobId(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -585,7 +604,7 @@ export default function DrawingWorkbench() {
                       size="sm"
                       aria-label={tr("Image history sources")}
                     >
-                      {tr(origin === "drawing" ? "Drawing records" : "All source records")}
+                      {tr(ORIGIN_LABELS[origin])}
                       <ChevronDownIcon className="size-3" />
                     </Button>
                   }
@@ -595,12 +614,11 @@ export default function DrawingWorkbench() {
                     value={origin}
                     onValueChange={(value) => setOrigin(value as typeof origin)}
                   >
-                    <MenuRadioItem value="drawing" closeOnClick>
-                      {tr("Drawing records")}
-                    </MenuRadioItem>
-                    <MenuRadioItem value="all" closeOnClick>
-                      {tr("All source records")}
-                    </MenuRadioItem>
+                    {(Object.keys(ORIGIN_LABELS) as (keyof typeof ORIGIN_LABELS)[]).map((value) => (
+                      <MenuRadioItem key={value} value={value} closeOnClick>
+                        {tr(ORIGIN_LABELS[value])}
+                      </MenuRadioItem>
+                    ))}
                   </MenuRadioGroup>
                 </ComposerPickerMenuPopup>
               </Menu>
@@ -650,13 +668,8 @@ export default function DrawingWorkbench() {
           filters={{ query, statusGroup, origin }}
           hasProvider={Boolean(provider)}
           onSettings={settings}
-          onOpen={(job) => {
-            if (job.origin?.kind === "batch" && job.origin.ownerId)
-              void navigate({ to: "/image-batches", search: { batchId: job.origin.ownerId } });
-            else if (job.origin?.kind === "sprite" && job.origin.ownerId)
-              void navigate({ to: "/sprite-animation", search: { projectId: job.origin.ownerId } });
-            else setDetails(job);
-          }}
+          onOpen={setDetails}
+          onOpenSource={openSource}
           onReuse={reuse}
           onRegenerate={(job) => void regenerate(job)}
           onCancel={(job) => void action(() => drawingApi().cancelJob({ id: job.id }))}
@@ -866,6 +879,7 @@ export default function DrawingWorkbench() {
             }}
             onAnnotate={openAnnotation}
             onMask={openMask}
+            onOpenSource={openSource}
             onReuse={reuse}
             onRegenerate={(job) => void regenerate(job)}
             onCancel={(job) => void action(() => drawingApi().cancelJob({ id: job.id }))}

@@ -124,9 +124,11 @@ export const ImageGenerationRepositoryLive = Layer.effect(
               ? sql`AND (created_at<${cursor.at} OR (created_at=${cursor.at} AND id<${cursor.id}))`
               : sql``;
             const origin =
-              input.origin !== "all"
-                ? sql`AND COALESCE(json_extract(payload, '$.origin.kind'), 'legacy') IN ('drawing', 'legacy')`
-                : sql``;
+              input.origin === "all"
+                ? sql``
+                : input.origin === "batch" || input.origin === "sprite"
+                  ? sql`AND json_extract(payload, '$.origin.kind') = ${input.origin}`
+                  : sql`AND COALESCE(json_extract(payload, '$.origin.kind'), 'legacy') IN ('drawing', 'legacy')`;
             const rows = yield* sql<{ payload: string }>`SELECT payload FROM image_jobs
               WHERE 1=1 ${search} ${status} ${page} ${origin}
               ORDER BY created_at DESC, id DESC LIMIT 31`;

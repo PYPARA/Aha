@@ -235,7 +235,8 @@ export const ImageJobCreateInput = Schema.Struct({
 });
 export type ImageJobCreateInput = typeof ImageJobCreateInput.Type;
 export const ImageJobListInput = Schema.Struct({
-  origin: Schema.optional(Schema.Literals(["drawing", "all"])),
+  /** Which module's records to list; "drawing" also includes unclassified legacy records. */
+  origin: Schema.optional(Schema.Literals(["drawing", "batch", "sprite", "all"])),
   cursor: Schema.optional(Schema.String),
   query: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
   statusGroup: Schema.optional(Schema.Literals(["all", "active", "completed", "issues"])),

@@ -44,6 +44,7 @@ export function DrawingElapsed({ job }: { job: ImageJob }) {
 export function DrawingGallery({
   filters,
   onOpen,
+  onOpenSource,
   onReuse,
   onRegenerate,
   onCancel,
@@ -52,7 +53,9 @@ export function DrawingGallery({
   hasProvider,
 }: {
   filters: Omit<ImageJobListInput, "cursor">;
+  /** Shows the task's details; source records open their workbench only via onOpenSource. */
   onOpen: (job: ImageJob) => void;
+  onOpenSource: (job: ImageJob) => void;
   onReuse: (job: ImageJob) => void;
   onRegenerate: (job: ImageJob) => void;
   onCancel: (job: ImageJob) => void;
@@ -304,8 +307,12 @@ export function DrawingGallery({
                           ) : null}
                           <MenuItem onClick={() => onReuse(job)}>{tr("Reuse parameters")}</MenuItem>
                           {job.origin?.kind === "batch" || job.origin?.kind === "sprite" ? (
-                            <MenuItem onClick={() => onOpen(job)}>
-                              {tr("Open source workbench")}
+                            <MenuItem onClick={() => onOpenSource(job)}>
+                              {tr(
+                                job.origin.kind === "batch"
+                                  ? "Open in batch images"
+                                  : "Open in sprite animation",
+                              )}
                             </MenuItem>
                           ) : activeImageJob(job) ? (
                             <MenuItem onClick={() => onCancel(job)}>{tr("Cancel task")}</MenuItem>

@@ -227,6 +227,7 @@ describe("resource collection extends existing menus", () => {
             filters={{ statusGroup: "all" }}
             hasProvider
             onOpen={noop}
+            onOpenSource={noop}
             onReuse={noop}
             onRegenerate={noop}
             onCancel={noop}
@@ -246,6 +247,7 @@ describe("resource collection extends existing menus", () => {
             onCancel={noop}
             onDelete={noop}
             onPreview={noop}
+            onOpenSource={noop}
           />
         ) : surface === "expanded" ? (
           <ExpandedImageOverlay

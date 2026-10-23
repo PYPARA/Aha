@@ -28,6 +28,7 @@ export function DrawingJobDialog({
   onCancel,
   onDelete,
   onPreview,
+  onOpenSource,
 }: {
   initialJob: ImageJob;
   onClose: () => void;
@@ -40,6 +41,7 @@ export function DrawingJobDialog({
   onCancel: (job: ImageJob) => void;
   onDelete: (job: ImageJob) => void;
   onPreview: (asset: ImageAsset) => void;
+  onOpenSource: (job: ImageJob) => void;
 }) {
   const tr = useAhaTranslation();
   const snapshot = useQuery({
@@ -48,6 +50,10 @@ export function DrawingJobDialog({
     initialData: initialJob,
   });
   const job = snapshot.data;
+  // Batch and sprite records belong to their workbench: deleting, regenerating, cancelling and
+  // collecting happen there, so details only offer read-only and copy-out actions.
+  const owner =
+    job.origin?.kind === "batch" ? "batch" : job.origin?.kind === "sprite" ? "sprite" : null;
   const [index, setIndex] = useState(0);
   const asset = job.outputs[Math.min(index, Math.max(0, job.outputs.length - 1))];
   const navigate = (direction: number) => {
@@ -155,10 +161,19 @@ export function DrawingJobDialog({
                 </>
               ) : null}
             </div>
-            {asset ? (
+            {asset && !owner ? (
               <ResourceCollectButton
                 sources={[drawingResourceSource(asset, imageUrl(asset), job)]}
               />
+            ) : null}
+            {owner ? (
+              <p className="pt-2 text-center text-ui-xs text-muted-foreground">
+                {tr(
+                  owner === "batch"
+                    ? "From batch images. Adopt, collect and regenerate it there."
+                    : "From sprite animation. Manage it in the sprite project.",
+                )}
+              </p>
             ) : null}
             {asset ? (
               <p className="pt-2 text-center text-ui-xs text-muted-foreground">
@@ -342,7 +357,11 @@ export function DrawingJobDialog({
               <Button size="sm" variant="outline" onClick={() => onReuse(job)}>
                 {tr("Reuse parameters")}
               </Button>
-              {activeImageJob(job) ? (
+              {owner ? (
+                <Button size="sm" variant="outline" onClick={() => onOpenSource(job)}>
+                  {tr(owner === "batch" ? "Open in batch images" : "Open in sprite animation")}
+                </Button>
+              ) : activeImageJob(job) ? (
                 <Button size="sm" variant="outline" onClick={() => onCancel(job)}>
                   {tr("Cancel task")}
                 </Button>
@@ -351,14 +370,16 @@ export function DrawingJobDialog({
                   {tr("Regenerate")} · {job.parameters.n}
                 </Button>
               )}
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive"
-                onClick={() => onDelete(job)}
-              >
-                {tr("Delete")}
-              </Button>
+              {!owner && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-destructive"
+                  onClick={() => onDelete(job)}
+                >
+                  {tr("Delete")}
+                </Button>
+              )}
             </div>
           </div>
         </div>
