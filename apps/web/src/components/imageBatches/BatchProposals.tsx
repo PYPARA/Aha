@@ -59,6 +59,9 @@ export function BatchProposals({
   const [view, setView] = useState<ImageBatchProposal | null>(null);
   const [busy, setBusy] = useState(false);
   const diff = view ? imageBatchDiff(batch.tasks, view.tasks) : null;
+  // Removing tasks is the one change that loses work, so it is called out before applying.
+  const removedBy = (proposal: ImageBatchProposal) =>
+    imageBatchDiff(batch.tasks, proposal.tasks).removed.length;
   const proposed = view ? imageBatchProposedDefaults(batch.defaults, view) : batch.defaults;
   const previousDefaults = defaultFields(batch.defaults),
     nextDefaults = defaultFields(proposed);
@@ -94,6 +97,14 @@ export function BatchProposals({
           <div key={p.id} className="space-y-2 border-b p-4 text-ui-sm">
             <p className="font-medium">{tr("Pending changes")}</p>
             <p className="whitespace-pre-wrap">{p.summary}</p>
+            {removedBy(p) > 0 && (
+              <p role="alert" className="text-destructive">
+                {tr("Applying removes {count} tasks from the task list.").replace(
+                  "{count}",
+                  String(removedBy(p)),
+                )}
+              </p>
+            )}
             {p.defaults && (
               <p className="text-muted-foreground">
                 {tr("Also changes the batch style or default parameters.")}
@@ -143,6 +154,16 @@ export function BatchProposals({
                   {tr("Removed")}: {diff.removed.length}
                   {diff.reordered ? " · " + tr("Order changed") : ""}
                 </p>
+                {diff.removed.length > 0 && (
+                  <p
+                    role="alert"
+                    className="rounded-md border border-destructive/40 p-2 text-destructive"
+                  >
+                    {tr(
+                      "Applying removes {count} tasks from the task list. Removed tasks can be restored from the task list afterwards.",
+                    ).replace("{count}", String(diff.removed.length))}
+                  </p>
+                )}
                 <p>
                   {tr("Planned images")}: {imageBatchPlanCounts(batch.tasks, batch.defaults).images}{" "}
                   → {imageBatchPlanCounts(view.tasks, proposed).images}

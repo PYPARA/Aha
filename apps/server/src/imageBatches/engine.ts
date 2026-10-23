@@ -9,6 +9,7 @@ import {
   imageBatchComposePrompt,
   imageBatchPlanCounts,
   imageBatchProposedDefaults,
+  imageBatchRemovedTasks,
   imageBatchTaskConfiguration,
   imageBatchTaskReferences,
   imageBatchMissingCount,
@@ -61,6 +62,26 @@ type RunScope = {
   providerId?: string | undefined;
   model?: string | undefined;
   taskIds?: readonly string[] | undefined;
+};
+/** Keep at most this many removed tasks for undo; the oldest drop off first. */
+const MAX_REMOVED_TASKS = 500;
+/**
+ * Replaces the draft's tasks and records the ones that left it, with their old position, so a
+ * mistaken removal (for example a partial proposal) can be restored. Restored tasks leave the record.
+ */
+const replaceTasks = (state: ImageBatchState, next: readonly ImageBatchTask[]) => {
+  const kept = new Set(next.map((t) => t.id));
+  const at = now();
+  const dropped = state.tasks.flatMap((task, index) =>
+    kept.has(task.id) ? [] : [{ task, index, removedAt: at }],
+  );
+  state.removedTasks = [
+    ...dropped,
+    ...imageBatchRemovedTasks(state).filter(
+      (r) => !kept.has(r.task.id) && !dropped.some((d) => d.task.id === r.task.id),
+    ),
+  ].slice(0, MAX_REMOVED_TASKS);
+  state.tasks = structuredClone([...next]);
 };
 /** A run limited to some tasks: exactly those, with their current settings, enabled or not. */
 const onTasks = (state: ImageBatchState, taskIds: readonly string[] | undefined) => {
@@ -203,21 +224,29 @@ export class ImageBatchEngine {
       const state = await this.get(input.batchId);
       if (state.removed || state.threadId !== threadId)
         throw new Error("This conversation does not own the batch.");
+      const signature = fingerprint(input);
       const existing = state.proposals.find((p) => p.requestId === input.requestId);
       if (existing) {
-        if (
-          JSON.stringify(existing.tasks) !== JSON.stringify(input.tasks) ||
-          existing.summary !== input.summary ||
-          JSON.stringify(existing.warnings) !== JSON.stringify(input.warnings) ||
-          JSON.stringify(existing.defaults) !== JSON.stringify(input.defaults)
-        )
+        if ((existing.inputFingerprint ?? null) !== signature)
           throw new Error("Proposal request ID was reused with different content.");
         return state;
       }
       if (state.version !== input.baseVersion) throw conflict();
+      // A proposal changes only the tasks it lists. Leaving a task out keeps it; deleting needs
+      // removeTaskIds, so a partial list can never wipe the rest of the draft.
+      const removals = new Set(input.removeTaskIds ?? []);
+      if ([...removals].some((id) => !state.tasks.some((t) => t.id === id)))
+        throw new Error("A task to remove is not in the current draft.");
+      if (input.tasks.some((t) => removals.has(t.id)))
+        throw new Error("A task cannot be both changed and removed.");
+      const incoming = new Map(input.tasks.map((t) => [t.id, t]));
+      const merged = [
+        ...state.tasks.filter((t) => !removals.has(t.id)).map((t) => incoming.get(t.id) ?? t),
+        ...input.tasks.filter((t) => !state.tasks.some((current) => current.id === t.id)),
+      ];
       this.validateTasks(
         { ...state, defaults: imageBatchProposedDefaults(state.defaults, input) },
-        input.tasks,
+        merged,
       );
       if (
         input.tasks.some((t) =>
@@ -242,6 +271,8 @@ export class ImageBatchEngine {
         throw new Error("Reference is not owned by this batch.");
       state.proposals.push({
         ...input,
+        tasks: merged,
+        inputFingerprint: signature,
         id: randomUUID(),
         threadId,
         turnId,
@@ -398,7 +429,10 @@ export class ImageBatchEngine {
         state.brief = input.brief;
         state.defaults = input.defaults;
         this.validateTasks(state, input.tasks);
-        state.tasks = structuredClone(input.tasks);
+        replaceTasks(state, input.tasks);
+        state.version++;
+      } else if (input.operation === "clear-removed-tasks") {
+        state.removedTasks = [];
         state.version++;
       } else if (input.operation === "bind-thread") {
         if (state.threadId && state.threadId !== input.threadId)
@@ -419,7 +453,7 @@ export class ImageBatchEngine {
           const defaults = imageBatchProposedDefaults(state.defaults, proposal);
           this.validateTasks({ ...state, defaults }, proposal.tasks);
           state.defaults = structuredClone(defaults);
-          state.tasks = structuredClone(proposal.tasks);
+          replaceTasks(state, proposal.tasks);
           state.version++;
           proposal.status = "applied";
         } else proposal.status = "dismissed";

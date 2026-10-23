@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import {
   imageBatchDiff,
   imageBatchPlanCounts,
+  imageBatchRemovedTasks,
   type ImageBatchState,
   type ImageBatchTask,
   type ImageJobCreateInput,
@@ -401,6 +402,97 @@ describe("task regeneration", () => {
     expect(attempts).toHaveLength(1);
     expect(attempts[0]).toMatchObject({ taskId: "sample", prompt: "edited prompt" });
     expect(s.tasks.find((t) => t.id === "sample")!.enabled).toBe(false);
+  });
+});
+describe("proposal merge", () => {
+  it("changes only listed tasks and deletes only explicitly removed ones", async () => {
+    let s = await f.save(await f.create(), [f.task("a"), f.task("b"), f.task("c")]);
+    s = await f.engine.command({
+      operation: "bind-thread",
+      batchId: s.id,
+      version: s.version,
+      threadId: "thread",
+    });
+    const input = {
+      batchId: s.id,
+      baseVersion: s.version,
+      requestId: randomUUID(),
+      summary: "",
+      warnings: [],
+      tasks: [{ ...f.task("b"), prompt: "changed" }, f.task("d")],
+    };
+    s = await f.engine.propose(input, "thread", "turn");
+    expect(s.proposals.at(-1)!.tasks.map((t) => [t.id, t.prompt])).toEqual([
+      ["a", "image a"],
+      ["b", "changed"],
+      ["c", "image c"],
+      ["d", "image d"],
+    ]);
+    // Retrying the same request is recognised instead of rejected.
+    await f.engine.propose(input, "thread", "turn");
+    expect(s.proposals).toHaveLength(1);
+    s = await f.engine.propose(
+      { ...input, requestId: randomUUID(), tasks: [], removeTaskIds: ["c"] },
+      "thread",
+      "turn",
+    );
+    expect(s.proposals.at(-1)!.tasks.map((t) => t.id)).toEqual(["a", "b"]);
+    await expect(
+      f.engine.propose(
+        { ...input, requestId: randomUUID(), tasks: [f.task("a")], removeTaskIds: ["a"] },
+        "thread",
+        "turn",
+      ),
+    ).rejects.toThrow("both changed and removed");
+    await expect(
+      f.engine.propose(
+        { ...input, requestId: randomUUID(), tasks: [], removeTaskIds: ["missing"] },
+        "thread",
+        "turn",
+      ),
+    ).rejects.toThrow("not in the current draft");
+  });
+});
+describe("removed tasks", () => {
+  it("records removed tasks for restore and derives them for older batches", async () => {
+    let s = await f.save(await f.create(), [f.task("a"), f.task("b"), f.task("c")]);
+    s = await f.save(s, [f.task("b")]);
+    expect(s.removedTasks!.map((r) => [r.task.id, r.index])).toEqual([
+      ["a", 0],
+      ["c", 2],
+    ]);
+    s = await f.save(s, [f.task("a"), f.task("b")]);
+    expect(s.removedTasks!.map((r) => r.task.id)).toEqual(["c"]);
+    s = await f.engine.command({
+      operation: "clear-removed-tasks",
+      batchId: s.id,
+      version: s.version,
+    });
+    expect(s.removedTasks).toEqual([]);
+    // Batches written before removals were recorded fall back to earlier applied proposals.
+    const legacy = {
+      ...s,
+      removedTasks: undefined,
+      tasks: [f.task("b")],
+      proposals: [
+        {
+          id: "p",
+          requestId: "r",
+          baseVersion: 1,
+          threadId: "thread",
+          turnId: "turn",
+          createdAt: "2026-10-23T00:00:00.000Z",
+          summary: "",
+          warnings: [],
+          tasks: [f.task("a"), f.task("b"), f.task("c")],
+          status: "applied" as const,
+        },
+      ],
+    };
+    expect(imageBatchRemovedTasks(legacy).map((r) => [r.task.id, r.index])).toEqual([
+      ["a", 0],
+      ["c", 2],
+    ]);
   });
 });
 describe("proposal defaults", () => {

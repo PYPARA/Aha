@@ -5,6 +5,7 @@ import {
   IMAGE_BATCH_MAX_STYLE_REFERENCES,
   imageBatchMissingCount,
   imageBatchPlanCounts,
+  imageBatchRemovedTasks,
   imageBatchTaskConfiguration,
   type ImageBatchResult,
   type ImageBatchState,
@@ -46,6 +47,7 @@ import { BatchExecution } from "./BatchExecution";
 import { BatchReferenceList } from "./BatchReferenceList";
 import { BatchBulkParameters } from "./BatchBulkParameters";
 import { BatchTaskResults } from "./BatchTaskResults";
+import { BatchRemovedTasks } from "./BatchRemovedTasks";
 import { outputGroup } from "./resultNames";
 import { useResourceAttachments, type ResourceReceiveResult } from "../resources/resourceLibrary";
 import { uploadDrawingImage } from "../drawing/useDrawing";
@@ -315,6 +317,8 @@ function BatchWorkspace({
   const [resultTask, setResultTask] = useState("");
   // A task's results open in a drawer beside the list; the full page stays one link away.
   const [taskResults, setTaskResults] = useState<string | null>(null);
+  const [showRemoved, setShowRemoved] = useState(false);
+  const removedCount = imageBatchRemovedTasks(batch).length;
   const openResults = (id: string) => setTaskResults(id);
   const openAllResults = (id: string) => {
     setTaskResults(null);
@@ -743,6 +747,19 @@ function BatchWorkspace({
               </>
             )}
           </div>
+          {removedCount > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-ui-sm">
+              <p className="min-w-0 flex-1">
+                {tr("{count} tasks were removed from the task list and can be restored.").replace(
+                  "{count}",
+                  String(removedCount),
+                )}
+              </p>
+              <Button size="sm" variant="outline" onClick={() => setShowRemoved(true)}>
+                {tr("Review and restore")}
+              </Button>
+            </div>
+          )}
           {/* Pending AI changes are reviewed where they take effect, not only beside the chat. */}
           <div className="max-h-[40%] shrink-0 overflow-auto">
             <BatchProposals
@@ -914,6 +931,27 @@ function BatchWorkspace({
                           <p className="mt-0.5 truncate text-ui-xs text-muted-foreground">
                             {spec.join(" · ")}
                           </p>
+                          {attempt?.error &&
+                            ["failed", "partial", "uncertain", "interrupted"].includes(
+                              attempt.status,
+                            ) && (
+                              <p
+                                className={
+                                  "mt-0.5 truncate text-ui-xs " +
+                                  (attempt.status === "failed"
+                                    ? "text-destructive"
+                                    : "text-warning")
+                                }
+                                title={attempt.error}
+                              >
+                                {attempt.status === "uncertain"
+                                  ? tr(
+                                      "The request may have reached the channel; check it before regenerating.",
+                                    ) + " "
+                                  : ""}
+                                {tr(attempt.error)}
+                              </p>
+                            )}
                         </div>
                         <Switch
                           className="mt-1"
@@ -1053,6 +1091,7 @@ function BatchWorkspace({
           {execution}
         </div>
       )}
+      {showRemoved && <BatchRemovedTasks batch={batch} onClose={() => setShowRemoved(false)} />}
       <BatchTaskResults
         batch={batch}
         taskId={taskResults}

@@ -100,6 +100,8 @@ export class ImageBatchRepository {
     const refs = new Set([
       ...state.sources.flatMap((s) => (s.asset ? [s.asset.id] : [])),
       ...state.tasks.flatMap((t) => t.references.map((r) => r.assetId)),
+      // Removed tasks can be restored, so their references stay protected until cleared.
+      ...(state.removedTasks ?? []).flatMap((r) => r.task.references.map((ref) => ref.assetId)),
       ...(state.defaults.styleReferences ?? []).map((r) => r.assetId),
       ...state.proposals
         .filter((p) => p.status === "pending")

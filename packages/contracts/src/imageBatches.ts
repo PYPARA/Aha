@@ -94,8 +94,12 @@ export const ImageBatchProposal = Schema.Struct({
   createdAt: Schema.String,
   summary: Text,
   warnings: Schema.mutable(Schema.Array(Text)),
+  /** The full task list the proposal would leave in place, built when it was proposed. */
   tasks: Schema.mutable(Schema.Array(ImageBatchTask)),
   defaults: Schema.optional(ImageBatchProposalDefaults),
+  removeTaskIds: Schema.optional(Schema.mutable(Schema.Array(Id))),
+  /** Fingerprint of the submitted changes, so a retried request ID is recognised. */
+  inputFingerprint: Schema.optional(Schema.String),
   status: Schema.Literals(["pending", "applied", "dismissed"]),
 }).mapFields(Struct.map(Schema.mutableKey));
 export type ImageBatchProposal = typeof ImageBatchProposal.Type;
@@ -156,6 +160,14 @@ export const ImageBatchState = Schema.Struct({
   tasks: Schema.mutable(Schema.Array(ImageBatchTask)),
   sources: Schema.mutable(Schema.Array(ImageBatchSource)),
   proposals: Schema.mutable(Schema.Array(ImageBatchProposal)),
+  /** Tasks that left the draft, newest first, so a mistaken removal can be undone. */
+  removedTasks: Schema.optional(
+    Schema.mutable(
+      Schema.Array(
+        Schema.Struct({ task: ImageBatchTask, index: Version, removedAt: Schema.String }),
+      ),
+    ),
+  ),
   sourceReports: Schema.optional(
     Schema.mutable(
       Schema.Array(
@@ -273,6 +285,11 @@ export const ImageBatchCommand = Schema.Union([
     tasks: Schema.mutable(Schema.Array(ImageBatchTask)),
   }),
   Schema.Struct({
+    operation: Schema.Literal("clear-removed-tasks"),
+    batchId: Id,
+    version: Version,
+  }),
+  Schema.Struct({
     operation: Schema.Literal("bind-thread"),
     batchId: Id,
     version: Version,
@@ -345,8 +362,11 @@ export const ImageBatchProposalInput = Schema.Struct({
   requestId: Id,
   summary: Text,
   warnings: Schema.mutable(Schema.Array(Text)),
+  /** Tasks to add or change, matched by ID. Tasks not listed stay as they are. */
   tasks: Schema.mutable(Schema.Array(ImageBatchTask)),
   defaults: Schema.optional(ImageBatchProposalDefaults),
+  /** Tasks to delete; deleting is never implied by leaving a task out. */
+  removeTaskIds: Schema.optional(Schema.mutable(Schema.Array(Id))),
 });
 export type ImageBatchProposalInput = typeof ImageBatchProposalInput.Type;
 export interface ImageBatchesApi {
@@ -361,6 +381,22 @@ export interface ImageBatchesApi {
   onEvent(callback: (event: { type: string; batchId?: string }) => void): () => void;
 }
 
+/**
+ * Tasks that left the draft. Batches saved before removals were recorded derive them from earlier
+ * applied proposals, which hold full task lists.
+ */
+export function imageBatchRemovedTasks(state: ImageBatchState) {
+  if (state.removedTasks) return state.removedTasks;
+  const current = new Set(state.tasks.map((t) => t.id));
+  const found = new Map<string, { task: ImageBatchTask; index: number; removedAt: string }>();
+  for (const proposal of state.proposals.toReversed())
+    if (proposal.status === "applied")
+      proposal.tasks.forEach((task, index) => {
+        if (!current.has(task.id) && !found.has(task.id))
+          found.set(task.id, { task, index, removedAt: proposal.createdAt });
+      });
+  return [...found.values()];
+}
 export function imageBatchTaskConfiguration(task: ImageBatchTask, defaults: ImageBatchDefaults) {
   return {
     providerId: task.providerId ?? defaults.providerId,

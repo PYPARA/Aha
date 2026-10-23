@@ -8,6 +8,7 @@ import { BatchProposals } from "./BatchProposals";
 import { BatchExecution } from "./BatchExecution";
 import { BatchResults } from "./BatchResults";
 import { ReferenceTargetDialog } from "./BatchReferenceTargets";
+import { BatchRemovedTasks } from "./BatchRemovedTasks";
 import { useResourceCollection } from "../resources/resourceLibrary";
 import { useBatchCollectionWorker } from "../resources/useBatchCollectionWorker";
 import type {
@@ -291,6 +292,44 @@ it("matches hero images to same-named portrait tasks and disables the samples", 
     false,
     false,
   ]);
+});
+it("restores removed tasks at their old positions as disabled", async () => {
+  const [first, second, third] = batch.tasks;
+  batch.tasks = [second!];
+  batch.removedTasks = [
+    { task: third!, index: 2, removedAt: new Date().toISOString() },
+    { task: first!, index: 0, removedAt: new Date().toISOString() },
+  ];
+  const onClose = vi.fn();
+  await mount(<BatchRemovedTasks batch={batch} onClose={onClose} />);
+  await page.getByRole("button", { name: "Restore selected", exact: true }).click();
+  await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  const tasks = mocks.command.mock.calls[0]![0].tasks as typeof batch.tasks;
+  expect(tasks.map((t) => [t.id, t.enabled])).toEqual([
+    ["task0", false],
+    ["task1", true],
+    ["task2", false],
+  ]);
+});
+it("warns before applying a proposal that removes tasks", async () => {
+  batch.proposals = [
+    {
+      id: "proposal",
+      requestId: "request",
+      baseVersion: 2,
+      threadId: "thread",
+      turnId: "turn",
+      createdAt: new Date().toISOString(),
+      summary: "Only portraits",
+      warnings: [],
+      status: "pending",
+      tasks: batch.tasks.slice(0, 2),
+    },
+  ];
+  await mount(<BatchProposals batch={batch} onError={onError} />);
+  await expect
+    .element(page.getByRole("alert"))
+    .toHaveTextContent("Applying removes 4 tasks from the task list.");
 });
 it("opens the generation check for the requested version without confirming", async () => {
   const opened = vi.fn();

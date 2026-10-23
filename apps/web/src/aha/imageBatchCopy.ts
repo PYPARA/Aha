@@ -322,6 +322,24 @@ export const imageBatchCopy: Record<string, string> = {
   "Style description": "风格描述",
   "Style reference images": "风格参考图",
   "Batch style and defaults": "批次风格与默认参数",
+  "{count} tasks were removed from the task list and can be restored.":
+    "有 {count} 项任务已从任务清单移除，可以恢复。",
+  "Review and restore": "查看并恢复",
+  "Restore removed tasks": "恢复已移除的任务",
+  "{count} tasks were removed from the task list. Restored tasks return to their earlier positions.":
+    "共有 {count} 项任务已从任务清单移除。恢复后会回到原来的位置。",
+  "Restore as disabled": "恢复为停用状态",
+  "Restore selected": "恢复所选",
+  "Clear list": "清空记录",
+  "Clear removed tasks?": "清空已移除任务的记录？",
+  "They can no longer be restored. Images they already generated stay in the results.":
+    "清空后无法再恢复。它们已生成的图片仍保留在生成结果中。",
+  "The request may have reached the channel; check it before regenerating.":
+    "请求可能已到达渠道，请核实后再重新生成。",
+  "fetch failed": "网络请求失败",
+  "Applying removes {count} tasks from the task list.": "应用后会从任务清单删除 {count} 项任务。",
+  "Applying removes {count} tasks from the task list. Removed tasks can be restored from the task list afterwards.":
+    "应用后会从任务清单删除 {count} 项任务。删除后可在任务清单中恢复。",
   "Also changes the batch style or default parameters.": "同时会修改批次风格或默认参数。",
   "Default image count": "默认张数",
   "Default size": "默认尺寸",
