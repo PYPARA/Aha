@@ -284,9 +284,22 @@ export class SkinLibrary {
         const next = structuredClone(this.state);
         const palette = SkinPaletteSchema.parse(initialPalette);
         const current = next.skins.find((s) => s.id === next.activeId)!;
-        current.original.palette = palette;
-        current.adjusted.palette = palette;
-        next.palette = palette;
+        const defaults = next.skins.find((s) => s.id === "synara-default");
+        // An untouched install starts on the default skin instead of a placeholder copy of it.
+        if (
+          defaults &&
+          stableJson(current.adjusted.backgrounds) === stableJson(defaults.original.backgrounds) &&
+          stableJson(palette) === stableJson(defaults.original.palette)
+        ) {
+          next.skins = next.skins.filter((s) => s.id !== current.id);
+          next.activeId = defaults.id;
+          next.palette = defaults.adjusted.palette;
+          next.effectiveIconId = this.resolveIcon(defaults.id);
+        } else {
+          current.original.palette = palette;
+          current.adjusted.palette = palette;
+          next.palette = palette;
+        }
         await this.write(next);
       }
       return this.snapshot();

@@ -72,6 +72,24 @@ describe("Aha skin library", () => {
     await restarted.list(BUILTIN_PALETTES["furina-chanson"]);
     expect(restarted.snapshot()).toEqual(initial);
   });
+  it("starts an untouched install on the default skin without a placeholder custom skin", async () => {
+    const { dir, options } = await fixture();
+    const appearance = new AhaAppearanceStore(join(dir, "fresh", "aha-appearance.json"));
+    await appearance.load();
+    const library = new SkinLibrary(join(dir, "fresh", "aha-skins.json"), appearance, options);
+    await library.load();
+    await library.list(BUILTIN_PALETTES["synara-default"]);
+    const snapshot = library.snapshot();
+    expect(snapshot.activeId).toBe("synara-default");
+    expect(snapshot.skins.map((s) => s.origin)).not.toContain("custom");
+    expect(snapshot.palette).toEqual(BUILTIN_PALETTES["synara-default"]);
+    expect(snapshot.effectiveIconId).toBe(
+      snapshot.skins.find((s) => s.id === "synara-default")!.original.iconId,
+    );
+    const restarted = new SkinLibrary(library.file, appearance, options);
+    await restarted.load();
+    expect(restarted.snapshot()).toEqual(snapshot);
+  });
   it("switches to the unskinned defaults with the Aha icon, restores original colors, and survives restart", async () => {
     const { library, appearance, dir, options, applyIcon } = await fixture();
     const furina = await library.preview("furina-chanson");
