@@ -5,6 +5,8 @@ import {
   exportSpriteAssets,
   exportSpriteProject,
   importSpriteProject,
+  prefixSpriteAssetFiles,
+  renderSpriteAssetFiles,
   renderSpriteFrame,
   renderSpriteAtlasPreview,
 } from "./spriteFiles";
@@ -236,6 +238,25 @@ describe("portable sprite exports in a real browser", () => {
       p.sources[0]!.blob.size,
     );
     await deleteSpriteProject(restored.id);
+  });
+  it("prefixes and flattens files for the resource center and keeps references valid", async () => {
+    const p = await fixture();
+    for (const mode of ["combined", "atlas", "sequence"] as const) {
+      const files = prefixSpriteAssetFiles(
+        await renderSpriteAssetFiles(p, [p.actions[0]!.id], mode, 2, 2),
+        "hero-",
+      );
+      expect(
+        Object.keys(files).every((name) => name.startsWith("hero-") && !name.includes("/")),
+      ).toBe(true);
+      const metadata = JSON.parse(strFromU8(files["hero-animation.json"]!));
+      const referenced: string[] = metadata.actions.flatMap(
+        (action: { image?: string; frames: { file?: string }[] }) =>
+          action.image ? [action.image] : action.frames.map((frame) => frame.file!),
+      );
+      expect(referenced.length).toBeGreaterThan(0);
+      for (const name of referenced) expect(files[name]).toBeDefined();
+    }
   });
   it("exports atlas rectangles and sequence pixels with matching alpha and motion", async () => {
     const p = await fixture();

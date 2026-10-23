@@ -562,3 +562,104 @@ describe("batch execution consistency", () => {
     expect(f.fetcher).toHaveBeenCalledTimes(1);
   });
 });
+const ref = (id: string, assetId: string) => ({ id, assetId, documentId: null });
+describe("batch style", () => {
+  const withStyle = (
+    s: ImageBatchState,
+    style: Pick<ImageBatchState["defaults"], "stylePrompt" | "styleReferences">,
+    tasks: ImageBatchTask[] = s.tasks,
+  ) =>
+    f.engine.command({
+      operation: "save",
+      batchId: s.id,
+      version: s.version,
+      name: s.name,
+      brief: s.brief,
+      defaults: { ...s.defaults, ...style },
+      tasks,
+    });
+  const sentPrompts = () =>
+    f.fetcher.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).prompt as string);
+  it("freezes the style at confirmation and reuses it unchanged for retries", async () => {
+    let s = await withStyle(await f.create(), { stylePrompt: "  flat pixel art  " }, [
+      f.task("one", 1),
+    ]);
+    expect((await f.engine.preflight(s.id)).issues).toEqual([]);
+    s = await f.confirm(s);
+    expect(s.executions[0]!.attempts[0]).toMatchObject({
+      prompt: "image one",
+      stylePrompt: "flat pixel art",
+    });
+    s = await f.settle(s.id);
+    expect(sentPrompts()).toEqual(["flat pixel art\n\nimage one"]);
+    expect((await f.repo.results({ batchId: s.id })).results[0]!.prompt).toBe(
+      "flat pixel art\n\nimage one",
+    );
+    // A later style edit applies to the next confirmation only, never to a retry of an old attempt.
+    s = await withStyle(s, { stylePrompt: "watercolor" });
+    s = await f.engine.command({
+      operation: "retry",
+      batchId: s.id,
+      version: s.version,
+      requestId: randomUUID(),
+      attemptIds: [s.executions[0]!.attempts[0]!.id],
+      mode: "regenerate",
+      acknowledgeUncertain: false,
+    });
+    expect(s.executions.at(-1)!.attempts[0]!.stylePrompt).toBe("flat pixel art");
+    s = await f.settle(s.id);
+    expect(sentPrompts()).toEqual(["flat pixel art\n\nimage one", "flat pixel art\n\nimage one"]);
+  });
+  it("places style references first, sends a shared image once and protects style assets", async () => {
+    const color = async (r: number) =>
+      sharp({ create: { width: 4, height: 4, channels: 4, background: { r, g: 9, b: 9 } } })
+        .png()
+        .toBuffer();
+    const style = await f.images.upload(await color(200), "style.png");
+    const own = await f.images.upload(await color(100), "own.png");
+    let s = await withStyle(await f.create(), { styleReferences: [ref("style", style.id)] }, [
+      { ...f.task("one", 1), references: [ref("own", own.id), ref("again", style.id)] },
+    ]);
+    const sql = await f.runtime.runPromise(
+      Effect.gen(function* () {
+        return yield* SqlClient.SqlClient;
+      }),
+    );
+    const refs = await Effect.runPromise(
+      sql<{ asset_id: string }>`SELECT asset_id FROM image_batch_asset_refs WHERE batch_id=${s.id}`,
+    );
+    expect(refs.map((r) => r.asset_id)).toContain(style.id);
+    s = await f.engine.command({
+      operation: "confirm",
+      batchId: s.id,
+      version: s.version,
+      requestId: randomUUID(),
+    });
+    expect(s.executions[0]!.attempts[0]!.references.map((r) => r.assetId)).toEqual([
+      style.id,
+      own.id,
+    ]);
+    await f.settle(s.id);
+    // A task that fits on its own but exceeds the request limit with the style is reported.
+    const distinct = await Promise.all(
+      Array.from({ length: 17 }, async (_, i) =>
+        f.images.upload(
+          await sharp({
+            create: { width: 4, height: 4, channels: 4, background: { r: i, g: 0, b: 0 } },
+          })
+            .png()
+            .toBuffer(),
+          i + ".png",
+        ),
+      ),
+    );
+    s = await withStyle(
+      await f.engine.get(s.id),
+      { styleReferences: distinct.slice(0, 8).map((a) => ref("s" + a.id, a.id)) },
+      [{ ...f.task("full", 1), references: distinct.slice(8).map((a) => ref("t" + a.id, a.id)) }],
+    );
+    expect((await f.engine.preflight(s.id)).issues.map((i) => i.message)).toEqual([
+      "Batch style and task references exceed 16 images.",
+    ]);
+  });
+});

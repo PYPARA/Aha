@@ -114,13 +114,54 @@ it("shows proposal differences without writing until Apply changes is clicked", 
   await page.getByRole("button", { name: "Preview changes", exact: true }).click();
   await expect.element(page.getByRole("dialog")).toHaveTextContent("12 → 11");
   expect(mocks.command).not.toHaveBeenCalled();
-  await page.getByRole("button", { name: "Apply changes", exact: true }).click();
+  await page.getByRole("button", { name: "Apply only", exact: true }).click();
   expect(mocks.command).toHaveBeenCalledWith({
     operation: "apply-proposal",
     batchId: "batch",
     version: 2,
     proposalId: "proposal",
   });
+});
+it("applies a proposal and asks the workspace to open the generation check", async () => {
+  batch.proposals = [
+    {
+      id: "proposal",
+      requestId: "request",
+      baseVersion: 2,
+      threadId: "thread",
+      turnId: "turn",
+      createdAt: new Date().toISOString(),
+      summary: "Rename the first task",
+      warnings: [],
+      status: "pending",
+      tasks: batch.tasks.map((task, index) => (index ? task : { ...task, name: "Renamed" })),
+    },
+  ];
+  const applied = { ...batch, version: 3 };
+  mocks.command.mockResolvedValueOnce(applied);
+  const onApplied = vi.fn();
+  await mount(<BatchProposals batch={batch} onError={onError} onApplied={onApplied} />);
+  await page.getByRole("button", { name: "Preview changes", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  // The comparison is readable fields, not raw JSON.
+  await expect.element(dialog).toHaveTextContent("Renamed");
+  await expect.element(dialog.getByText('"references"')).not.toBeVisible();
+  await page.getByRole("button", { name: "Apply and review generation", exact: true }).click();
+  await vi.waitFor(() => expect(onApplied).toHaveBeenCalledWith(applied, true));
+  expect(mocks.command).toHaveBeenCalledTimes(1);
+  expect(mocks.command.mock.calls[0]![0]).toMatchObject({ operation: "apply-proposal" });
+});
+it("opens the generation check for the requested version without confirming", async () => {
+  const opened = vi.fn();
+  batch = { ...batch, defaults: { ...batch.defaults, stylePrompt: "Flat vector icons" } };
+  await mount(
+    <BatchExecution batch={batch} onError={onError} reviewVersion={2} onReviewOpened={opened} />,
+  );
+  await expect.element(page.getByRole("dialog")).toHaveTextContent("Confirm image generation");
+  // The summary shows the prompt that is actually sent: batch style first, then the task.
+  await expect.element(page.getByRole("dialog")).toHaveTextContent("Flat vector icons Prompt 0");
+  expect(opened).toHaveBeenCalledTimes(1);
+  expect(mocks.command).not.toHaveBeenCalled();
 });
 it("preflights 6 tasks and 11 images, shows channel names and sends exactly one explicit confirmation", async () => {
   await mount(<BatchExecution batch={batch} onError={onError} />);

@@ -96,7 +96,6 @@ export const resourceCopy: Record<string, string> = {
   "Replace all tags": "替换全部标签",
   "This replaces every selected resource's tags, including removing tags not listed here.":
     "这会替换所选素材的全部标签，并移除未在此列出的标签。",
-  Original: "原名",
   "Original name": "原名",
   Result: "结果",
   "Preview changes": "预览修改",
@@ -106,7 +105,6 @@ export const resourceCopy: Record<string, string> = {
   "Retry failed items": "重试失败项",
   "Unchanged or included by a parent folder": "无需修改或已包含在父目录中",
   Cancelled: "已取消",
-  succeeded: "成功",
   skipped: "未变化",
   failed: "失败",
   cancelled: "已取消",

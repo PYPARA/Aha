@@ -912,12 +912,10 @@ it("claims transfers once in StrictMode and retries only rejected files", async 
     .fn<(files: File[]) => Promise<ResourceReceiveResult>>()
     .mockResolvedValueOnce({ accepted: [0], rejected: [{ index: 1, error: "capacity" }] })
     .mockResolvedValueOnce({ accepted: [0], rejected: [] });
-  queueResourceTransfer(
-    "drawing",
-    [new File(["a"], "a.png"), new File(["b"], "b.png")],
-    ["a", "b"],
-    "test",
-  );
+  queueResourceTransfer("drawing", [new File(["a"], "a.png"), new File(["b"], "b.png")], {
+    resourceIds: ["a", "b"],
+    libraryId: "test",
+  });
   await mount(
     <StrictMode>
       <Receiver receive={receive} />

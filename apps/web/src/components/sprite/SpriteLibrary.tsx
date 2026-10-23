@@ -14,8 +14,10 @@ import { useNavigate } from "@tanstack/react-router";
 import type { SpriteLibrarySnapshot, SpriteProjectSummary } from "@synara/contracts/spriteLibrary";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "../ui/button";
+import { confirmDialog } from "../ui/confirm-dialog";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
 import { newSpriteProject, type SpriteProject } from "./spriteModel";
+import { retargetResourceTransfer, useResourceTransfer } from "../resources/resourceLibrary";
 import { importSpriteProject } from "./spriteFiles";
 import {
   listSpriteProjects,
@@ -59,6 +61,7 @@ function ProjectThumbnail({ id }: { id: string }) {
     </div>
   );
 }
+const NEW_SPRITE_TARGET = "sprite:new";
 export default function SpriteLibrary({ projectId }: { projectId?: string | undefined }) {
   const tr = useAhaTranslation(),
     navigate = useNavigate();
@@ -110,6 +113,20 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
       setBusy(false);
     }
   };
+  // Images sent to "New sprite project" wait here until the user names the project.
+  const pendingTransfer = useResourceTransfer((s) => s.pending);
+  const awaitingNewProject =
+    !projectId &&
+    pendingTransfer?.target === NEW_SPRITE_TARGET &&
+    pendingTransfer.status === "queued";
+  useEffect(() => {
+    if (awaitingNewProject) setDialog((current) => current ?? { id: null, name: "" });
+  }, [awaitingNewProject]);
+  const closeDialog = () => {
+    setDialog(null);
+    if (useResourceTransfer.getState().pending?.target === NEW_SPRITE_TARGET)
+      useResourceTransfer.setState({ pending: null });
+  };
   const open = async (id: string) => {
     await navigate({ to: "/sprite-animation", search: { projectId: id } });
   };
@@ -119,11 +136,14 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
   const remove = async (p: SpriteProjectSummary) => {
     if (
       !p.deleting &&
-      !window.confirm(
-        tr(
-          "Delete this sprite project and its generation records? Conversation history will be kept.",
+      !(await confirmDialog({
+        title: tr('Delete sprite project "{name}"?').replace("{name}", p.name),
+        description: tr(
+          "Deletes the project, its frames and generation records. This cannot be undone. Conversation history is kept.",
         ),
-      )
+        confirmLabel: tr("Delete"),
+        destructive: true,
+      }))
     )
       return;
     await run(async () => {
@@ -285,7 +305,7 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
       <Dialog
         open={!!dialog}
         onOpenChange={(value) => {
-          if (!value && !busy) setDialog(null);
+          if (!value && !busy) closeDialog();
         }}
       >
         <DialogPopup>
@@ -349,7 +369,7 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
             </p>
           )}
           <DialogFooter>
-            <Button variant="outline" disabled={busy} onClick={() => setDialog(null)}>
+            <Button variant="outline" disabled={busy} onClick={closeDialog}>
               {tr("Cancel")}
             </Button>
             <Button
@@ -392,6 +412,9 @@ export default function SpriteLibrary({ projectId }: { projectId?: string | unde
                           }),
                     };
                     await saveSpriteProject(p);
+                    const transfer = useResourceTransfer.getState().pending;
+                    if (transfer?.target === NEW_SPRITE_TARGET)
+                      retargetResourceTransfer(transfer.transferId, "sprite:" + p.id);
                     setDialog(null);
                     await open(p.id);
                   }

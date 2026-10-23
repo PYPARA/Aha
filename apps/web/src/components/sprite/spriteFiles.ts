@@ -346,6 +346,31 @@ export async function exportSpriteAssets(
   signal?: AbortSignal,
   progress?: (value: string) => void,
 ) {
+  const files = await renderSpriteAssetFiles(
+    project,
+    actionIds,
+    mode,
+    columns,
+    gap,
+    signal,
+    progress,
+  );
+  const archive = await pack(files);
+  signal?.throwIfAborted();
+  return archive;
+}
+export const exportSpriteFileArchive = (files: Record<string, Uint8Array>) => pack(files);
+
+/** Export files keyed by name: PNG frames or atlases plus animation.json. */
+export async function renderSpriteAssetFiles(
+  project: SpriteProject,
+  actionIds: string[],
+  mode: SpriteExportMode,
+  columns: number,
+  gap: number,
+  signal?: AbortSignal,
+  progress?: (value: string) => void,
+) {
   const layout = spriteExportLayout(project, actionIds, mode, columns, gap);
   if (!layout) throw new Error("No frames to export.");
   signal?.throwIfAborted();
@@ -415,9 +440,29 @@ export async function exportSpriteAssets(
   if (combined) files["atlas.png"] = new Uint8Array(await (await png(combined)).arrayBuffer());
   files["animation.json"] = strToU8(JSON.stringify(metadata, null, 2));
   signal?.throwIfAborted();
-  const archive = await pack(files);
-  signal?.throwIfAborted();
-  return archive;
+  return files;
+}
+
+/**
+ * Prefixes and flattens every exported file so several projects can share one resource
+ * folder, and rewrites animation.json image references to match.
+ */
+export function prefixSpriteAssetFiles(files: Record<string, Uint8Array>, prefix: string) {
+  // Resource libraries store flat file names, so sequence folders become part of the name.
+  const rename = (name: string) => prefix + name.replaceAll("/", "-");
+  const metadata = JSON.parse(strFromU8(files["animation.json"]!)) as {
+    actions: { image?: string; frames: { file?: string }[] }[];
+  };
+  for (const action of metadata.actions) {
+    if (action.image) action.image = rename(action.image);
+    for (const frame of action.frames) if (frame.file) frame.file = rename(frame.file);
+  }
+  return Object.fromEntries(
+    Object.entries(files).map(([name, bytes]) => [
+      rename(name),
+      name === "animation.json" ? strToU8(JSON.stringify(metadata, null, 2)) : bytes,
+    ]),
+  );
 }
 
 /** Preview uses the same frame renderer and packing order as the resource exporter. */

@@ -297,7 +297,7 @@ export function ResourceToolbar({
               }
               options={[
                 { value: "all", label: tr("All sources") },
-                ...["image-batch", "drawing", "chat", "local", "game"].map((value) => ({
+                ...["image-batch", "sprite", "drawing", "chat", "local", "game"].map((value) => ({
                   value,
                   label: tr(value),
                 })),

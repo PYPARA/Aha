@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type {
   ImageBatchAttempt,
   ImageBatchCommand,
@@ -8,12 +8,15 @@ import type {
 import {
   imageBatchMissingCount,
   imageBatchRetryLineage,
+  imageBatchComposePrompt,
   imageBatchTaskConfiguration,
+  imageBatchTaskReferences,
   type ImageGenerationParameters,
 } from "@synara/contracts";
 import { useImageProviders } from "../drawing/useDrawing";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "../ui/button";
+import { confirmDialog } from "../ui/confirm-dialog";
 import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
 import { batchApi, useBatchCommand } from "./useImageBatches";
@@ -38,9 +41,14 @@ type Confirmation = {
 export function BatchExecution({
   batch,
   onError,
+  reviewVersion,
+  onReviewOpened,
 }: {
   batch: ImageBatchState;
   onError: (e: unknown) => void;
+  /** Opens the generation check once this draft version is loaded (after "Apply and review"). */
+  reviewVersion?: number | null;
+  onReviewOpened?: () => void;
 }) {
   const tr = useAhaTranslation(),
     command = useBatchCommand();
@@ -86,7 +94,8 @@ export function BatchExecution({
             .map((t) => ({
               ...t,
               ...imageBatchTaskConfiguration(t, batch.defaults),
-              references: t.references.length,
+              prompt: imageBatchComposePrompt(batch.defaults.stylePrompt, t.prompt),
+              references: imageBatchTaskReferences(t, batch.defaults.styleReferences).length,
             })),
         });
       } else {
@@ -153,15 +162,28 @@ export function BatchExecution({
       setBusy(false);
     }
   };
+  const reviewRequested = reviewVersion != null && reviewVersion === batch.version;
+  // prepare reads the batch prop, which already carries the applied version here.
+  const openReview = useEffectEvent(() => {
+    onReviewOpened?.();
+    if (!active && !batch.archived) void prepare();
+  });
+  useEffect(() => {
+    if (reviewRequested) openReview();
+  }, [reviewRequested]);
   const control = async (operation: "pause" | "resume" | "cancel") => {
     if (!active) return;
     if (
       operation === "cancel" &&
-      !window.confirm(
-        tr(
-          "Cancel all remaining items in this execution? Sent requests may have already executed or incurred charges. Returned images are retained.",
+      !(await confirmDialog({
+        title: tr("Cancel remaining items?"),
+        description: tr(
+          "Items not yet sent are cancelled. Sent requests may have already executed or incurred charges. Returned images are retained.",
         ),
-      )
+        confirmLabel: tr("Cancel remaining"),
+        cancelLabel: tr("Keep running"),
+        destructive: true,
+      }))
     )
       return;
     setBusy(true);
@@ -234,13 +256,15 @@ export function BatchExecution({
           {tr(
             "A channel is blocked by authentication, quota or rate limits. Resolve the channel issue and choose Continue.",
           )}{" "}
-          {active?.blockedProviders?.join(", ")}
+          {active?.blockedProviders
+            ?.map((id) => providers.data?.find((provider) => provider.id === id)?.name ?? id)
+            .join(", ")}
         </p>
       )}
       {latest && (
         <details>
           <summary className="cursor-pointer py-1">
-            {tr("Frozen execution and attempts")} · {new Date(latest.createdAt).toLocaleString()}
+            {tr("Generation records")} · {new Date(latest.createdAt).toLocaleString()}
           </summary>
           <div className="max-h-80 space-y-2 overflow-auto py-2">
             {attempts.map((a) => (
@@ -333,12 +357,6 @@ export function BatchExecution({
                     .join(", ") || "—"}
                 </p>
                 <p>
-                  {tr("Draft version")}: {confirm.command.version}
-                  {latest
-                    ? " · " + tr("Previous execution version") + ": " + latest.draftVersion
-                    : ""}
-                </p>
-                <p>
                   {tr("Estimated cost")}: {tr("Unknown")}
                 </p>
                 {confirm.summaries?.map((task) => (
@@ -362,6 +380,15 @@ export function BatchExecution({
                     )}
                   </p>
                 )}
+                <details className="text-ui-xs text-muted-foreground">
+                  <summary className="cursor-pointer">{tr("Diagnostic details")}</summary>
+                  <p className="mt-1">
+                    {tr("Draft version")}: {confirm.command.version}
+                    {latest
+                      ? " · " + tr("Previous execution version") + ": " + latest.draftVersion
+                      : ""}
+                  </p>
+                </details>
                 {[...new Set(confirm.issues)].map((issue) => (
                   <p role="alert" key={issue} className="text-destructive">
                     {issue}
@@ -427,7 +454,7 @@ function AttemptRow({
           </p>
           {a.error && <p className="break-words text-destructive">{a.error}</p>}
           <details className="mt-1 text-ui-xs text-muted-foreground">
-            <summary className="cursor-pointer">{tr("Frozen parameters")}</summary>
+            <summary className="cursor-pointer">{tr("Diagnostic details")}</summary>
             <pre className="overflow-auto whitespace-pre-wrap break-all">
               {JSON.stringify(
                 {

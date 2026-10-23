@@ -100,14 +100,16 @@ interface ResourceTransfer {
   transferId: string;
   target: string;
   files: File[];
+  /** Resource IDs for Resource Center files; other senders get positional file IDs. */
   resourceIds: string[];
-  libraryId: string;
+  /** Null when the files did not come from a resource library (batch results, drawings). */
+  libraryId: string | null;
   status: "queued" | "receiving";
 }
 interface ResourceTransferResult {
   transferId: string;
   target: string;
-  libraryId: string;
+  libraryId: string | null;
   acceptedIds: string[];
   rejected: { id: string; error: string; file: File }[];
 }
@@ -115,20 +117,37 @@ export const useResourceTransfer = create<{
   pending: ResourceTransfer | null;
   lastResult: ResourceTransferResult | null;
 }>(() => ({ pending: null, lastResult: null }));
+/**
+ * Hands files to the module registered for `target` ("drawing", a thread ID, "sprite:<id>",
+ * "sprite:new" or "image-batch:<id>"); the destination claims them with useResourceAttachments.
+ */
 export function queueResourceTransfer(
   target: string,
   files: File[],
-  resourceIds: string[],
-  libraryId: string,
+  origin?: { resourceIds: string[]; libraryId: string },
 ) {
   if (useResourceTransfer.getState().pending)
     throw new Error("Finish the previous resource transfer first.");
   const transferId = crypto.randomUUID();
   useResourceTransfer.setState({
-    pending: { transferId, target, files, resourceIds, libraryId, status: "queued" },
+    pending: {
+      transferId,
+      target,
+      files,
+      resourceIds: origin?.resourceIds ?? files.map((_, index) => "file:" + index),
+      libraryId: origin?.libraryId ?? null,
+      status: "queued",
+    },
     lastResult: null,
   });
   return transferId;
+}
+/** Points a still-queued transfer at a destination created after it was queued. */
+export function retargetResourceTransfer(transferId: string, target: string) {
+  const pending = useResourceTransfer.getState().pending;
+  if (pending?.transferId !== transferId || pending.status !== "queued") return false;
+  useResourceTransfer.setState({ pending: { ...pending, target } });
+  return true;
 }
 export function retryResourceTransfer(): string | null {
   const previous = useResourceTransfer.getState().lastResult;
@@ -136,8 +155,9 @@ export function retryResourceTransfer(): string | null {
   queueResourceTransfer(
     previous.target,
     previous.rejected.map((item) => item.file),
-    previous.rejected.map((item) => item.id),
-    previous.libraryId,
+    previous.libraryId
+      ? { resourceIds: previous.rejected.map((item) => item.id), libraryId: previous.libraryId }
+      : undefined,
   );
   return previous.target;
 }

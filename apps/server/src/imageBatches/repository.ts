@@ -99,6 +99,7 @@ export class ImageBatchRepository {
     const refs = new Set([
       ...state.sources.flatMap((s) => (s.asset ? [s.asset.id] : [])),
       ...state.tasks.flatMap((t) => t.references.map((r) => r.assetId)),
+      ...(state.defaults.styleReferences ?? []).map((r) => r.assetId),
       ...state.proposals
         .filter((p) => p.status === "pending")
         .flatMap((p) => p.tasks.flatMap((t) => t.references.map((r) => r.assetId))),

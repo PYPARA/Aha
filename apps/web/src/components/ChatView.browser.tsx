@@ -3477,10 +3477,13 @@ describe("ChatView transcript geometry (full app)", () => {
         path: "../../../../output/playwright/sprite-workbench.png",
         element: page.getByTestId("sprite-workbench"),
       });
-      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-      try {
+      {
         await page.getByRole("button", { name: "Project options", exact: true }).click();
         await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
+        // Deleting asks through the shared confirmation dialog, which names the project.
+        const confirmation = page.getByRole("alertdialog");
+        await expect.element(confirmation).toHaveTextContent("Delete sprite project");
+        await confirmation.getByRole("button", { name: "Delete", exact: true }).click();
         await expect.element(page.getByTestId("sprite-library")).toBeVisible();
         expect(projects.size).toBe(0);
         expect(fixture.snapshot.threads.some((t) => t.id === threadId)).toBe(true);
@@ -3489,8 +3492,6 @@ describe("ChatView transcript geometry (full app)", () => {
             page.getByText("No sprite projects yet. Create a project or import a project package."),
           )
           .toBeVisible();
-      } finally {
-        confirm.mockRestore();
       }
     } finally {
       restoreSendApi();

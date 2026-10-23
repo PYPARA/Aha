@@ -45,7 +45,7 @@ const Metadata = z.object({
       deleted: z.boolean().optional(),
       origin: z
         .object({
-          kind: z.enum(["drawing", "chat", "local", "game", "image-batch"]),
+          kind: z.enum(["drawing", "chat", "local", "game", "image-batch", "sprite"]),
           threadId: z.string().optional(),
           messageId: z.string().optional(),
           jobId: z.string().optional(),
@@ -53,6 +53,7 @@ const Metadata = z.object({
           taskId: z.string().optional(),
           attemptId: z.string().optional(),
           resultId: z.string().optional(),
+          projectId: z.string().optional(),
           prompt: z.string().optional(),
           model: z.string().optional(),
           parameters: z.record(z.string(), z.unknown()).optional(),

@@ -399,8 +399,13 @@ it.skipIf(!enabled)(
       server = startServer();
       await healthy(`http://127.0.0.1:${serverPort}/`);
       await page.goto(`http://127.0.0.1:${webPort}/#/image-batches?batchId=${batch.id}`);
-      await page.getByRole("button", { name: /^Preview changes$|^预览变更$/ }).click();
-      await page.getByRole("button", { name: /^Apply changes$|^应用变更$/ }).click();
+      await page.getByRole("button", { name: /^Preview changes$|^预览修改$/ }).click();
+      await page
+        .getByRole("button", { name: /^Apply and review generation$|^应用并检查生成$/ })
+        .waitFor();
+      await page.waitForTimeout(400); // let the dialog finish opening
+      await page.screenshot({ path: path.join(artifacts, "proposal-preview.png") });
+      await page.getByRole("button", { name: /^Apply only$|^仅应用$/ }).click();
       batch = await current(page, batch.id);
       expect(batch.tasks).toHaveLength(6);
       // Row-level count change is a user edit of the versioned draft; defaults remain two.
@@ -463,13 +468,13 @@ it.skipIf(!enabled)(
         .first()
         .click();
       expect(library.list({ path: "" }).total).toBe(0);
-      await page.getByRole("button", { name: /^Mark adopted$|^标记选用$/ }).click();
-      await page.getByRole("button", { name: /^Add to resource center$|^添加到资源中心$/ }).click();
+      await page.getByRole("button", { name: /^Mark adopted$|^标记采用$/ }).click();
+      await page.getByRole("button", { name: /^Add to resource center$|^加入资源中心$/ }).click();
       await page.getByRole("dialog").getByRole("combobox").click();
       await page.getByRole("option", { name: /^Library root$|^资源库根目录$/ }).click();
       await page
         .getByRole("dialog")
-        .getByRole("button", { name: /^Add to resource center$|^添加到资源中心$/ })
+        .getByRole("button", { name: /^Add to resource center$|^加入资源中心$/ })
         .click();
       await expect
         .poll(
@@ -491,6 +496,14 @@ it.skipIf(!enabled)(
       await page.getByRole("button", { name: /^Open image batch$|^打开生图批次$/ }).click();
       await page.getByRole("tab", { name: /^Generated results$|^生成结果$/ }).waitFor();
       await page.screenshot({ path: path.join(artifacts, "batch-results.png") });
+      await page.getByRole("button", { name: /^Batch settings$|^批次设置$/ }).click();
+      await page
+        .getByRole("dialog")
+        .getByText(/^Batch style$|^批次风格$/)
+        .waitFor();
+      await page.waitForTimeout(400); // let the dialog finish opening
+      await page.screenshot({ path: path.join(artifacts, "batch-style-settings.png") });
+      await page.keyboard.press("Escape");
       await stop(server);
       server = startServer();
       await healthy(`http://127.0.0.1:${serverPort}/`);

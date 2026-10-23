@@ -8,27 +8,20 @@ export const imageBatchCopy: Record<string, string> = {
   "Resource is unavailable": "资源不可用",
   "Resource copy receipts could not be read. Originals are retained.":
     "资源入库回执读取失败，已保留原图。",
-  "Batch settings changed elsewhere. Keep your local settings and use the latest task list?":
-    "批次设置已在其他位置变化。保留本地设置并使用最新任务清单？",
   "Select one attempt per task to retry.": "每项任务请选择一条尝试记录进行重试。",
   "Finish or recover pending resource copies before clearing batch originals.":
     "请先完成或恢复待处理的资源入库操作，再清理批次原图。",
 
   "Add reference image": "添加参考图",
-  "At most 16 reference images are allowed.": "最多添加 16 张参考图。",
   Running: "执行中",
   Selected: "已选",
   "Previous execution version": "上次执行版本",
   "Reload base; keep my edits": "重新读取基线，保留我的编辑",
-  "This task was changed or removed elsewhere. Keep your local edit and overwrite this task on the latest draft? Other tasks will be preserved.":
-    "这项任务已在其他位置修改或移除。保留本地编辑并覆盖最新草稿中的该任务？其他任务将保留最新版本。",
   "Batch record removed": "批次记录已移除",
   "Back to batches": "返回批次列表",
   "Clear batch originals": "清理批次原图",
   "Original images are retained. Clearing originals removes batch results and source snapshots; collected resources and shared references remain.":
     "批次原图仍保留。清理会移除批次结果和资料快照，已入库文件及其他共享引用保留。",
-  "Permanently clear this removed batch's originals and source snapshots? This cannot be undone. Collected resources remain.":
-    "永久清理已移除批次的原图和资料快照？此操作不可撤销。已入库文件会保留。",
   "Batch images": "批量生图",
   "New batch": "新建批次",
   "Untitled batch": "未命名批次",
@@ -76,18 +69,12 @@ export const imageBatchCopy: Record<string, string> = {
   "Select task": "选择任务",
   "Enable selected": "启用所选",
   "Disable selected": "停用所选",
-  Enabled: "启用",
   "Images per selected task": "所选任务的图片张数",
   "Set image count": "设置张数",
   "Move task up": "上移任务",
   "Move task down": "下移任务",
   Duplicate: "复制任务",
-  Copy: "副本",
-  "Remove this draft task? Existing attempts and images are retained.":
-    "移除这项草稿任务？已有尝试记录和图片会保留。",
   "Restore batch": "恢复批次",
-  "Remove this batch record? Batch originals and collected files are retained.":
-    "移除该批次记录？批次原图和已入库文件会保留。",
   "This batch is archived. Restore it to generate more images.": "该批次已归档。恢复后可继续出图。",
   "Discuss requirements and attach documents or reference images. AI prepares changes for review before generation.":
     "通过对话说明需求，添加文档或参考图。AI 会先准备变更方案，审阅后再确认出图。",
@@ -95,7 +82,6 @@ export const imageBatchCopy: Record<string, string> = {
   "Attachments use the current conversation model and file tools. Unread files must be reported.":
     "附件沿用当前会话模型和文件工具。未读取的资料会明确报告。",
   "Creating...": "正在创建…",
-  "Chat workspace is not ready. Try again after connecting.": "聊天工作区尚未就绪，请连接后重试。",
   "Conversation changed. Reload before sending.": "会话绑定已变化，请刷新后发送。",
   "Source snapshots": "资料快照",
   "Source documents": "资料文档",
@@ -106,11 +92,9 @@ export const imageBatchCopy: Record<string, string> = {
   "Attached; not yet reported read": "已添加，尚未报告读取",
   "Open source conversation": "打开来源会话",
   "Pending changes": "待应用变更",
-  "Preview changes": "预览变更",
   "Review task changes": "审阅任务变更",
-  "Apply changes": "应用变更",
-  "Applying changes updates the draft only. Generation requires a separate confirmation.":
-    "应用变更只更新草稿。提交生图还需单独确认。",
+  "Applying updates the task list. Generation still needs your confirmation in the next step.":
+    "应用后更新任务清单；生成仍需在下一步确认。",
   "Order changed": "顺序已调整",
   "Planned images": "计划图片数",
   Changed: "修改",
@@ -136,8 +120,7 @@ export const imageBatchCopy: Record<string, string> = {
   "Cancel remaining": "取消剩余",
   "Tasks finished": "已结束任务",
   "Images saved": "已保存图片",
-  "Frozen execution and attempts": "冻结执行与尝试记录",
-  "Frozen parameters": "冻结参数",
+  "Generation records": "生成记录",
   "Previous executions": "历史执行",
   "Fill missing images": "补齐缺失图片",
   "Regenerate selected": "重新生成所选",
@@ -149,8 +132,6 @@ export const imageBatchCopy: Record<string, string> = {
     "将创建新的生成尝试，保留已有候选。",
   "I checked the uncertain requests. Resubmitting may execute and charge again.":
     "我已核实待核实请求。重新提交可能再次执行并计费。",
-  "Cancel all remaining items in this execution? Sent requests may have already executed or incurred charges. Returned images are retained.":
-    "取消本次执行中的剩余项？已发送请求可能已执行或计费，已返回图片会保留。",
   "A channel is blocked by authentication, quota or rate limits. Resolve the channel issue and choose Continue.":
     "渠道因认证、额度或限流问题停止派发。处理渠道问题后点击「继续」。",
   "Configure an image channel before generation.": "请先在设置中配置生图渠道。",
@@ -159,7 +140,6 @@ export const imageBatchCopy: Record<string, string> = {
   queued: "排队中",
   running: "生成中",
   saving: "保存中",
-  succeeded: "成功",
   partial: "部分完成",
   failed: "失败",
   cancelled: "已取消",
@@ -168,21 +148,19 @@ export const imageBatchCopy: Record<string, string> = {
   "All tasks": "全部任务",
   "Result filter": "筛选结果",
   "Result task": "结果所属任务",
-  Adopted: "已选用",
-  "Not adopted": "未选用",
+  "Not adopted": "未采用",
   "Not collected": "未入库",
   Collected: "已入库",
   "No image results in this view.": "当前筛选下没有生成结果。",
   "Multiple selection": "多选",
   "Select result": "选择结果",
-  "Mark adopted": "标记选用",
-  "Unmark adopted": "取消选用",
+  "Mark adopted": "标记采用",
+  "Unmark adopted": "取消采用",
   "Image result details": "生成结果详情",
   "Compare candidates": "对比候选",
   "Original results are retained in this batch.": "原始结果保存在所属批次中。",
   "Export selected": "导出所选",
   "Continue in drawing": "到绘图继续修改",
-  "Replace the existing drawing draft with this selected image?": "使用所选图片替换现有绘图草稿？",
   "Locate in resource center": "在资源中心定位",
   "Organize as image batch": "整理为生图批次",
   "Text to bring into the batch": "带入批次的文本",
@@ -200,7 +178,7 @@ export const imageBatchCopy: Record<string, string> = {
   "All sources": "全部来源",
   "image-batch": "批量生图",
   "Open image batch": "打开生图批次",
-  "System selection": "系统选用状态",
+  "System selection": "采用状态",
   "Saving batch results": "正在入库批次结果",
   "Retry failed copies": "重试失败项",
   "Choose destination again": "重新选择位置",
@@ -213,4 +191,45 @@ export const imageBatchCopy: Record<string, string> = {
   tasks: "项任务",
   images: "张图片",
   references: "张参考图",
+  'Remove batch record "{name}"?': "移除批次记录“{name}”？",
+  "The batch leaves the list. Original images and files already added to the resource center are kept, and you can still clear the originals afterwards.":
+    "批次将从列表中移除。原图和已加入资源中心的文件会保留，之后仍可单独清理原图。",
+  "Clear batch originals?": "清理批次原图？",
+  "Permanently deletes this removed batch's original images and source snapshots. This cannot be undone. Files already added to the resource center remain.":
+    "将永久删除这个已移除批次的原图和资料快照，无法撤销。已加入资源中心的文件会保留。",
+  "Clear originals": "清理原图",
+  'Remove task "{name}"?': "移除任务“{name}”？",
+  "The task leaves the draft. Images it already generated are kept in the results.":
+    "任务将从草稿中移除，已生成的图片仍保留在结果中。",
+  "This task changed elsewhere": "此任务已在其他位置修改",
+  "Keep your local edit and overwrite this task on the latest draft? Other tasks keep their latest version.":
+    "保留本地编辑，并覆盖最新草稿中的此任务？其他任务保持最新版本。",
+  "Keep my edit": "保留我的编辑",
+  "Batch settings changed elsewhere": "批次设置已在其他位置修改",
+  "Keep your local settings and use the latest task list?": "保留本地设置，并使用最新任务清单？",
+  "Keep my settings": "保留我的设置",
+  "Replace the drawing draft?": "替换绘图草稿？",
+  "The current drawing prompt and reference images are replaced by this result. The batch result itself is kept.":
+    "当前绘图提示词和参考图将替换为这张结果，批次结果本身保留。",
+  "Replace draft": "替换草稿",
+  "Cancel remaining items?": "取消剩余项目？",
+  "Items not yet sent are cancelled. Sent requests may have already executed or incurred charges. Returned images are retained.":
+    "尚未发送的项目将被取消。已发送的请求可能已经执行或计费，已返回的图片会保留。",
+  "Keep running": "继续运行",
+  "{name} copy": "{name} 副本",
+  "Apply only": "仅应用",
+  "Apply and review generation": "应用并检查生成",
+  "Only settings without a summary changed.": "仅修改了未在摘要中列出的设置。",
+  "At most {count} reference images are allowed.": "最多添加 {count} 张参考图。",
+  "Batch style adds {count} reference images before these.":
+    "批次风格会在这些参考图前加入 {count} 张风格参考图。",
+  "Batch style": "批次风格",
+  "Style description": "风格描述",
+  "Style reference images": "风格参考图",
+  "Applied before every task prompt when you confirm generation. Leave empty to use task prompts only.":
+    "确认生成时放在每个任务提示词之前；留空则只使用任务提示词。",
+  "Uses batch style": "使用批次风格",
+  "Use in batch": "用于批量",
+  "images will be added to the batch style reference images.": "张图片将加入批次风格参考图。",
+  "Some images were not added": "部分图片未能加入",
 };

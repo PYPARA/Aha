@@ -123,4 +123,14 @@ export const spriteV5Copy: Record<string, string> = {
     "任务数据已部分恢复，请重试读取或根据诊断恢复后再修改生成状态。",
   "Confirm a baseline anchor first.": "请先确认基准帧锚点。",
   "Frame is outside its source image.": "裁切范围超出了源图。",
+  'Delete sprite project "{name}"?': "删除精灵项目“{name}”？",
+  "Deletes the project, its frames and generation records. This cannot be undone. Conversation history is kept.":
+    "将删除工程及其帧和生成记录，无法撤销。会话历史会保留。",
+  "Corrected from original": "已在原图基础上修正",
+  "Original slicing": "原始切帧",
+  sprite: "精灵动画",
+  "Use in sprite": "用于精灵",
+  "images will be added to the project's image materials.": "张图片将加入工程的图片素材。",
+  "Animation resources added to the resource center keep this project as their source.":
+    "加入资源中心的动画资源会记录本工程为来源。",
 };

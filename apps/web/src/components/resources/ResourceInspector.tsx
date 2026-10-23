@@ -196,6 +196,20 @@ export function ResourceInspector({
                     </Button>
                   </>
                 )}
+                {entry.origin.kind === "sprite" && entry.origin.projectId ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      void navigate({
+                        to: "/sprite-animation",
+                        search: { projectId: entry.origin!.projectId! },
+                      })
+                    }
+                  >
+                    {tr("Open sprite project")}
+                  </Button>
+                ) : null}
                 {entry.origin.threadId ? (
                   <Button
                     variant="outline"

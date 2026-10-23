@@ -4,11 +4,17 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "../ui/button";
+import { confirmDialog } from "../ui/confirm-dialog";
 import { OptionSelect } from "../ui/option-select";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
 import { PreviewSurface } from "../ui/preview-surface";
 import { imageUrl, drawingApi } from "../drawing/useDrawing";
 import { downloadUrlAsBlob } from "~/lib/browserDownload";
+import {
+  fetchImageFile,
+  sendFilesToTarget,
+  TransferTargetDialog,
+} from "../resources/transferTargets";
 import { useBatchCommand, useBatchResults } from "./useImageBatches";
 import {
   collectResources,
@@ -41,6 +47,7 @@ export function BatchResults({
   const [taskId, setTaskId] = useState("");
   const [selection, setSelection] = useState(emptyResourceSelection);
   const [multiple, setMultiple] = useState(false);
+  const [spriteTarget, setSpriteTarget] = useState(false);
   const [preview, setPreview] = useState<ImageBatchResult[]>([]);
   const previewTrigger = useRef<HTMLElement | null>(null);
   const focusedLink = useRef<string | null>(null);
@@ -145,7 +152,15 @@ export function BatchResults({
     sessionStorage.setItem("drawing:window:v1", id);
     const existing = await drawingApi().getDraft({ id });
     if (existing && (existing.prompt.trim() || existing.inputAssetIds.length)) {
-      if (!window.confirm(tr("Replace the existing drawing draft with this selected image?")))
+      if (
+        !(await confirmDialog({
+          title: tr("Replace the drawing draft?"),
+          description: tr(
+            "The current drawing prompt and reference images are replaced by this result. The batch result itself is kept.",
+          ),
+          confirmLabel: tr("Replace draft"),
+        }))
+      )
         return;
     }
     const attempt = batch.executions.flatMap((e) => e.attempts).find((a) => a.id === r.attemptId);
@@ -306,7 +321,7 @@ export function BatchResults({
                     )}
                   </span>
                   <span className="block truncate text-ui-xs text-muted-foreground">
-                    {new Date(r.createdAt).toLocaleString()} · {r.attemptId.slice(0, 8)}
+                    {new Date(r.createdAt).toLocaleString()}
                   </span>
                 </button>
               ))}
@@ -382,7 +397,26 @@ export function BatchResults({
               {tr("Continue in drawing")}
             </Button>
           )}
+          <Button size="sm" variant="ghost" onClick={() => setSpriteTarget(true)}>
+            {tr("Use in sprite")}
+          </Button>
         </div>
+      )}
+      {spriteTarget && (
+        <TransferTargetDialog
+          module="sprite"
+          count={chosen.length}
+          onClose={() => setSpriteTarget(false)}
+          onSend={async (target) =>
+            sendFilesToTarget(
+              navigate,
+              target,
+              await Promise.all(
+                chosen.map((r) => fetchImageFile(imageUrl(r.asset), resultFilename(r))),
+              ),
+            )
+          }
+        />
       )}
       <Dialog
         open={preview.length > 0}
@@ -421,7 +455,8 @@ export function BatchResults({
                   {r.taskName} · {r.position + 1}
                 </h3>
                 <p className="break-all text-ui-xs text-muted-foreground">
-                  {r.model} · {r.asset.width}×{r.asset.height} · {r.attemptId}
+                  {r.model} · {r.asset.width}×{r.asset.height} ·{" "}
+                  {new Date(r.createdAt).toLocaleString()}
                 </p>
                 <p className="whitespace-pre-wrap text-ui-sm">{r.prompt}</p>
                 {r.collection && (

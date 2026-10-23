@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { RouteSurfaceHeader } from "../RouteSurface";
 import { Button } from "../ui/button";
+import { confirmDialog } from "../ui/confirm-dialog";
 import { Input } from "../ui/input";
 import { Alert } from "../ui/alert";
 import { WorkAreaPanel } from "../ui/work-area-panel";
@@ -336,14 +337,17 @@ export default function SpriteWorkbench({
               <MenuSeparator />
               <MenuItem
                 disabled={c.deleteBusy}
-                onClick={() => {
+                onClick={async () => {
                   if (
                     c.deleting ||
-                    window.confirm(
-                      tr(
-                        "Delete this sprite project and its generation records? Conversation history will be kept.",
+                    (await confirmDialog({
+                      title: tr('Delete sprite project "{name}"?').replace("{name}", project.name),
+                      description: tr(
+                        "Deletes the project, its frames and generation records. This cannot be undone. Conversation history is kept.",
                       ),
-                    )
+                      confirmLabel: tr("Delete"),
+                      destructive: true,
+                    }))
                   )
                     c.safe(async () => {
                       c.deletionStarted.current = true;
@@ -424,9 +428,6 @@ export default function SpriteWorkbench({
               </Button>
             </>
           )}
-          <Button size="sm" variant="ghost" onClick={() => c.importRef.current?.click()}>
-            {tr("Import images")}
-          </Button>
           {stage !== "export" && (
             <Button
               size="sm"
@@ -654,9 +655,21 @@ export default function SpriteWorkbench({
                     {tr("Cancel")}
                   </Button>
                 )}
+                {window.desktopBridge?.resourceLibrary && (
+                  <Button
+                    variant="outline"
+                    disabled={!c.exportActions.length || !!c.progress}
+                    title={tr(
+                      "Animation resources added to the resource center keep this project as their source.",
+                    )}
+                    onClick={() => c.safe(() => c.exportAssets("resources"))}
+                  >
+                    {tr("Add to resource center")}
+                  </Button>
+                )}
                 <Button
                   disabled={!c.exportActions.length || !!c.progress}
-                  onClick={() => c.safe(c.exportAssets)}
+                  onClick={() => c.safe(() => c.exportAssets("download"))}
                 >
                   <DownloadIcon />
                   {tr("Export animation resources")}

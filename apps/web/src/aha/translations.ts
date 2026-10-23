@@ -217,10 +217,10 @@ export const copy: Record<string, string> = {
   "layout-continuity": "片段衔接风险",
   "layout-loop-seam": "循环首尾风险",
   "This action uses an earlier character reference. Review it before adding it to the current project.":
-    "此动作使用较早的角色基准，采纳到当前项目之前请先检查。",
+    "此动作使用较早的角色基准，采用到当前项目之前请先检查。",
 
   "AI assistant": "AI 助手",
-  "Adopt complete action": "采纳完整动作",
+  "Adopt complete action": "采用完整动作",
   "An approved reference is saved. Confirming changes creates a new version and preserves existing actions.":
     "已保存角色基准。确认修改将创建新版本，并保留已有动作。",
   "Approve one character before generating its actions. All actions reuse this reference, scale and ground coordinate.":
@@ -305,7 +305,7 @@ export const copy: Record<string, string> = {
   "Output dimensions do not match the render specification.": "输出尺寸与渲染规格不一致。",
   "Wait for every segment before reviewing the complete action.":
     "请等待所有片段完成后检查完整动作。",
-  "Wait for every segment before adding the complete action.": "请等待所有片段完成后采纳完整动作。",
+  "Wait for every segment before adding the complete action.": "请等待所有片段完成后采用完整动作。",
   "The approved character must be the first reference.": "已确认的角色基准必须作为第一张参考图。",
   "Invalid sprite render specification.": "精灵渲染规格无效。",
   "Invalid sprite alignment.": "精灵对齐参数无效。",
@@ -458,7 +458,7 @@ export const copy: Record<string, string> = {
   "Manage tasks": "任务管理",
   "General reference": "通用参考",
   "Removing records only hides them in this project. Drawing tasks and adopted work are retained.":
-    "移除只隐藏本项目记录，绘图任务与已采纳作品仍然保留。",
+    "移除只隐藏本项目记录，绘图任务与已采用作品仍然保留。",
 
   "Prompt background conflicts with Drawing settings": "提示词中的背景要求与绘图配置冲突",
   "Edit prompt": "修改提示词",
@@ -572,7 +572,7 @@ export const copy: Record<string, string> = {
   "Prepare sprite retry plan": "准备精灵重试方案",
   "Preview reference": "查看参考图",
   "View original sheet": "查看原始精灵图",
-  "Adopt selected actions": "采纳所选动作",
+  "Adopt selected actions": "采用所选动作",
   "Project exceeds 1024 images or actions.": "项目不能超过 1024 张素材或 1024 个动作。",
   "Sprite generation plan": "精灵生成方案",
   "Review the plan before generating.": "确认描述和请求参数后再开始生成。",
@@ -619,7 +619,7 @@ export const copy: Record<string, string> = {
   "Open sprite project": "打开精灵项目",
   "Confirm and generate": "确认并生成",
   "Create revised plan": "创建修改方案",
-  "Adopt all actions": "采纳全部动作",
+  "Adopt all actions": "采用全部动作",
   "Preview action": "预览动作",
   "Redo action": "单独重做",
   "Enter generation requirements.": "请填写生成需求。",
@@ -659,7 +659,7 @@ export const copy: Record<string, string> = {
   "Deleted conversation": "已删除会话",
   "Archived conversations can be restored later.": "归档的会话可以稍后恢复。",
   "This permanently deletes conversation history. Adopted sprite artwork, actions and frames are kept.":
-    "会话历史将被永久删除，项目内已采纳的素材、动作和帧会保留。",
+    "会话历史将被永久删除，项目内已采用的素材、动作和帧会保留。",
   "Conversation updated. Project association still needs saving.":
     "会话操作已完成，项目关联尚未保存，请重试。",
   "Read sprite context": "读取精灵上下文",
@@ -757,8 +757,6 @@ export const copy: Record<string, string> = {
   "No sprite projects yet. Create a project or import a project package.":
     "还没有精灵项目，创建项目或导入项目包开始创作。",
   "Rename sprite project": "重命名精灵项目",
-  "Delete this sprite project and its generation records? Conversation history will be kept.":
-    "删除此精灵项目及其生成记录？普通会话历史将保留。",
   "Projects are saved in this browser. Clearing browser data removes them.":
     "项目保存在当前浏览器中，清理浏览器数据会移除这些项目。",
   "Deletion incomplete. Retry to finish removing this project.":
@@ -870,7 +868,7 @@ export const copy: Record<string, string> = {
 
   "Retry failed imports": "重试失败项",
   "Resource center": "资源中心",
-  "Add to resource center": "添加到资源中心",
+  "Add to resource center": "加入资源中心",
   "Add all results to resource center": "添加全部结果到资源中心",
   "Keep an independent copy in a project folder.": "在项目目录中保存独立副本。",
   "Choose resource folder": "选择资源库目录",

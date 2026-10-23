@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  IMAGE_BATCH_MAX_STYLE_PROMPT,
+  IMAGE_BATCH_MAX_STYLE_REFERENCES,
   imageBatchPlanCounts,
   imageBatchTaskConfiguration,
   type ImageBatchState,
@@ -16,6 +18,7 @@ import { OptionSelect } from "../ui/option-select";
 import { Sheet, SheetPopup, SheetTitle } from "../ui/sheet";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
 import { RouteSurfaceHeader } from "../RouteSurface";
+import { confirmDialog } from "../ui/confirm-dialog";
 import { DrawingModelPicker, DrawingParameters } from "../drawing/DrawingPickers";
 import { useImageProviders, useDrawingEvents } from "../drawing/useDrawing";
 import {
@@ -30,6 +33,10 @@ import { BatchTaskEditor } from "./BatchTaskEditor";
 import { BatchResults } from "./BatchResults";
 import { BatchProposals } from "./BatchProposals";
 import { BatchExecution } from "./BatchExecution";
+import { BatchReferenceList } from "./BatchReferenceList";
+import { useResourceAttachments, type ResourceReceiveResult } from "../resources/resourceLibrary";
+import { uploadDrawingImage } from "../drawing/useDrawing";
+import { drawingResourceError } from "@synara/contracts/resourceLibrary";
 
 export default function ImageBatchWorkbench({
   batchId,
@@ -278,6 +285,7 @@ function BatchWorkspace({
   const [selected, setSelected] = useState<string[]>([]),
     [busy, setBusy] = useState(false);
   const [bulkCount, setBulkCount] = useState("2");
+  const [reviewVersion, setReviewVersion] = useState<number | null>(null);
   const [retainedResults, setRetainedResults] = useState(false);
   const focusTask = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -288,8 +296,54 @@ function BatchWorkspace({
     if (tab === "tasks" && taskId) focusTask.current?.scrollIntoView({ block: "nearest" });
   }, [tab, taskId]);
   const counts = imageBatchPlanCounts(batch.tasks, batch.defaults);
+  const hasStyle = !!batch.defaults.stylePrompt?.trim() || !!batch.defaults.styleReferences?.length;
   const pending = batch.proposals.filter((p) => p.status === "pending").length;
   const active = batch.executions.some((e) => !e.finishedAt);
+  // Images sent from the Resource Center or other modules become batch style references.
+  useResourceAttachments(
+    "image-batch:" + batch.id,
+    async (files) => {
+      const result: ResourceReceiveResult = { accepted: [], rejected: [] };
+      const styleReferences = [...(batch.defaults.styleReferences ?? [])];
+      let bytes = 0;
+      for (const [index, file] of files.entries()) {
+        try {
+          if (styleReferences.length >= IMAGE_BATCH_MAX_STYLE_REFERENCES)
+            throw new Error(
+              tr("At most {count} reference images are allowed.").replace(
+                "{count}",
+                String(IMAGE_BATCH_MAX_STYLE_REFERENCES),
+              ),
+            );
+          const reason = drawingResourceError(file, { count: index, bytes });
+          if (reason) throw new Error(tr(reason));
+          const asset = await uploadDrawingImage(file, file.name);
+          styleReferences.push({ id: crypto.randomUUID(), assetId: asset.id, documentId: null });
+          bytes += file.size;
+          result.accepted.push(index);
+        } catch (error) {
+          result.rejected.push({
+            index,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      if (result.accepted.length) {
+        await command({
+          operation: "save",
+          batchId: batch.id,
+          version: batch.version,
+          name: batch.name,
+          brief: batch.brief,
+          defaults: { ...batch.defaults, styleReferences },
+          tasks: batch.tasks,
+        });
+        setConfiguration(null);
+      }
+      return result;
+    },
+    !batch.archived && !active,
+  );
   const saveTasks = async (tasks: ImageBatchTask[], base = batch) => {
     await command({
       operation: "save",
@@ -311,9 +365,14 @@ function BatchWorkspace({
   const lifecycle = async (operation: "archive" | "remove") => {
     if (operation === "remove") {
       if (
-        !window.confirm(
-          tr("Remove this batch record? Batch originals and collected files are retained."),
-        )
+        !(await confirmDialog({
+          title: tr('Remove batch record "{name}"?').replace("{name}", batch.name),
+          description: tr(
+            "The batch leaves the list. Original images and files already added to the resource center are kept, and you can still clear the originals afterwards.",
+          ),
+          confirmLabel: tr("Remove"),
+          destructive: true,
+        }))
       )
         return;
       await command({ operation, batchId: batch.id, version: batch.version });
@@ -348,11 +407,14 @@ function BatchWorkspace({
               onClick={() =>
                 action(async () => {
                   if (
-                    !window.confirm(
-                      tr(
-                        "Permanently clear this removed batch's originals and source snapshots? This cannot be undone. Collected resources remain.",
+                    !(await confirmDialog({
+                      title: tr("Clear batch originals?"),
+                      description: tr(
+                        "Permanently deletes this removed batch's original images and source snapshots. This cannot be undone. Files already added to the resource center remain.",
                       ),
-                    )
+                      confirmLabel: tr("Clear originals"),
+                      destructive: true,
+                    }))
                   )
                     return;
                   await command({
@@ -444,7 +506,14 @@ function BatchWorkspace({
           aria-labelledby="batch-tab-brief"
           className="flex min-h-0 flex-1 flex-col overflow-auto"
         >
-          <BatchProposals batch={batch} onError={onError} />
+          <BatchProposals
+            batch={batch}
+            onError={onError}
+            onApplied={(state, review) => {
+              setTab("tasks");
+              if (review) setReviewVersion(state.version);
+            }}
+          />
           {(batch.sources.length > 0 || !!batch.sourceReports?.length) && (
             <details className="shrink-0 border-b p-4 text-ui-sm">
               <summary className="cursor-pointer">
@@ -653,6 +722,7 @@ function BatchWorkspace({
                     <p className="mt-1 text-ui-xs text-muted-foreground">
                       {c.model || tr("No model")} · {c.parameters.n} {tr("images")} ·{" "}
                       {t.references.length} {tr("references")}
+                      {hasStyle && " · " + tr("Uses batch style")}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
@@ -713,7 +783,7 @@ function BatchWorkspace({
                             {
                               ...structuredClone(t),
                               id: crypto.randomUUID(),
-                              name: t.name + " " + tr("Copy"),
+                              name: tr("{name} copy").replace("{name}", t.name),
                             },
                             ...batch.tasks.slice(index + 1),
                           ]),
@@ -729,11 +799,14 @@ function BatchWorkspace({
                       onClick={() =>
                         action(async () => {
                           if (
-                            window.confirm(
-                              tr(
-                                "Remove this draft task? Existing attempts and images are retained.",
+                            await confirmDialog({
+                              title: tr('Remove task "{name}"?').replace("{name}", t.name),
+                              description: tr(
+                                "The task leaves the draft. Images it already generated are kept in the results.",
                               ),
-                            )
+                              confirmLabel: tr("Remove"),
+                              destructive: true,
+                            })
                           ) {
                             await saveTasks(batch.tasks.filter((x) => x.id !== t.id));
                             setSelected(selected.filter((id) => id !== t.id));
@@ -749,7 +822,12 @@ function BatchWorkspace({
             })}
           </div>
           <div className="max-h-[45%] shrink-0 overflow-auto">
-            <BatchExecution batch={batch} onError={onError} />
+            <BatchExecution
+              batch={batch}
+              onError={onError}
+              reviewVersion={reviewVersion}
+              onReviewOpened={() => setReviewVersion(null)}
+            />
           </div>
         </div>
       )}
@@ -777,11 +855,13 @@ function BatchWorkspace({
               current = latest.tasks.find((task) => task.id === editor.task.id);
             if (
               JSON.stringify(previous) !== JSON.stringify(current) &&
-              !window.confirm(
-                tr(
-                  "This task was changed or removed elsewhere. Keep your local edit and overwrite this task on the latest draft? Other tasks will be preserved.",
+              !(await confirmDialog({
+                title: tr("This task changed elsewhere"),
+                description: tr(
+                  "Keep your local edit and overwrite this task on the latest draft? Other tasks keep their latest version.",
                 ),
-              )
+                confirmLabel: tr("Keep my edit"),
+              }))
             )
               return;
             setEditor({ ...editor, base: latest });
@@ -882,6 +962,45 @@ function BatchConfiguration({
               })
             }
           />
+          <section className="space-y-3 border-t pt-4">
+            <div>
+              <h3 className="font-medium">{tr("Batch style")}</h3>
+              <p className="text-ui-sm text-muted-foreground">
+                {tr(
+                  "Applied before every task prompt when you confirm generation. Leave empty to use task prompts only.",
+                )}
+              </p>
+            </div>
+            <label className="block space-y-1">
+              <span>{tr("Style description")}</span>
+              <Textarea
+                rows={3}
+                maxLength={IMAGE_BATCH_MAX_STYLE_PROMPT}
+                value={draft.defaults.stylePrompt ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    defaults: { ...draft.defaults, stylePrompt: e.target.value },
+                  })
+                }
+              />
+            </label>
+            <BatchReferenceList
+              title={tr("Style reference images")}
+              references={draft.defaults.styleReferences ?? []}
+              sources={batch.sources}
+              max={IMAGE_BATCH_MAX_STYLE_REFERENCES}
+              disabled={busy}
+              onChange={(styleReferences) =>
+                setDraft((current) => ({
+                  ...current,
+                  defaults: { ...current.defaults, styleReferences },
+                }))
+              }
+              onBusy={setBusy}
+              onError={(cause) => setError(cause instanceof Error ? cause.message : String(cause))}
+            />
+          </section>
           {!providers.data?.length && (
             <p className="text-ui-sm text-muted-foreground">
               {tr("Configure an image channel before generation.")}
@@ -902,7 +1021,7 @@ function BatchConfiguration({
                 setBusy(true);
                 void batchApi()
                   .get({ id: batch.id })
-                  .then((latest) => {
+                  .then(async (latest) => {
                     if (
                       JSON.stringify({
                         name: base.name,
@@ -914,11 +1033,11 @@ function BatchConfiguration({
                           brief: latest.brief,
                           defaults: latest.defaults,
                         }) &&
-                      !window.confirm(
-                        tr(
-                          "Batch settings changed elsewhere. Keep your local settings and use the latest task list?",
-                        ),
-                      )
+                      !(await confirmDialog({
+                        title: tr("Batch settings changed elsewhere"),
+                        description: tr("Keep your local settings and use the latest task list?"),
+                        confirmLabel: tr("Keep my settings"),
+                      }))
                     )
                       return;
                     setBase(latest);

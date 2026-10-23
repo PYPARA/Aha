@@ -1,4 +1,6 @@
 import { ResourceCollectionDialog } from "~/components/resources/ResourceCollectionDialog";
+import { ConfirmDialogHost } from "~/components/ui/confirm-dialog";
+import { ResourceTransferNotice } from "~/components/resources/ResourceTransferNotice";
 import type { ResolvedKeybindingsConfig } from "@synara/contracts";
 import { AhaBackgroundLayer } from "../aha/BackgroundLayer";
 import { CHAT_SURFACE_HEADER_HEIGHT_PX } from "@synara/shared/desktopChrome";
@@ -647,6 +649,8 @@ function ChatRouteLayout() {
     >
       <AhaBackgroundLayer />
       <ResourceCollectionDialog />
+      <ConfirmDialogHost />
+      <ResourceTransferNotice />
       <ThreadRetentionMaintenanceToast />
       <ChatRouteGlobalShortcuts />
       <AppRailSlotProvider value={railSlot}>

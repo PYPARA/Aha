@@ -11,10 +11,22 @@ export const IMAGE_BATCH_MAX_IMAGES = 500;
 const Id = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,128}$/));
 const Text = Schema.String.check(Schema.isMaxLength(32000));
 const Version = Schema.Finite.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0));
+export const IMAGE_BATCH_MAX_STYLE_REFERENCES = 8;
+export const IMAGE_BATCH_MAX_STYLE_PROMPT = 4000;
 export const ImageBatchDefaults = Schema.Struct({
   providerId: Schema.String,
   model: Schema.String,
   parameters: ImageGenerationParameters,
+  /** Shared style text placed before every task prompt when an execution is confirmed. */
+  stylePrompt: Schema.optional(
+    Schema.String.check(Schema.isMaxLength(IMAGE_BATCH_MAX_STYLE_PROMPT)),
+  ),
+  /** Shared style images placed before every task's own references when confirmed. */
+  styleReferences: Schema.optional(
+    Schema.mutable(Schema.Array(ImageInputReference)).check(
+      Schema.isMaxLength(IMAGE_BATCH_MAX_STYLE_REFERENCES),
+    ),
+  ),
 });
 export type ImageBatchDefaults = typeof ImageBatchDefaults.Type;
 export const ImageBatchTaskParameters = ImageGenerationParameters.mapFields((fields) => ({
@@ -68,6 +80,8 @@ export const ImageBatchAttempt = Schema.Struct({
   prompt: Text,
   references: Schema.mutable(Schema.Array(ImageInputReference)),
   requestPrompt: Schema.optional(Text),
+  /** Batch style frozen at confirmation; retries reuse it instead of the current defaults. */
+  stylePrompt: Schema.optional(Text),
   providerVersion: Schema.optional(Version),
   sourceIds: Schema.mutable(Schema.Array(Id)),
   requestId: Id,
@@ -309,6 +323,23 @@ export function imageBatchTaskConfiguration(task: ImageBatchTask, defaults: Imag
       n: task.parameters?.n ?? defaults.parameters.n,
     },
   };
+}
+/** The prompt sent for a task: frozen batch style, a blank line, then the task prompt. */
+export function imageBatchComposePrompt(stylePrompt: string | undefined, prompt: string) {
+  const style = stylePrompt?.trim();
+  return style ? style + "\n\n" + prompt : prompt;
+}
+/** Style references first, then the task's own; an image used by both is sent once. */
+export function imageBatchTaskReferences(
+  task: Pick<ImageBatchTask, "references">,
+  styleReferences: readonly ImageInputReference[] = [],
+) {
+  const seen = new Set<string>();
+  return [...styleReferences, ...task.references].filter((r) => {
+    if (seen.has(r.assetId)) return false;
+    seen.add(r.assetId);
+    return true;
+  });
 }
 export function imageBatchPlanCounts(
   tasks: readonly ImageBatchTask[],

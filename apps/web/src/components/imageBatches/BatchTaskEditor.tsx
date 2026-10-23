@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type {
   ImageBatchDefaults,
@@ -12,9 +12,9 @@ import { Textarea } from "../ui/textarea";
 import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
 import { DrawingModelPicker, DrawingParameters } from "../drawing/DrawingPickers";
-import { imageUrl, uploadDrawingImage } from "../drawing/useDrawing";
 import { getImageEditDocument } from "../drawing/useDrawing";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
+import { BatchReferenceList } from "./BatchReferenceList";
 import { imageBatchTaskConfiguration } from "@synara/contracts";
 
 export function BatchTaskEditor({
@@ -42,7 +42,6 @@ export function BatchTaskEditor({
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const file = useRef<HTMLInputElement>(null);
   const c = imageBatchTaskConfiguration(draft, defaults);
   const report = (cause: unknown) => {
     setError(tr(cause instanceof Error ? cause.message : String(cause)));
@@ -127,90 +126,24 @@ export function BatchTaskEditor({
               />
             </div>
           )}
-          <div className="space-y-2 text-ui">
-            <h3 className="font-medium">{tr("Reference images")}</h3>
-            <div className="flex flex-wrap gap-2">
-              {draft.references.map((r, i) => (
-                <Button
-                  key={r.id}
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    setDraft({
-                      ...draft,
-                      references: draft.references.filter((x) => x.id !== r.id),
-                    })
-                  }
-                >
-                  {tr("Reference")} {i + 1} ×
-                </Button>
-              ))}
-            </div>
-            <input
-              ref={file}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              multiple
-              hidden
-              onChange={(e) => {
-                const files = Array.from(e.target.files ?? []);
-                e.target.value = "";
-                setBusy(true);
-                void (async () => {
-                  const references = [...draft.references];
-                  for (const f of files) {
-                    if (references.length >= 16)
-                      throw new Error(tr("At most 16 reference images are allowed."));
-                    const a = await uploadDrawingImage(f, f.name);
-                    references.push({ id: crypto.randomUUID(), assetId: a.id, documentId: null });
-                  }
-                  setDraft({ ...draft, references });
-                })()
-                  .catch(report)
-                  .finally(() => setBusy(false));
-              }}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => file.current?.click()}
-            >
-              {tr("Add reference image")}
-            </Button>
-            <div className="flex flex-wrap gap-2">
-              {sources
-                .filter((s) => s.asset)
-                .map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    aria-label={tr("Use reference") + ": " + s.name}
-                    className="rounded-md p-1 focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => {
-                      if (
-                        draft.references.length >= 16 ||
-                        draft.references.some((r) => r.assetId === s.asset!.id)
-                      )
-                        return;
-                      setDraft({
-                        ...draft,
-                        references: [
-                          ...draft.references,
-                          { id: crypto.randomUUID(), assetId: s.asset!.id, documentId: null },
-                        ],
-                      });
-                    }}
-                  >
-                    <img
-                      src={imageUrl(s.asset!, "thumbnail")}
-                      alt={s.name}
-                      className="size-16 rounded object-contain"
-                    />
-                  </button>
-                ))}
-            </div>
-          </div>
+          <BatchReferenceList
+            title={tr("Reference images")}
+            references={draft.references}
+            sources={sources}
+            max={16 - (defaults.styleReferences?.length ?? 0)}
+            disabled={busy}
+            onChange={(references) => setDraft((current) => ({ ...current, references }))}
+            onBusy={setBusy}
+            onError={report}
+          />
+          {!!defaults.styleReferences?.length && (
+            <p className="text-ui-sm text-muted-foreground">
+              {tr("Batch style adds {count} reference images before these.").replace(
+                "{count}",
+                String(defaults.styleReferences.length),
+              )}
+            </p>
+          )}
           {sources.length > 0 && (
             <div className="space-y-2 text-ui">
               <h3 className="font-medium">{tr("Source documents")}</h3>

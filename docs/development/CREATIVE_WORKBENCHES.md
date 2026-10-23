@@ -37,6 +37,14 @@
 - 复制前记录目标库、目录稳定身份、目标路径、预留资源 ID 和文件身份。文件提交后回执丢失，按结果来源或准确的文件身份恢复。相同结果在同库去重，部分失败仅重试失败项；移动、重命名保留资源 ID，废纸篓不触发自动入库。入库补保存绝不调用图像模型。
 - 入库开始前在批次服务登记活跃操作，回执与来源关联完成后再释放；原图清理检查这项保留。尚未完成或无法核实的入库操作、无法完整枚举的精灵引用都会阻止清理，不能仅因批次已移除而回收资产。
 
+## 模块间传递与确认
+
+- 模块之间传图只用 `resources/resourceLibrary.ts` 的传递队列：发送方 `queueResourceTransfer`（`resources/transferTargets.tsx` 的 `sendFilesToTarget` 负责新建批次与导航），接收方 `useResourceAttachments` 按序号返回接收与拒绝结果。target 约定：`drawing`、会话 ID、`sprite:<projectId>`、`sprite:new`（精灵库在用户建好项目后 `retargetResourceTransfer`）和 `image-batch:<batchId>`。资源中心来源带 `libraryId` 并在资源中心显示状态和重试；其他来源的失败由全局 `ResourceTransferNotice` 提示。
+- 精灵接收的图片只进入项目素材，批量接收的图片只进入批次风格参考图，都不触发生成。精灵导出入库走 `collectResources`，`ResourceOrigin.kind=sprite` 带 `projectId`。
+- 批次风格（`defaults.stylePrompt`/`styleReferences`）只在 `confirm` 路径读取并冻结：尝试保存未加风格的 `prompt` 与 `stylePrompt`，`references` 已含风格图；发送与结果使用 `imageBatchComposePrompt`。重试只复用尝试冻结的风格，不读取当前 defaults。风格图计入资产引用，防止被清理。
+- 业务确认使用 `ui/confirm-dialog.tsx` 的 `confirmDialog`（单例宿主挂在 `routes/_chat.tsx`），标题写明对象，说明写明影响与能否恢复，破坏性操作用 destructive 并默认聚焦取消。不在业务中使用 `window.confirm`。
+- 文案键在 `aha/*Copy.ts` 与 `translations.ts` 合并；`aha/translations.test.ts` 禁止同一键在不同文件给出不同译文。
+
 ## 回归与证据
 
 改动时按影响运行实际核心测试，命令入口可从以下范围选择：

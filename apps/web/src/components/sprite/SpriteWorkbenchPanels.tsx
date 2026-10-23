@@ -5,6 +5,8 @@ import { Textarea } from "../ui/textarea";
 import { Checkbox } from "../ui/checkbox";
 import { StatusChip } from "../ui/status-chip";
 import { Alert } from "../ui/alert";
+import { Menu, MenuTrigger, MenuItem } from "../ui/menu";
+import { ComposerPickerMenuPopup } from "../chat/ComposerPickerMenuPopup";
 import { PlusIcon, HistoryIcon, FolderIcon, ChatBubblePlusIcon } from "~/lib/icons";
 import { SpriteNumberField } from "./SpriteNumberField";
 import { SpriteSelect } from "./SpriteSelect";
@@ -451,6 +453,8 @@ export function ActionProperties({ controller: c }: Props) {
         />
         <Button
           className="w-full"
+          // The empty canvas already shows Generate action as the primary action.
+          variant={c.frame ? "default" : "outline"}
           disabled={c.generationBusy || (project.version === 2 && !project.canonical)}
           onClick={() => c.safe(() => c.prepareGeneration("animation"))}
         >
@@ -589,15 +593,6 @@ export function CandidateProperties({ controller: c }: Props) {
       {run && (
         <>
           <Button
-            variant="outline"
-            className="w-full"
-            onClick={() =>
-              c.openSlicing(c.state.runs.find((r) => r.id === run.id) ?? run, actionId)
-            }
-          >
-            {tr("Adjust slicing and alignment")}
-          </Button>
-          <Button
             variant="ghost"
             className="w-full"
             onClick={() => c.safe(() => c.runCommand(run, "retry", actionId))}
@@ -606,34 +601,46 @@ export function CandidateProperties({ controller: c }: Props) {
           </Button>
           {record && (
             <div className="space-y-2 border-t pt-4 text-ui-sm text-muted-foreground">
-              <p>{run.context.model}</p>
               <p>
-                {tr("Processing version")}:{" "}
-                {record.processingVersionId?.slice(0, 8) ?? tr("Original")}
+                {tr(record.processingVersionId ? "Corrected from original" : "Original slicing")}
               </p>
-              <Button size="sm" variant="ghost" onClick={() => c.setOriginalImage(record.source)}>
-                {tr("View original image")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  c.safe(async () => {
-                    const next = await drawingApi().spriteCommand({
-                      operation: "reprocess-candidate",
-                      projectId: c.project.id,
-                      runId: run.id,
-                      candidateId: record.id,
-                      version: record.version ?? 0,
-                    });
-                    c.setState(next);
-                    const updated = next.runs.find((r) => r.id === run.id);
-                    if (updated) await c.inspectCandidate(updated, actionId);
-                  })
-                }
-              >
-                {tr("Reprocess from original · free")}
-              </Button>
+              <Menu>
+                <MenuTrigger render={<Button size="sm" variant="ghost" />}>
+                  {tr("Source image")}
+                </MenuTrigger>
+                <ComposerPickerMenuPopup align="start">
+                  <MenuItem onClick={() => c.setOriginalImage(record.source)}>
+                    {tr("View original image")}
+                  </MenuItem>
+                  <MenuItem
+                    onClick={() =>
+                      c.safe(async () => {
+                        const next = await drawingApi().spriteCommand({
+                          operation: "reprocess-candidate",
+                          projectId: c.project.id,
+                          runId: run.id,
+                          candidateId: record.id,
+                          version: record.version ?? 0,
+                        });
+                        c.setState(next);
+                        const updated = next.runs.find((r) => r.id === run.id);
+                        if (updated) await c.inspectCandidate(updated, actionId);
+                      })
+                    }
+                  >
+                    {tr("Reprocess from original · free")}
+                  </MenuItem>
+                </ComposerPickerMenuPopup>
+              </Menu>
+              <details>
+                <summary className="cursor-pointer">{tr("Diagnostic details")}</summary>
+                <p className="mt-1 break-all">
+                  {tr("Model")}: {run.context.model}
+                </p>
+                <p className="break-all">
+                  {tr("Processing version")}: {record.processingVersionId ?? tr("Original")}
+                </p>
+              </details>
             </div>
           )}
         </>

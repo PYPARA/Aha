@@ -1,4 +1,10 @@
 import { collectResources } from "../resources/resourceLibrary";
+import {
+  fetchImageFile,
+  sendFilesToTarget,
+  TransferTargetDialog,
+} from "../resources/transferTargets";
+import { useNavigate } from "@tanstack/react-router";
 import { drawingResourceSource, resourceContextMenu } from "../resources/ResourceCollectionDialog";
 import { CentralIcon } from "~/lib/central-icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -54,8 +60,10 @@ export function DrawingGallery({
   onSettings: () => void;
   hasProvider: boolean;
 }) {
-  const tr = useAhaTranslation();
+  const tr = useAhaTranslation(),
+    navigate = useNavigate();
   const history = useImageJobs(filters);
+  const [spriteJob, setSpriteJob] = useState<ImageJob | null>(null);
   const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = history;
   const viewport = useRef<HTMLDivElement>(null),
     sentinel = useRef<HTMLDivElement>(null);
@@ -289,6 +297,11 @@ export function DrawingGallery({
                               {tr("Add all results to resource center")}
                             </MenuItem>
                           ) : null}
+                          {job.outputs.length && job.origin?.kind !== "sprite" ? (
+                            <MenuItem onClick={() => setSpriteJob(job)}>
+                              {tr("Use in sprite")}
+                            </MenuItem>
+                          ) : null}
                           <MenuItem onClick={() => onReuse(job)}>{tr("Reuse parameters")}</MenuItem>
                           {job.origin?.kind === "batch" || job.origin?.kind === "sprite" ? (
                             <MenuItem onClick={() => onOpen(job)}>
@@ -335,6 +348,27 @@ export function DrawingGallery({
           </div>
         ) : null}
       </div>
+      {spriteJob && (
+        <TransferTargetDialog
+          module="sprite"
+          count={spriteJob.outputs.length}
+          onClose={() => setSpriteJob(null)}
+          onSend={async (target) =>
+            sendFilesToTarget(
+              navigate,
+              target,
+              await Promise.all(
+                spriteJob.outputs.map((asset, index) =>
+                  fetchImageFile(
+                    imageUrl(asset),
+                    `drawing-${index + 1}.${asset.mimeType.split("/")[1]}`,
+                  ),
+                ),
+              ),
+            )
+          }
+        />
+      )}
     </div>
   );
 }

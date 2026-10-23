@@ -7,8 +7,10 @@ import {
   IMAGE_BATCH_MAX_IMAGES,
   IMAGE_BATCH_MAX_TASKS,
   ImageBatchTask,
+  imageBatchComposePrompt,
   imageBatchPlanCounts,
   imageBatchTaskConfiguration,
+  imageBatchTaskReferences,
   imageBatchMissingCount,
   imageBatchRetryLineage,
   type ImageBatchCommand,
@@ -19,6 +21,7 @@ import {
   type ImageBatchResult,
   type ImageBatchSource,
   type ImageBatchPreflight,
+  type ImageInputReference,
   type ImageJobEvent,
 } from "@synara/contracts";
 import type { ImageGenerationEngine } from "../imageGeneration/imageGenerationEngine";
@@ -33,6 +36,22 @@ const fingerprint = (input: unknown) =>
   hash(stableJsonStringify(JSON.parse(JSON.stringify(input))));
 const terminal = (s: string) => !["prepared", "queued", "running", "saving"].includes(s);
 const conflict = () => new Error("Batch changed. Reload before applying your changes.");
+const IMAGE_BATCH_MAX_REFERENCES = 16;
+interface BatchStyle {
+  prompt: string;
+  references: readonly ImageInputReference[];
+}
+const NO_STYLE: BatchStyle = { prompt: "", references: [] };
+/** The current batch style; only a confirm reads it, and the attempt freezes it. */
+const batchStyle = (state: ImageBatchState): BatchStyle => ({
+  prompt: state.defaults.stylePrompt ?? "",
+  references: state.defaults.styleReferences ?? [],
+});
+/** A retry's references already contain the frozen style images, so only the text is reused. */
+const frozenStyle = (attempt: ImageBatchAttempt): BatchStyle => ({
+  prompt: attempt.stylePrompt ?? "",
+  references: [],
+});
 
 export class ImageBatchEngine {
   private tail: Promise<unknown> = Promise.resolve();
@@ -90,9 +109,14 @@ export class ImageBatchEngine {
   }
   async preflight(id: string): Promise<ImageBatchPreflight> {
     const state = await this.get(id);
-    return this.check(state, state.tasks);
+    return this.check(state, state.tasks, batchStyle(state));
   }
-  private async check(state: ImageBatchState, tasks: readonly ImageBatchTask[]) {
+  /** `style` is the batch style a confirm would freeze; retries pass none (it is already frozen). */
+  private async check(
+    state: ImageBatchState,
+    tasks: readonly ImageBatchTask[],
+    style: BatchStyle = NO_STYLE,
+  ) {
     this.validateTasks(state, [...tasks]);
     const counts = imageBatchPlanCounts(tasks, state.defaults);
     const issues: { taskId: string; message: string }[] = [];
@@ -106,11 +130,18 @@ export class ImageBatchEngine {
         issues.push({ taskId: t.id, message: "Select an enabled image model." });
       try {
         imageRequestParameters(c.parameters);
-        const assets = await Promise.all(t.references.map((r) => this.images.getAsset(r.assetId)));
+        const references = imageBatchTaskReferences(t, style.references);
+        if (references.length > IMAGE_BATCH_MAX_REFERENCES)
+          throw new Error(
+            `Batch style and task references exceed ${IMAGE_BATCH_MAX_REFERENCES} images.`,
+          );
+        if (imageBatchComposePrompt(style.prompt, t.prompt).length > 32000)
+          throw new Error("Batch style and prompt exceed 32,000 characters.");
+        const assets = await Promise.all(references.map((r) => this.images.getAsset(r.assetId)));
         if (assets.reduce((n, a) => n + a.bytes, 0) > 80 * 1024 * 1024)
           throw new Error("References exceed 80 MiB.");
         for (const a of assets) await this.images.assets.read(a, "original");
-        for (const r of t.references)
+        for (const r of references)
           if (r.documentId) {
             const doc = await this.images.getDocument(r.documentId);
             if (doc.compositeAssetId !== r.assetId)
@@ -150,7 +181,8 @@ export class ImageBatchEngine {
       const known = new Set(
         state.sources
           .flatMap((s) => (s.asset ? [s.asset.id] : []))
-          .concat(state.tasks.flatMap((t) => t.references.map((r) => r.assetId))),
+          .concat(state.tasks.flatMap((t) => t.references.map((r) => r.assetId)))
+          .concat((state.defaults.styleReferences ?? []).map((r) => r.assetId)),
       );
       for (const task of input.tasks)
         for (const r of task.references)
@@ -206,20 +238,26 @@ export class ImageBatchEngine {
   private async attempt(
     task: ImageBatchTask,
     state: ImageBatchState,
+    style: BatchStyle,
     retryOf: string | null = null,
     n?: number,
   ): Promise<ImageBatchAttempt> {
     const c = imageBatchTaskConfiguration(task, state.defaults);
     const references = await Promise.all(
-      task.references.map(async (r) => ({
-        ...r,
-        comments: r.documentId ? (await this.images.getDocument(r.documentId)).comments : [],
-      })),
+      imageBatchTaskReferences(task, style.references).map(async (r) =>
+        Object.assign({}, r, {
+          comments: r.documentId ? (await this.images.getDocument(r.documentId)).comments : [],
+        }),
+      ),
     );
     const providerVersion = (await this.images.listProviders()).find(
       (p) => p.id === c.providerId,
     )?.version;
-    const requestPrompt = imageCommentPrompt(task.prompt, references);
+    const stylePrompt = style.prompt.trim();
+    const requestPrompt = imageCommentPrompt(
+      imageBatchComposePrompt(stylePrompt, task.prompt),
+      references,
+    );
     if (requestPrompt.length > 32000)
       throw new Error("Prompt and image comments exceed 32,000 characters.");
     return {
@@ -230,6 +268,7 @@ export class ImageBatchEngine {
       ...c,
       providerVersion,
       requestPrompt,
+      ...(stylePrompt ? { stylePrompt } : {}),
       parameters: { ...c.parameters, ...(n === undefined ? {} : { n }) },
       references,
       sourceIds: [...task.sourceIds],
@@ -333,10 +372,11 @@ export class ImageBatchEngine {
           throw new Error("Finish the active execution or restore the batch first.");
         let attempts: ImageBatchAttempt[];
         if (input.operation === "confirm") {
-          const check = await this.check(state, state.tasks);
+          const style = batchStyle(state);
+          const check = await this.check(state, state.tasks, style);
           if (check.issues.length) throw new Error(check.issues.map((i) => i.message).join("\n"));
           attempts = await Promise.all(
-            state.tasks.filter((t) => t.enabled).map((t) => this.attempt(t, state)),
+            state.tasks.filter((t) => t.enabled).map((t) => this.attempt(t, state, style)),
           );
         } else {
           const selected = input.attemptIds.map((id) =>
@@ -367,9 +407,12 @@ export class ImageBatchEngine {
               references: a.references,
               sourceIds: a.sourceIds,
             };
-            const check = await this.check(state, [task]);
+            const check = await this.check(state, [task], frozenStyle(a));
             if (check.issues.length) throw new Error(check.issues.map((i) => i.message).join("\n"));
-            attempts.push({ ...(await this.attempt(task, state, a.id, n)), retryMode: input.mode });
+            attempts.push({
+              ...(await this.attempt(task, state, frozenStyle(a), a.id, n)),
+              retryMode: input.mode,
+            });
           }
           if (!attempts.length) throw new Error("No missing images to generate.");
         }
@@ -507,7 +550,7 @@ export class ImageBatchEngine {
                     taskName: a.taskName,
                     position,
                     asset,
-                    prompt: a.prompt,
+                    prompt: imageBatchComposePrompt(a.stylePrompt, a.prompt),
                     model: a.model,
                     parameters: a.parameters,
                     createdAt: job.finishedAt ?? job.createdAt,
@@ -535,7 +578,7 @@ export class ImageBatchEngine {
                     clientRequestId: a.requestId,
                     providerId: a.providerId,
                     model: a.model,
-                    prompt: a.prompt,
+                    prompt: imageBatchComposePrompt(a.stylePrompt, a.prompt),
                     parameters: a.parameters,
                     inputAssetIds: a.references.map((r) => r.assetId),
                     inputReferences: a.references,

@@ -31,7 +31,9 @@ export function ResourceSelectionBar({
   onPage: (offset: number) => void;
 }) {
   const tr = useAhaTranslation();
-  const usage = actions.filter((action) => ["chat", "drawing"].includes(action.key));
+  const usage = actions.filter((action) =>
+    ["chat", "drawing", "sprite", "image-batch"].includes(action.key),
+  );
   return (
     <footer
       data-testid="resource-actions"

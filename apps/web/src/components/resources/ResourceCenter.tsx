@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import type { ThreadId } from "@synara/contracts";
 import {
   drawingResourceError,
   type ResourceBatchAction,
@@ -35,7 +34,6 @@ import {
   ResourceLibraryIdContext,
   useResourceLibrary,
   useResourceTransfer,
-  queueResourceTransfer,
   retryResourceTransfer,
   useResourceTaskResults,
   recordResourceTask,
@@ -44,6 +42,12 @@ import { Sheet, SheetPopup, SheetHeader, SheetTitle } from "~/components/ui/shee
 import { ResourceIndexStatus } from "./ResourceIndexStatus";
 import { ResourceSidebar } from "./ResourceSidebar";
 import { ResourceAssetBrowser, type ResourceItemAction } from "./ResourceAssetBrowser";
+import {
+  navigateToTransferTarget,
+  sendFilesToTarget,
+  TransferTargetDialog,
+  type TransferModule,
+} from "./transferTargets";
 import { ResourceDetailsDialog } from "./ResourceDetailsDialog";
 import { ResourceInspector } from "./ResourceInspector";
 import { ResourceOperationDialog, type ResourceOperation } from "./ResourceOperationDialog";
@@ -161,6 +165,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
   const root = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const [operation, setOperation] = useState<ResourceOperation | null>(null);
+  const [transferModule, setTransferModule] = useState<TransferModule | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -620,7 +625,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
     const files: File[] = [];
     for (const entry of resources) {
       const file = await resourceFile(entry.id);
-      if (target === "drawing") {
+      if (target === "drawing" || target.startsWith("image-batch:")) {
         const reason = drawingResourceError(file, {
           count: files.length,
           bytes: files.reduce((total, item) => total + item.size, 0),
@@ -636,19 +641,10 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
       if (!created.threadId) throw new Error(tr("Unable to prepare a new chat."));
       destination = created.threadId;
     }
-    queueResourceTransfer(
-      destination,
-      files,
-      resources.map((entry) => entry.id),
-      snapshot.libraryId!,
-    );
-    try {
-      if (destination === "drawing") await navigate({ to: "/drawing" });
-      else await navigate({ to: "/$threadId", params: { threadId: destination as ThreadId } });
-    } catch (cause) {
-      useResourceTransfer.setState({ pending: null });
-      throw cause;
-    }
+    await sendFilesToTarget(navigate, destination, files, {
+      origin: { resourceIds: resources.map((entry) => entry.id), libraryId: snapshot.libraryId! },
+      newBatchName: tr("Untitled batch"),
+    });
   };
   const filesOnly =
     selectedEntries.length > 0 && selectedEntries.every((entry) => entry.kind === "file");
@@ -694,6 +690,18 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
         editor.guard(() => {
           void run(() => sendResources("drawing", selectedEntries));
         }),
+    },
+    {
+      key: "sprite",
+      label: tr("Use in sprite"),
+      disabled: !filesOnly,
+      run: () => editor.guard(() => setTransferModule("sprite")),
+    },
+    {
+      key: "image-batch",
+      label: tr("Use in batch"),
+      disabled: !filesOnly,
+      run: () => editor.guard(() => setTransferModule("image-batch")),
     },
     {
       key: "export",
@@ -1060,7 +1068,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
               </div>
             </details>
           ) : null}
-          {transfer?.libraryId === snapshot.libraryId ? (
+          {transfer?.libraryId && transfer.libraryId === snapshot.libraryId ? (
             <div
               role="status"
               className="flex shrink-0 flex-wrap items-center gap-2 px-4 pt-2 text-ui-sm"
@@ -1077,12 +1085,7 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
                   onClick={() => {
                     void run(async () => {
                       const target = retryResourceTransfer();
-                      if (target === "drawing") await navigate({ to: "/drawing" });
-                      else if (target)
-                        await navigate({
-                          to: "/$threadId",
-                          params: { threadId: target as ThreadId },
-                        });
+                      if (target) await navigateToTransferTarget(navigate, target);
                     });
                   }}
                 >
@@ -1244,6 +1247,14 @@ function ResourceWorkspace({ snapshot }: { snapshot: ResourceSnapshot }) {
           onRescan={() => {
             void run(() => resourceApi({ op: "refresh" }));
           }}
+        />
+      ) : null}
+      {transferModule ? (
+        <TransferTargetDialog
+          module={transferModule}
+          count={selectedEntries.length}
+          onClose={() => setTransferModule(null)}
+          onSend={(target) => sendResources(target, selectedEntries)}
         />
       ) : null}
       {operation ? (

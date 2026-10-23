@@ -34,7 +34,9 @@ import {
   suggestChromaKey,
   cropSpriteFrameSource,
   decodeSpriteSource,
-  exportSpriteAssets,
+  exportSpriteFileArchive,
+  prefixSpriteAssetFiles,
+  renderSpriteAssetFiles,
   type SpriteExportMode,
 } from "./spriteFiles";
 import { spriteAdoption } from "./spriteAdoption";
@@ -71,6 +73,11 @@ import {
   type SpriteCreationDraft,
 } from "./spriteCreation";
 import { decodeSpriteImages } from "./spriteImageInput";
+import {
+  collectResources,
+  useResourceAttachments,
+  type ResourceReceiveResult,
+} from "../resources/resourceLibrary";
 const adoptionKey = (run: SpriteRun, actionId: string) =>
   `${run.id}:${run.selectedCandidateId ?? run.source?.id ?? "legacy"}:${actionId}`;
 export function useSpriteWorkbenchController({
@@ -816,6 +823,36 @@ export function useSpriteWorkbenchController({
     if (destination !== "materials") setIndex(0);
     if (sources.length === 1 && destination !== "materials") setSourceId(sources[0]!.id);
   };
+  /** Images sent from the Resource Center, batch results or drawings become materials. */
+  const receiveImages = async (files: File[]): Promise<ResourceReceiveResult> => {
+    const result: ResourceReceiveResult = { accepted: [], rejected: [] };
+    const sources: SpriteSource[] = [];
+    let bytes = current.current.sources.reduce((n, s) => n + s.blob.size, 0);
+    for (const [index, file] of files.entries()) {
+      try {
+        if (bytes + file.size > 80 * 1024 * 1024)
+          throw new Error("Import at most 128 images / 80 MiB at once.");
+        sources.push(await decodeSpriteSource(file, file.name));
+        bytes += file.size;
+        result.accepted.push(index);
+      } catch (error) {
+        result.rejected.push({
+          index,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (!sources.length || !mounted.current || deletionStarted.current) return result;
+    const chooseCharacter = !current.current.canonical && !current.current.referenceSourceId;
+    update((p) => ({
+      ...p,
+      sources: [...p.sources, ...sources],
+      ...(chooseCharacter ? { referenceSourceId: sources[0]!.id } : {}),
+    }));
+    if (chooseCharacter) setStage("character");
+    return result;
+  };
+  useResourceAttachments("sprite:" + project.id, receiveImages, !deleting);
   const addImageToChat = async (sourceId: string, currentFrame = false) => {
     if (attachmentBusyRef.current || deletionStarted.current) return;
     attachmentBusyRef.current = true;
@@ -1373,7 +1410,7 @@ export function useSpriteWorkbenchController({
       else throw e;
     }
   };
-  const exportAssets = async () => {
+  const exportAssets = async (destination: "download" | "resources" = "download") => {
     const controller = new AbortController();
     abort.current = controller;
     setProgress("Preparing export…");
@@ -1383,7 +1420,7 @@ export function useSpriteWorkbenchController({
       const actionIds = exportActions.map((a) => a.id);
       const versions = snapshotSpriteActions(formal, actionIds);
       const fingerprint = await spriteExportFingerprint(snapshot, actionIds);
-      const blob = await exportSpriteAssets(
+      const files = await renderSpriteAssetFiles(
         snapshot,
         actionIds,
         exportMode,
@@ -1394,7 +1431,33 @@ export function useSpriteWorkbenchController({
       );
       if (current.current !== formal)
         throw new Error("Project changed during export. Try exporting again.");
-      downloadBlob(blob, `${safeFilename(project.name)}-${exportMode}.zip`);
+      if (destination === "download")
+        downloadBlob(
+          await exportSpriteFileArchive(files),
+          `${safeFilename(project.name)}-${exportMode}.zip`,
+        );
+      else
+        collectResources(
+          Object.entries(prefixSpriteAssetFiles(files, safeFilename(project.name) + "-")).map(
+            ([name, bytes]) => ({
+              name,
+              origin: { kind: "sprite" as const, projectId: project.id },
+              // The collection dialog fetches each file once right after resolving it.
+              resolveUrl: async () => {
+                const url = URL.createObjectURL(
+                  new Blob([bytes as BlobPart], {
+                    type: name.endsWith(".json") ? "application/json" : "image/png",
+                  }),
+                );
+                setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                return url;
+              },
+            }),
+          ),
+        );
+      // Only a downloaded package is recorded as the last export; the collection dialog can
+      // still be cancelled.
+      if (destination === "resources") return;
       controller.signal.throwIfAborted();
       update(
         (p) => ({
