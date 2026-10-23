@@ -124,9 +124,6 @@ export const imageBatchCopy: Record<string, string> = {
   "Will change": "将修改",
   "No parameter changed yet.": "尚未修改任何参数。",
   "Apply to selected": "应用到所选任务",
-  "{count} pending changes from AI are not in the task list yet.":
-    "AI 有 {count} 项待应用变更，尚未进入任务清单。",
-  "Review pending changes": "查看待应用变更",
   "Review task changes": "审阅任务变更",
   "Applying updates the task list. Generation still needs your confirmation in the next step.":
     "应用后更新任务清单；生成仍需在下一步确认。",

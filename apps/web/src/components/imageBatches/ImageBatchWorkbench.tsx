@@ -694,19 +694,16 @@ function BatchWorkspace({
               </>
             )}
           </div>
-          {pending > 0 && (
-            <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-ui-sm">
-              <p className="min-w-0 flex-1">
-                {tr("{count} pending changes from AI are not in the task list yet.").replace(
-                  "{count}",
-                  String(pending),
-                )}
-              </p>
-              <Button size="sm" variant="outline" onClick={() => setTab("brief")}>
-                {tr("Review pending changes")}
-              </Button>
-            </div>
-          )}
+          {/* Pending AI changes are reviewed where they take effect, not only beside the chat. */}
+          <div className="max-h-[40%] shrink-0 overflow-auto">
+            <BatchProposals
+              batch={batch}
+              onError={onError}
+              onApplied={(state, review) => {
+                if (review) setReviewVersion(state.version);
+              }}
+            />
+          </div>
           <div className="min-h-0 flex-1 overflow-auto p-3">
             {!batch.tasks.length && (
               <div className="space-y-3 py-10 text-center text-ui text-muted-foreground">
