@@ -85,3 +85,12 @@ export function resultSizeMismatch(r: ImageBatchResult) {
 /** First folder of an output path, used to group tasks and results the same way. */
 export const outputGroup = (output: string | undefined) =>
   output?.includes("/") ? output.slice(0, output.indexOf("/")) : "";
+
+/** File name of an output path without folder or extension, compared case-insensitively. */
+export const outputStem = (output: string | undefined) =>
+  output
+    ? output
+        .slice(output.lastIndexOf("/") + 1)
+        .replace(/\.[^.]+$/u, "")
+        .toLowerCase()
+    : "";

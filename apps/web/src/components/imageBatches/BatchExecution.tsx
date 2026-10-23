@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type {
   ImageBatchAttempt,
+  ImageBatchResult,
   ImageBatchCommand,
   ImageBatchPreflight,
   ImageBatchState,
@@ -13,7 +14,7 @@ import {
   imageBatchTaskReferences,
   type ImageGenerationParameters,
 } from "@synara/contracts";
-import { useImageProviders } from "../drawing/useDrawing";
+import { assetThumbnailUrl, imageUrl, useImageProviders } from "../drawing/useDrawing";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "../ui/button";
 import { confirmDialog } from "../ui/confirm-dialog";
@@ -24,7 +25,7 @@ import { DrawingModelPicker } from "../drawing/DrawingPickers";
 import { useNavigate } from "@tanstack/react-router";
 import { outputGroup } from "./resultNames";
 import { latestTaskAttempts } from "./BatchTaskStatus";
-import { batchApi, useBatchCommand } from "./useImageBatches";
+import { batchApi, useBatchCommand, useBatchResults } from "./useImageBatches";
 
 const activeStatus = (s: string) => ["prepared", "queued", "running", "saving"].includes(s);
 type Confirmation = {
@@ -44,6 +45,8 @@ type Confirmation = {
     inherits: boolean;
     parameters: ImageGenerationParameters;
     references: number;
+    /** Images actually sent, batch style images first, so they can be checked before paying. */
+    referenceIds: string[];
   }[];
 };
 export function BatchExecution({
@@ -78,6 +81,12 @@ export function BatchExecution({
     [ack, setAck] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [records, setRecords] = useState(false);
+  // Saved images per attempt, so the records drawer shows what each request produced.
+  const recordResults = useBatchResults({ batchId: batch.id });
+  const outputsOf = (attemptId: string) =>
+    (recordResults.data?.pages.flatMap((p) => p.results) ?? []).filter(
+      (r) => r.attemptId === attemptId,
+    );
   const [reopenAt, setReopenAt] = useState<number | null>(null);
   const submitting = useRef(false);
   const active = batch.executions.find((e) => !e.finishedAt);
@@ -123,6 +132,9 @@ export function BatchExecution({
             inherits: !t.providerId && !t.model,
             prompt: imageBatchComposePrompt(batch.defaults.stylePrompt, t.prompt),
             references: imageBatchTaskReferences(t, batch.defaults.styleReferences).length,
+            referenceIds: imageBatchTaskReferences(t, batch.defaults.styleReferences).map(
+              (r) => r.assetId,
+            ),
           })),
         });
       } else {
@@ -163,6 +175,7 @@ export function BatchExecution({
             model: a.model,
             parameters: { ...a.parameters, n: amounts[index]! },
             references: a.references.length,
+            referenceIds: a.references.map((r) => r.assetId),
           })),
         });
       }
@@ -443,6 +456,7 @@ export function BatchExecution({
                   <AttemptRow
                     key={a.id}
                     attempt={a}
+                    outputs={outputsOf(a.id)}
                     selected={selected.includes(a.id)}
                     onSelected={(value) => toggle(a.id, value)}
                   />
@@ -466,6 +480,7 @@ export function BatchExecution({
                         <AttemptRow
                           key={a.id}
                           attempt={a}
+                          outputs={outputsOf(a.id)}
                           selected={selected.includes(a.id)}
                           onSelected={(value) => toggle(a.id, value)}
                         />
@@ -598,28 +613,42 @@ export function BatchExecution({
                       {confirm.summaries
                         .filter((task) => outputGroup(task.output) === group)
                         .map((task) => (
-                          <details key={task.id} className="py-1">
-                            <summary className="cursor-pointer">
-                              {task.name}
-                              <span className="text-muted-foreground">
-                                {" · " +
-                                  [
-                                    task.output,
-                                    task.parameters.size,
-                                    task.parameters.n + " " + tr("images"),
-                                    task.parameters.quality &&
-                                      tr("Quality") + " " + tr(task.parameters.quality),
-                                    task.parameters.background &&
-                                      tr("Background") + " " + tr(task.parameters.background),
-                                    !sharedModel && task.model,
-                                    task.references + " " + tr("references"),
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" · ")}
-                              </span>
-                            </summary>
-                            <p className="my-2 whitespace-pre-wrap break-words">{task.prompt}</p>
-                          </details>
+                          <div key={task.id}>
+                            <details className="py-1">
+                              <summary className="cursor-pointer">
+                                {task.name}
+                                <span className="text-muted-foreground">
+                                  {" · " +
+                                    [
+                                      task.output,
+                                      task.parameters.size,
+                                      task.parameters.n + " " + tr("images"),
+                                      task.parameters.quality &&
+                                        tr("Quality") + " " + tr(task.parameters.quality),
+                                      task.parameters.background &&
+                                        tr("Background") + " " + tr(task.parameters.background),
+                                      !sharedModel && task.model,
+                                      task.references + " " + tr("references"),
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                </span>
+                              </summary>
+                              <p className="my-2 whitespace-pre-wrap break-words">{task.prompt}</p>
+                            </details>
+                            {task.referenceIds.length > 0 && (
+                              <div className="mb-1 flex flex-wrap gap-1 pl-4">
+                                {task.referenceIds.map((id, i) => (
+                                  <img
+                                    key={id}
+                                    src={assetThumbnailUrl(id)}
+                                    alt={tr("Reference") + " " + (i + 1)}
+                                    className="size-10 rounded bg-muted object-contain"
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         ))}
                     </section>
                   ),
@@ -708,10 +737,12 @@ export function BatchExecution({
 }
 function AttemptRow({
   attempt: a,
+  outputs = [],
   selected,
   onSelected,
 }: {
   attempt: ImageBatchAttempt;
+  outputs?: readonly ImageBatchResult[];
   selected?: boolean;
   onSelected?: (value: boolean) => void;
 }) {
@@ -731,6 +762,22 @@ function AttemptRow({
             {a.taskName} · {tr(a.status)} · {a.outputs}/{a.parameters.n}
           </p>
           {a.error && <p className="break-words text-destructive">{a.error}</p>}
+          {outputs.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {outputs.map((r) => (
+                <img
+                  key={r.id}
+                  src={imageUrl(r.asset, "thumbnail")}
+                  alt={r.taskName + " " + (r.position + 1)}
+                  title={r.adopted ? tr("Adopted") : undefined}
+                  className={
+                    "size-16 rounded bg-muted object-contain" +
+                    (r.adopted ? " ring-2 ring-primary" : "")
+                  }
+                />
+              ))}
+            </div>
+          )}
           <details className="mt-1 text-ui-xs text-muted-foreground">
             <summary className="cursor-pointer">{tr("Diagnostic details")}</summary>
             <pre className="overflow-auto whitespace-pre-wrap break-all">

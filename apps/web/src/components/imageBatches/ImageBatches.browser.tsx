@@ -82,6 +82,7 @@ beforeEach(() => {
   mocks.command.mockImplementation(async () => batch);
   mocks.listProviders.mockResolvedValue([{ id: "mock", name: "Local mock" }]);
   mocks.preflight.mockResolvedValue({ version: 2, tasks: 6, images: 11, issues: [] });
+  mocks.results.mockResolvedValue({ results: [], total: 0, nextCursor: null });
   useResourceCollection.setState({ sources: null });
   onError.mockClear();
 });
@@ -219,6 +220,77 @@ it("adds selected results as references to chosen tasks and enables them", async
     references: [{ assetId: "a".repeat(64), documentId: null }],
   });
   expect(saved.tasks[2].references).toEqual([]);
+});
+it("matches hero images to same-named portrait tasks and disables the samples", async () => {
+  const task = (id: string, output: string) => ({
+    id,
+    name: id,
+    prompt: id,
+    enabled: true,
+    references: [],
+    sourceIds: [],
+    output,
+  });
+  batch.tasks = [
+    task("hero-a", "heroes/ember.png"),
+    task("hero-b", "heroes/zero.png"),
+    task("portrait-a", "portraits/ember.png"),
+    task("portrait-b", "portraits/zero.png"),
+  ];
+  const result = (id: string, taskId: string, output: string, hex: string) =>
+    ({
+      id,
+      batchId: "batch",
+      executionId: "execution",
+      attemptId: "attempt-" + id,
+      taskId,
+      taskName: taskId,
+      output,
+      position: 0,
+      asset: {
+        id: hex.repeat(64),
+        name: "sample.png",
+        mimeType: "image/png",
+        url: "/asset",
+        thumbnailUrl: "/asset?variant=thumbnail",
+        width: 1,
+        height: 1,
+        bytes: 1,
+        createdAt: new Date().toISOString(),
+      },
+      prompt: "p",
+      model: "image-model",
+      parameters: { n: 1 },
+      createdAt: new Date().toISOString(),
+      adopted: true,
+    }) as ImageBatchResult;
+  const onClose = vi.fn();
+  await mount(
+    <ReferenceTargetDialog
+      batch={batch}
+      results={[
+        result("r-a", "hero-a", "heroes/ember.png", "a"),
+        result("r-b", "hero-b", "heroes/zero.png", "b"),
+      ]}
+      onClose={onClose}
+    />,
+  );
+  await expect
+    .element(page.getByRole("dialog"))
+    .toHaveTextContent("heroes/ember.png → portraits/ember.png");
+  await page.getByRole("button", { name: "Add references", exact: true }).click();
+  await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  const tasks = mocks.command.mock.calls[0]![0].tasks as typeof batch.tasks;
+  expect(tasks.find((t) => t.id === "portrait-a")!.references.map((r) => r.assetId)).toEqual([
+    "a".repeat(64),
+  ]);
+  expect(tasks.find((t) => t.id === "portrait-b")!.references.map((r) => r.assetId)).toEqual([
+    "b".repeat(64),
+  ]);
+  expect(tasks.filter((t) => t.id.startsWith("hero")).map((t) => t.enabled)).toEqual([
+    false,
+    false,
+  ]);
 });
 it("opens the generation check for the requested version without confirming", async () => {
   const opened = vi.fn();

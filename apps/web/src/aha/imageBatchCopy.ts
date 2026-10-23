@@ -128,6 +128,14 @@ export const imageBatchCopy: Record<string, string> = {
   "Choose tasks…": "选择任务…",
   "Not now": "暂不",
   "Reference scope": "参考范围",
+  "Match by file name": "按文件名对应",
+  Reference: "参考图",
+  "Target folder": "目标目录",
+  "Each image goes only to the task with the same file name in the target folder.":
+    "每张图片只加入目标目录中同名的任务。",
+  "No task with this name": "没有同名任务",
+  "{count} images will each be added to the same-named task.":
+    "{count} 张图片将分别加入对应的同名任务。",
   "{count} images will be added to the batch style reference images.":
     "将把 {count} 张图片加入批次风格参考图。",
   "Chosen tasks only": "仅所选任务",

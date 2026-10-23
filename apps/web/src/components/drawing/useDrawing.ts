@@ -48,6 +48,9 @@ export async function uploadDrawingImage(file: File | Blob, name: string): Promi
   if (!response.ok) throw new Error(body.error ?? "Could not upload image.");
   return body;
 }
+/** Thumbnail of a stored image known only by its ID (the ID is the content hash in the URL). */
+export const assetThumbnailUrl = (assetId: string) =>
+  resolveWsHttpUrl(`/api/drawing/assets/${encodeURIComponent(assetId)}?variant=thumbnail`);
 export const imageUrl = (asset: ImageAsset, variant?: "thumbnail" | "edit") =>
   resolveWsHttpUrl(variant ? `${asset.url}?variant=${variant}` : asset.url);
 

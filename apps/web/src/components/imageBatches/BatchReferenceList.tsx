@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import type { ImageAsset, ImageBatchSource, ImageInputReference } from "@synara/contracts";
+import { useRef, useState } from "react";
+import type { ImageBatchSource, ImageInputReference } from "@synara/contracts";
 import { Button } from "../ui/button";
 import { OptionSelect } from "../ui/option-select";
 import { useBatchResults } from "./useImageBatches";
-import { imageUrl, uploadDrawingImage } from "../drawing/useDrawing";
+import { assetThumbnailUrl, imageUrl, uploadDrawingImage } from "../drawing/useDrawing";
+import { PreviewSurface } from "../ui/preview-surface";
+import { XIcon } from "~/lib/icons";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 
 /** Reference picker shared by the task editor and the batch style settings. */
@@ -31,9 +33,6 @@ export function BatchReferenceList({
 }) {
   const tr = useAhaTranslation();
   const file = useRef<HTMLInputElement>(null);
-  const [uploaded, setUploaded] = useState<Record<string, ImageAsset>>({});
-  const known = (assetId: string) =>
-    uploaded[assetId] ?? sources.find((s) => s.asset?.id === assetId)?.asset ?? null;
   const limit = tr("At most {count} reference images are allowed.").replace("{count}", String(max));
   const pick = (assetId: string) => {
     if (references.length >= max || references.some((r) => r.assetId === assetId)) return;
@@ -43,24 +42,31 @@ export function BatchReferenceList({
     <div className="space-y-2 text-ui">
       <h3 className="font-medium">{title}</h3>
       <div className="flex flex-wrap gap-2">
-        {references.map((r, i) => {
-          const asset = known(r.assetId);
-          return (
+        {/* Removing is its own small button, so looking at or clicking a reference keeps it. */}
+        {references.map((r, i) => (
+          <figure key={r.id} className="relative w-20 space-y-1">
+            <PreviewSurface checker className="size-20 rounded-md">
+              <img
+                src={assetThumbnailUrl(r.assetId)}
+                alt={tr("Reference") + " " + (i + 1)}
+                className="h-full w-full object-contain"
+              />
+            </PreviewSurface>
+            <figcaption className="truncate text-center text-ui-xs text-muted-foreground">
+              {tr("Reference")} {i + 1}
+            </figcaption>
             <Button
-              key={r.id}
-              size="sm"
-              variant="outline"
+              size="icon-xs"
+              variant="secondary"
+              className="absolute top-1 right-1"
               disabled={disabled}
               aria-label={tr("Remove reference") + " " + (i + 1)}
               onClick={() => onChange(references.filter((x) => x.id !== r.id))}
             >
-              {asset && (
-                <img src={imageUrl(asset, "thumbnail")} alt="" className="size-5 object-contain" />
-              )}
-              {tr("Reference")} {i + 1} ×
+              <XIcon className="size-3" />
             </Button>
-          );
-        })}
+          </figure>
+        ))}
       </div>
       <input
         ref={file}
@@ -74,14 +80,11 @@ export function BatchReferenceList({
           onBusy?.(true);
           void (async () => {
             const next = [...references];
-            const assets: Record<string, ImageAsset> = {};
             for (const f of files) {
               if (next.length >= max) throw new Error(limit);
               const a = await uploadDrawingImage(f, f.name);
-              assets[a.id] = a;
               next.push({ id: crypto.randomUUID(), assetId: a.id, documentId: null });
             }
-            setUploaded((current) => ({ ...current, ...assets }));
             onChange(next);
           })()
             .catch(onError)
@@ -121,11 +124,6 @@ export function BatchReferenceList({
           batchId={batchId}
           disabled={disabled || references.length >= max}
           picked={(assetId) => references.some((r) => r.assetId === assetId)}
-          onLoaded={(assets) =>
-            setUploaded((current) =>
-              assets.every((a) => current[a.id]) ? current : { ...current, ...byId(assets) },
-            )
-          }
           onPick={pick}
         />
       )}
@@ -133,29 +131,22 @@ export function BatchReferenceList({
   );
 }
 
-const byId = (assets: readonly ImageAsset[]) => Object.fromEntries(assets.map((a) => [a.id, a]));
-
 /** Saved results of the same batch, so an adopted sample can guide later tasks. */
 function ResultReferences({
   batchId,
   disabled,
   picked,
-  onLoaded,
   onPick,
 }: {
   batchId: string;
   disabled?: boolean | undefined;
   picked: (assetId: string) => boolean;
-  onLoaded: (assets: ImageAsset[]) => void;
   onPick: (assetId: string) => void;
 }) {
   const tr = useAhaTranslation();
   const [filter, setFilter] = useState<"adopted" | "all">("adopted");
   const page = useBatchResults({ batchId, filter });
   const results = page.data?.pages.flatMap((p) => p.results) ?? [];
-  useEffect(() => {
-    if (results.length) onLoaded(results.map((r) => r.asset));
-  }, [results.map((r) => r.id).join(",")]);
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">

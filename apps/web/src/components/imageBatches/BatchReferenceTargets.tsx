@@ -13,7 +13,8 @@ import {
 } from "../ui/dialog";
 import { OptionSelect } from "../ui/option-select";
 import { SearchInput } from "../ui/search-input";
-import { outputGroup } from "./resultNames";
+import { outputGroup, outputStem } from "./resultNames";
+import { imageUrl } from "../drawing/useDrawing";
 import { useBatchCommand } from "./useImageBatches";
 import { IMAGE_BATCH_MAX_STYLE_REFERENCES } from "@synara/contracts";
 
@@ -35,7 +36,28 @@ export function ReferenceTargetDialog({
 }) {
   const tr = useAhaTranslation(),
     command = useBatchCommand();
-  const [scope, setScope] = useState<"tasks" | "style">("tasks");
+  // Matching by file name pairs each image with the same-named task in another folder, e.g.
+  // heroes/ember.png → portraits/ember.png, so one selection fans out to the right tasks.
+  const sourceFolders = new Set(results.map((r) => outputGroup(r.output)));
+  const pairsFor = (folder: string) =>
+    results
+      .filter((r) => r.output)
+      .map((result) => ({
+        result,
+        task: batch.tasks.find(
+          (t) =>
+            outputGroup(t.output) === folder && outputStem(t.output) === outputStem(result.output),
+        ),
+      }));
+  const matchFolders = [...new Set(batch.tasks.map((t) => outputGroup(t.output)))]
+    .filter((folder) => folder && !sourceFolders.has(folder))
+    .map((folder) => ({ folder, count: pairsFor(folder).filter((p) => p.task).length }))
+    .toSorted((a, b) => b.count - a.count);
+  const [matchFolder, setMatchFolder] = useState(matchFolders[0]?.folder ?? "");
+  const pairs = matchFolder ? pairsFor(matchFolder) : [];
+  const [scope, setScope] = useState<"tasks" | "match" | "style">(() =>
+    results.length > 1 && (matchFolders[0]?.count ?? 0) > 0 ? "match" : "tasks",
+  );
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
   const shown = batch.tasks.filter(
@@ -52,7 +74,14 @@ export function ReferenceTargetDialog({
     batch.tasks.some((t) => t.id === id && t.enabled),
   );
   const [retire, setRetire] = useState(true);
-  const retired = (id: string) => retire && sourceTasks.includes(id) && !selected.includes(id);
+  // Images each task receives under the current scope.
+  const assetsFor = (taskId: string) =>
+    scope === "match"
+      ? pairs.filter((p) => p.task?.id === taskId).map((p) => p.result.asset.id)
+      : selected.includes(taskId)
+        ? [...new Set(results.map((r) => r.asset.id))]
+        : [];
+  const retired = (id: string) => retire && sourceTasks.includes(id) && !assetsFor(id).length;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const max = 16 - (batch.defaults.styleReferences?.length ?? 0);
@@ -85,8 +114,9 @@ export function ReferenceTargetDialog({
     }
     const tasks = batch.tasks.map((task) => {
       if (retired(task.id)) return { ...task, enabled: false };
-      if (!selected.includes(task.id)) return task;
-      const added = assetIds
+      const incoming = assetsFor(task.id);
+      if (!incoming.length) return task;
+      const added = incoming
         .filter((id) => !task.references.some((r) => r.assetId === id))
         .map((assetId) => ({ id: crypto.randomUUID(), assetId, documentId: null }));
       if (task.references.length + added.length > max)
@@ -125,7 +155,9 @@ export function ReferenceTargetDialog({
             {tr(
               scope === "style"
                 ? "{count} images will be added to the batch style reference images."
-                : "{count} images will be added to the reference images of the chosen tasks.",
+                : scope === "match"
+                  ? "{count} images will each be added to the same-named task."
+                  : "{count} images will be added to the reference images of the chosen tasks.",
             ).replace("{count}", String(results.length))}
           </DialogDescription>
         </DialogHeader>
@@ -138,6 +170,7 @@ export function ReferenceTargetDialog({
               onValueChange={(v) => setScope(v as typeof scope)}
             >
               <option value="tasks">{tr("Chosen tasks only")}</option>
+              {matchFolders.length > 0 && <option value="match">{tr("Match by file name")}</option>}
               <option value="style">{tr("Batch style (every task)")}</option>
             </OptionSelect>
           </div>
@@ -147,6 +180,57 @@ export function ReferenceTargetDialog({
                 "Added to the batch style reference images. At confirmation they are placed before every task's own references, including tasks added later.",
               )}
             </p>
+          ) : scope === "match" ? (
+            <>
+              <div className="w-64">
+                <OptionSelect
+                  label={tr("Target folder")}
+                  value={matchFolder}
+                  disabled={busy}
+                  onValueChange={setMatchFolder}
+                >
+                  {matchFolders.map(({ folder, count }) => (
+                    <option key={folder} value={folder}>
+                      {folder} ({count})
+                    </option>
+                  ))}
+                </OptionSelect>
+              </div>
+              <p className="text-ui-xs text-muted-foreground">
+                {tr(
+                  "Each image goes only to the task with the same file name in the target folder.",
+                )}
+              </p>
+              <ul className="max-h-72 space-y-1 overflow-auto rounded-md border p-2 text-ui-sm">
+                {pairs.map(({ result, task }) => (
+                  <li key={result.id} className="flex items-center gap-2">
+                    <img
+                      src={imageUrl(result.asset, "thumbnail")}
+                      alt=""
+                      className="size-8 shrink-0 rounded bg-muted object-contain"
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {result.output} →{" "}
+                      {task ? (
+                        task.output
+                      ) : (
+                        <span className="text-muted-foreground">
+                          {tr("No task with this name")}
+                        </span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <label className="flex items-center gap-2 text-ui-sm">
+                <Checkbox
+                  checked={enable}
+                  disabled={busy}
+                  onCheckedChange={(v) => setEnable(v === true)}
+                />
+                {tr("Enable the chosen tasks")}
+              </label>
+            </>
           ) : (
             <>
               <SearchInput
@@ -246,7 +330,11 @@ export function ReferenceTargetDialog({
             {tr("Cancel")}
           </Button>
           <Button
-            disabled={busy || (scope === "tasks" && !selected.length)}
+            disabled={
+              busy ||
+              (scope === "tasks" && !selected.length) ||
+              (scope === "match" && !pairs.some((p) => p.task))
+            }
             onClick={() => {
               setBusy(true);
               setError(null);
