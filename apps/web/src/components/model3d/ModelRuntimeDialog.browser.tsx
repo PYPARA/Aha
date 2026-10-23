@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Model3DCommand, Model3DEnvironment, Model3DProject } from "@synara/contracts";
 import Model3DWorkbench from "./Model3DWorkbench";
 import { ModelRuntimeDialog, shouldRemindBlender } from "./ModelRuntimeDialog";
+import { buildThemeCssVariables, DEFAULT_THEME_STATE, resolveThemePack } from "~/theme/theme.logic";
 
 const mocks = vi.hoisted(() => ({ command: vi.fn(), get: vi.fn(), list: vi.fn() }));
 vi.mock("~/aha/AppearanceProvider", () => ({ useAhaTranslation: () => (text: string) => text }));
@@ -25,6 +26,7 @@ let environment: Model3DEnvironment;
 let project: Model3DProject;
 const close = vi.fn();
 const changed = vi.fn();
+let originalStyle: string | null;
 const mountDialog = (intent: "settings" | "blender" = "settings") =>
   render(
     <ModelRuntimeDialog
@@ -35,6 +37,7 @@ const mountDialog = (intent: "settings" | "blender" = "settings") =>
     />,
   );
 beforeEach(() => {
+  originalStyle = document.documentElement.getAttribute("style");
   vi.clearAllMocks();
   localStorage.removeItem("aha:model3d:blender-intro:v1");
   environment = {
@@ -76,6 +79,8 @@ afterEach(async () => {
   await cleanup();
   document.documentElement.classList.remove("dark");
   document.documentElement.style.removeProperty("--app-font-size-ui");
+  if (originalStyle === null) document.documentElement.removeAttribute("style");
+  else document.documentElement.setAttribute("style", originalStyle);
   localStorage.removeItem("aha:model3d:blender-intro:v1");
   await page.viewport(1280, 900);
 });
@@ -164,6 +169,10 @@ it("shows connection errors inside the dialog and supports an explicit successfu
   await expect
     .element(page.getByRole("dialog").getByRole("alert"))
     .toHaveTextContent("Cannot connect to the dedicated Blender instance.");
+  await expect.element(page.getByRole("status")).toHaveTextContent("Runtime setup failed");
+  await expect
+    .element(page.getByRole("button", { name: "Check connection", exact: true }))
+    .not.toBeInTheDocument();
   fail = false;
   await page.getByRole("button", { name: "Save and check", exact: true }).click();
   await expect.element(page.getByRole("status")).toHaveTextContent("Blender connection verified");
@@ -221,6 +230,10 @@ it("keeps fields inset and footer reachable on a narrow window with enlarged tex
   await page.viewport(420, 620);
   document.documentElement.style.setProperty("--app-font-size-ui", "20px");
   for (const dark of [false, true]) {
+    const variant = dark ? "dark" : "light";
+    const theme = buildThemeCssVariables(resolveThemePack(DEFAULT_THEME_STATE, variant), variant);
+    for (const [key, value] of Object.entries(theme.variables))
+      document.documentElement.style.setProperty(key, value);
     document.documentElement.classList.toggle("dark", dark);
     await mountDialog();
     await expect.element(page.getByRole("button", { name: "Done", exact: true })).toBeEnabled();

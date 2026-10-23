@@ -48,6 +48,7 @@ export const model3dCopy: Record<string, string> = {
   "Your applications were found. Prepare the modeling dependencies before building.":
     "已找到所需应用，准备建模依赖后即可开始。",
   "Executable paths": "可执行文件路径",
+  "Executable paths changed": "可执行文件路径已修改",
   "Choose Blender executable": "选择 Blender 可执行文件",
   "Choose uvx executable": "选择 uvx 可执行文件",
   "Runtime setup failed": "运行环境配置未完成",

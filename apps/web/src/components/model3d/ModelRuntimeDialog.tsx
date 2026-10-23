@@ -173,9 +173,13 @@ export function ModelRuntimeDialog({
                   ? "uvx was not found"
                   : !result.prepared
                     ? "Prepare Blender dependencies"
-                    : checked
-                      ? "Blender connection verified"
-                      : "Blender runtime prepared";
+                    : pathsChanged
+                      ? "Executable paths changed"
+                      : displayedError
+                        ? "Runtime setup failed"
+                        : checked
+                          ? "Blender connection verified"
+                          : "Blender runtime prepared";
   const statusDescription =
     busy === "prepare"
       ? "The first preparation downloads modeling dependencies. This may take a few minutes."
@@ -195,12 +199,12 @@ export function ModelRuntimeDialog({
   const buttonLabel =
     busy === "prepare"
       ? "Preparing…"
-      : busy === "check"
-        ? "Checking…"
-        : canFinish
-          ? intent === "blender"
-            ? "Use Blender"
-            : "Done"
+      : canFinish
+        ? intent === "blender"
+          ? "Use Blender"
+          : "Done"
+        : busy === "check"
+          ? "Checking…"
           : result?.prepared
             ? "Save and check"
             : "Prepare Blender runtime";
@@ -223,8 +227,12 @@ export function ModelRuntimeDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-5 pt-2 text-ui-sm">
-          <Alert role="status" aria-live="polite" variant={ready && !busy ? "success" : "default"}>
-            {ready && !busy ? <CircleCheckIcon /> : <InfoIcon />}
+          <Alert
+            role="status"
+            aria-live="polite"
+            variant={canFinish && !busy ? "success" : "default"}
+          >
+            {canFinish && !busy ? <CircleCheckIcon /> : <InfoIcon />}
             <AlertTitle>{tr(statusTitle)}</AlertTitle>
             <AlertDescription>
               {busy !== "detect" && <p>{tr(statusDescription)}</p>}
@@ -318,7 +326,7 @@ export function ModelRuntimeDialog({
           <Button variant="ghost" disabled={!!busy && busy !== "detect"} onClick={onClose}>
             {tr(canFinish ? "Close" : "Set up later")}
           </Button>
-          {ready && !pathsChanged && (
+          {canFinish && (
             <Button variant="outline" disabled={!canConfigure} onClick={() => void run(false)}>
               {tr(busy === "check" ? "Checking…" : "Check connection")}
             </Button>
