@@ -1,12 +1,23 @@
 // Build the exact upstream commit plus the native patch required by the host.
 // The upstream binary archive is baseline provenance, never a patched artifact.
 import { timeBuildStage, startBuildStage } from "../../../scripts/lib/build-timing.ts";
-import { mkdir, readFile, writeFile, chmod, mkdtemp, rm, copyFile, cp } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  writeFile,
+  chmod,
+  mkdtemp,
+  rm,
+  copyFile,
+  cp,
+  rename,
+} from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import {
   assertCuaArtifactProvenance,
   assertLinuxCuaBinaryIdentity,
@@ -46,7 +57,7 @@ const upstreamAsset = {
   linux: { binary: "cua-driver", suffix: "tar.gz" },
 }[platform];
 const architectures = arch === "universal" ? ["arm64", "x64"] : [arch];
-const artifact = option("--artifact-dir") ?? process.env.SYNARA_CUA_ARTIFACT_DIR;
+let artifact = option("--artifact-dir") ?? process.env.SYNARA_CUA_ARTIFACT_DIR;
 const signIdentity = option("--sign-identity") ?? process.env.SYNARA_CUA_SIGN_IDENTITY;
 /** Stable signing identifier so macOS TCC remembers the driver across rebuilds. */
 const CUA_DRIVER_SIGN_IDENTIFIER = "com.emanueledipietro.synara.cua.driver";
@@ -87,7 +98,41 @@ if (platform === "linux") {
 }
 // Check the compiler before fetching ~190 MB of upstream source: a missing or
 // mismatched toolchain is the common failure and needs no network to detect.
-if (!(option("--artifact-dir") ?? process.env.SYNARA_CUA_ARTIFACT_DIR) && platform !== "win32") {
+// Aha: a macOS source build is cached per pinned release, so later packages reuse the verified
+// binary instead of fetching ~190 MB from GitHub and recompiling. --no-cache forces a rebuild.
+const cacheDir =
+  platform === "darwin"
+    ? join(
+        process.env.AHA_CUA_CACHE_DIR ?? join(homedir(), "Library/Caches/aha/cua-driver"),
+        [
+          release.version,
+          release.source.slice(0, 12),
+          `r${release.nativeRevision}`,
+          release.patchSha256.slice(0, 12),
+          `rust${release.rustVersion}`,
+          platform,
+          architectures.join("+"),
+        ].join("-"),
+      )
+    : null;
+const cacheUsable =
+  cacheDir && !artifact && !option("--source-checkout") && !process.argv.includes("--no-cache");
+if (cacheUsable && existsSync(join(cacheDir, "provenance.json"))) {
+  try {
+    assertCuaArtifactProvenance({
+      provenance: JSON.parse(await readFile(join(cacheDir, "provenance.json"), "utf8")),
+      release,
+      platform,
+      architectures,
+      binarySha256: digest(await readFile(join(cacheDir, "cua-driver"))),
+    });
+    artifact = cacheDir;
+    console.log(`Using cached Cua Driver from ${cacheDir}`);
+  } catch (error) {
+    console.warn(`Ignoring the Cua Driver cache (${error.message}); building from source.`);
+  }
+}
+if (!artifact && platform !== "win32") {
   let found;
   try {
     found = execFileSync("rustc", ["--version"], { encoding: "utf8" }).trim();
@@ -374,6 +419,23 @@ try {
     fileURLToPath(new URL("../../../licenses/CUA-LICENSE.txt", import.meta.url)),
     join(destination, "LICENSE.txt"),
   );
+  // Aha: keep a fresh macOS source build for later packages. The staged pair is a valid artifact:
+  // provenance records the digest of the signed binary written next to it.
+  if (cacheUsable && artifact !== cacheDir) {
+    const pending = `${cacheDir}.tmp-${process.pid}`;
+    await rm(pending, { recursive: true, force: true });
+    await mkdir(pending, { recursive: true });
+    // Content writes, not copyFile, so the protected provenance xattr does not follow the binary.
+    await writeFile(join(pending, "cua-driver"), await readFile(join(destination, "cua-driver")));
+    await chmod(join(pending, "cua-driver"), 0o755);
+    await writeFile(
+      join(pending, "provenance.json"),
+      await readFile(join(destination, "provenance.json")),
+    );
+    await rm(cacheDir, { recursive: true, force: true });
+    await rename(pending, cacheDir);
+    console.log(`Cached Cua Driver at ${cacheDir}`);
+  }
   provisionSucceeded = true;
   console.log(
     `Cua ${release.version} ${provenance.patched === false ? "upstream (unpatched, no browser input control)" : platform === "linux" ? `browser input control ${provenance.browserInputControl}, native desktop input unavailable` : `native revision ${release.nativeRevision}`} (${architectures.join("+")}) staged at ${destination}`,

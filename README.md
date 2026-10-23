@@ -20,7 +20,7 @@ bun run aha:build
 bun run aha:package
 ```
 
-`aha:package` 默认生成 macOS Apple Silicon 正式版，整体替换 `release/mac-arm64/` 并做 ad-hoc 签名。构建 Cua Driver 需要 Rust 1.97.1，未设为默认时用 `RUSTUP_TOOLCHAIN=1.97.1 bun run aha:package`。其他平台的本地构建入口保留在根 package.json 中。
+`aha:package` 默认生成 macOS Apple Silicon 正式版，整体替换 `release/mac-arm64/` 并做 ad-hoc 签名。构建 Cua Driver 需要 Rust 1.97.1，未设为默认时用 `RUSTUP_TOOLCHAIN=1.97.1 bun run aha:package`。首次构建后结果按固定版本缓存在 `~/Library/Caches/aha/cua-driver`（可用 `AHA_CUA_CACHE_DIR` 指定），之后打包校验后直接复用，无需再访问 GitHub；删除该目录即可强制重建。其他平台的本地构建入口保留在根 package.json 中。
 
 核心回归及源码检查：
 
