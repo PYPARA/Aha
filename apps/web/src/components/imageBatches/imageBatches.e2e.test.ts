@@ -548,8 +548,9 @@ it.skipIf(!enabled)(
       });
       await page.goto(`http://127.0.0.1:${webPort}/#/image-batches?batchId=${capacity.id}`);
       await page.getByRole("tab", { name: /^Task list$|^任务清单$/ }).click();
+      // Task count has no cap; the 500 planned-image limit is checked on save and confirm.
       expect(await page.getByRole("button", { name: /^Add task$|^添加任务$/ }).isDisabled()).toBe(
-        true,
+        false,
       );
       expect(
         await page
