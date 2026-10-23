@@ -465,8 +465,10 @@ export function ResourceCollectionDialog() {
                     <div className="space-y-1 text-ui-sm text-muted-foreground">
                       <p>{tr("Subfolders from the task output paths are created here:")}</p>
                       <ul className="list-inside list-disc break-all">
-                        {sources.slice(0, 5).map((source, i) => (
-                          <li key={i}>{[source.folder, source.name].filter(Boolean).join("/")}</li>
+                        {sources.slice(0, 5).map((source) => (
+                          <li key={source.origin?.resultId ?? source.assetId ?? source.name}>
+                            {[source.folder, source.name].filter(Boolean).join("/")}
+                          </li>
                         ))}
                         {sources.length > 5 && <li>…</li>}
                       </ul>

@@ -8,6 +8,7 @@ const EXTENSIONS: Record<string, readonly string[]> = {
 
 /** Name used when a task has no output path: task name, attempt and position. */
 export function resultFilename(r: ImageBatchResult) {
+  // eslint-disable-next-line no-control-regex -- file names cannot contain control characters.
   const characters = [...r.taskName.replace(/[\\/\u0000-\u001f<>:"|?*]/g, "_")].slice(0, 80);
   let name = "";
   const encoder = new TextEncoder();

@@ -51,14 +51,19 @@ export function BatchTaskEditor({
     onError(cause);
   };
   const save = async () => {
+    // Field problems stay inline: they are not draft conflicts and need no baseline reload.
+    const invalid =
+      !draft.name.trim() || !draft.prompt.trim()
+        ? "Enter a task name and prompt."
+        : draft.output !== undefined && !Schema.is(ImageBatchOutputPath)(draft.output)
+          ? "Use a relative path such as heroes/ember.png, without empty, . or .. parts."
+          : null;
+    if (invalid) {
+      setError(tr(invalid));
+      return;
+    }
     setBusy(true);
     try {
-      if (!draft.name.trim() || !draft.prompt.trim())
-        throw new Error(tr("Enter a task name and prompt."));
-      if (draft.output !== undefined && !Schema.is(ImageBatchOutputPath)(draft.output))
-        throw new Error(
-          tr("Use a relative path such as heroes/ember.png, without empty, . or .. parts."),
-        );
       for (const r of draft.references) if (r.documentId) await getImageEditDocument(r.documentId);
       await onSave(draft);
       onClose();

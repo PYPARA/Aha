@@ -15,6 +15,8 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { Checkbox } from "../ui/checkbox";
 import { OptionSelect } from "../ui/option-select";
+import { SearchInput } from "../ui/search-input";
+import { DisclosureChevron } from "../ui/DisclosureChevron";
 import { Sheet, SheetPopup, SheetTitle } from "../ui/sheet";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
 import { RouteSurfaceHeader } from "../RouteSurface";
@@ -34,9 +36,14 @@ import { BatchResults } from "./BatchResults";
 import { BatchProposals } from "./BatchProposals";
 import { BatchExecution } from "./BatchExecution";
 import { BatchReferenceList } from "./BatchReferenceList";
+import { BatchBulkParameters } from "./BatchBulkParameters";
 import { useResourceAttachments, type ResourceReceiveResult } from "../resources/resourceLibrary";
 import { uploadDrawingImage } from "../drawing/useDrawing";
 import { drawingResourceError } from "@synara/contracts/resourceLibrary";
+
+/** Tasks group by the first folder of their output path, e.g. heroes/ember.png → heroes. */
+const taskGroup = (t: ImageBatchTask) =>
+  t.output?.includes("/") ? t.output.slice(0, t.output.indexOf("/")) : "";
 
 export default function ImageBatchWorkbench({
   batchId,
@@ -284,7 +291,10 @@ function BatchWorkspace({
   const [configuration, setConfiguration] = useState<ImageBatchState | null>(null);
   const [selected, setSelected] = useState<string[]>([]),
     [busy, setBusy] = useState(false);
-  const [bulkCount, setBulkCount] = useState("2");
+  const [bulkParameters, setBulkParameters] = useState(false);
+  const [taskFilter, setTaskFilter] = useState<"all" | "enabled" | "disabled">("all");
+  const [taskQuery, setTaskQuery] = useState("");
+  const [collapsed, setCollapsed] = useState<string[]>([]);
   const [reviewVersion, setReviewVersion] = useState<number | null>(null);
   const [retainedResults, setRetainedResults] = useState(false);
   const focusTask = useRef<HTMLDivElement>(null);
@@ -298,7 +308,26 @@ function BatchWorkspace({
   const counts = imageBatchPlanCounts(batch.tasks, batch.defaults);
   const hasStyle = !!batch.defaults.stylePrompt?.trim() || !!batch.defaults.styleReferences?.length;
   const pending = batch.proposals.filter((p) => p.status === "pending").length;
+  const query = taskQuery.trim().toLowerCase();
+  const visibleTasks = batch.tasks.filter(
+    (t) =>
+      (taskFilter === "all" || t.enabled === (taskFilter === "enabled")) &&
+      (!query || (t.name + " " + (t.output ?? "")).toLowerCase().includes(query)),
+  );
+  const grouped = batch.tasks.some((t) => taskGroup(t));
+  const taskGroups = grouped
+    ? [...new Set(visibleTasks.map(taskGroup))].map((id) => ({
+        id,
+        tasks: visibleTasks.filter((t) => taskGroup(t) === id),
+      }))
+    : [{ id: "", tasks: visibleTasks }];
   const active = batch.executions.some((e) => !e.finishedAt);
+  // Bulk actions act on what is shown: a filter change drops hidden tasks from the selection.
+  const visibleKey = visibleTasks.map((t) => t.id).join(",");
+  useEffect(() => {
+    const shown = new Set(visibleKey.split(","));
+    setSelected((current) => current.filter((id) => shown.has(id)));
+  }, [visibleKey]);
   // Images sent from the Resource Center or other modules become batch style references.
   useResourceAttachments(
     "image-batch:" + batch.id,
@@ -597,6 +626,29 @@ function BatchWorkspace({
             >
               {tr("Add task")}
             </Button>
+            {batch.tasks.length > 0 && (
+              <>
+                <div className="w-28">
+                  <OptionSelect
+                    label={tr("Task filter")}
+                    value={taskFilter}
+                    onValueChange={(v) => setTaskFilter(v as typeof taskFilter)}
+                  >
+                    <option value="all">{tr("All tasks")}</option>
+                    <option value="enabled">{tr("Enabled")}</option>
+                    <option value="disabled">{tr("Disabled")}</option>
+                  </OptionSelect>
+                </div>
+                <div className="w-44">
+                  <SearchInput
+                    aria-label={tr("Search tasks")}
+                    placeholder={tr("Search tasks")}
+                    value={taskQuery}
+                    onChange={(e) => setTaskQuery(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
             {selected.length > 0 && (
               <>
                 <Button
@@ -631,43 +683,13 @@ function BatchWorkspace({
                 >
                   {tr("Disable selected")}
                 </Button>
-                <Input
-                  className="w-16"
-                  type="number"
-                  min={1}
-                  max={10}
-                  aria-label={tr("Images per selected task")}
-                  value={bulkCount}
-                  onChange={(e) => setBulkCount(e.target.value)}
-                />
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={
-                    busy ||
-                    !Number.isInteger(Number(bulkCount)) ||
-                    Number(bulkCount) < 1 ||
-                    Number(bulkCount) > 10
-                  }
-                  onClick={() =>
-                    action(() =>
-                      saveTasks(
-                        batch.tasks.map((t) =>
-                          selected.includes(t.id)
-                            ? {
-                                ...t,
-                                parameters: {
-                                  ...imageBatchTaskConfiguration(t, batch.defaults).parameters,
-                                  n: Number(bulkCount),
-                                },
-                              }
-                            : t,
-                        ),
-                      ),
-                    )
-                  }
+                  disabled={busy}
+                  onClick={() => setBulkParameters(true)}
                 >
-                  {tr("Set image count")}
+                  {tr("Set parameters")}
                 </Button>
               </>
             )}
@@ -697,142 +719,214 @@ function BatchWorkspace({
             {batch.tasks.length > 0 && (
               <label className="mb-2 flex items-center gap-2 text-ui-xs">
                 <Checkbox
-                  checked={selected.length === batch.tasks.length}
-                  onCheckedChange={(v) => setSelected(v ? batch.tasks.map((t) => t.id) : [])}
+                  checked={
+                    visibleTasks.length > 0 && visibleTasks.every((t) => selected.includes(t.id))
+                  }
+                  onCheckedChange={(v) => setSelected(v ? visibleTasks.map((t) => t.id) : [])}
                 />
-                {tr("Select all tasks")} ({selected.length})
+                {tr(
+                  visibleTasks.length < batch.tasks.length
+                    ? "Select shown tasks"
+                    : "Select all tasks",
+                )}{" "}
+                ({selected.length})
               </label>
             )}
-            {batch.tasks.map((t, index) => {
-              const c = imageBatchTaskConfiguration(t, batch.defaults);
-              return (
-                <div
-                  key={t.id}
-                  ref={t.id === taskId ? focusTask : undefined}
-                  tabIndex={t.id === taskId ? 0 : undefined}
-                  className="flex flex-wrap items-start gap-3 border-b px-2 py-3 text-ui outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <Checkbox
-                    aria-label={tr("Select task") + ": " + t.name}
-                    checked={selected.includes(t.id)}
-                    onCheckedChange={(v) =>
-                      setSelected(v ? [...selected, t.id] : selected.filter((id) => id !== t.id))
-                    }
-                  />
-                  <div className="min-w-0 flex-1 basis-48">
+            {batch.tasks.length > 0 && !visibleTasks.length && (
+              <p className="py-6 text-center text-ui-sm text-muted-foreground">
+                {tr("No tasks match the filter.")}
+              </p>
+            )}
+            {taskGroups.map((group) => (
+              <div key={group.id}>
+                {grouped && (
+                  <div className="flex items-center gap-2 border-b px-2 py-2 text-ui-sm">
+                    <Checkbox
+                      aria-label={tr("Select group") + ": " + (group.id || tr("Ungrouped"))}
+                      checked={group.tasks.every((t) => selected.includes(t.id))}
+                      onCheckedChange={(v) =>
+                        setSelected(
+                          v
+                            ? [...new Set([...selected, ...group.tasks.map((t) => t.id)])]
+                            : selected.filter((id) => !group.tasks.some((t) => t.id === id)),
+                        )
+                      }
+                    />
                     <button
                       type="button"
-                      className="max-w-full truncate text-left font-medium underline-offset-4 hover:underline focus-visible:outline-ring"
+                      aria-label={`${group.id || tr("Ungrouped")} ${group.tasks.filter((t) => t.enabled).length}/${group.tasks.length} ${tr("enabled")}`}
+                      aria-expanded={!collapsed.includes(group.id)}
+                      className="flex min-w-0 flex-1 items-center gap-1 text-left font-medium focus-visible:outline-ring"
                       onClick={() =>
-                        setEditor({ task: structuredClone(t), base: structuredClone(batch) })
-                      }
-                    >
-                      {index + 1}. {t.name}
-                    </button>
-                    <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-ui-sm text-muted-foreground">
-                      {t.prompt || tr("No prompt")}
-                    </p>
-                    <p className="mt-1 text-ui-xs text-muted-foreground">
-                      {c.model || tr("No model")} · {c.parameters.n} {tr("images")} ·{" "}
-                      {t.references.length} {tr("references")}
-                      {hasStyle && " · " + tr("Uses batch style")}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1">
-                    <label className="mr-2 flex items-center gap-1 text-ui-xs">
-                      <Checkbox
-                        disabled={busy}
-                        checked={t.enabled}
-                        onCheckedChange={(v) =>
-                          action(() =>
-                            saveTasks(
-                              batch.tasks.map((x) =>
-                                x.id === t.id ? { ...x, enabled: v === true } : x,
-                              ),
-                            ),
-                          )
-                        }
-                      />
-                      {tr("Enabled")}
-                    </label>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label={tr("Move task up") + ": " + t.name}
-                      disabled={busy || index === 0}
-                      onClick={() =>
-                        action(() => {
-                          const next = [...batch.tasks];
-                          [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
-                          return saveTasks(next);
-                        })
-                      }
-                    >
-                      ↑
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label={tr("Move task down") + ": " + t.name}
-                      disabled={busy || index === batch.tasks.length - 1}
-                      onClick={() =>
-                        action(() => {
-                          const next = [...batch.tasks];
-                          [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
-                          return saveTasks(next);
-                        })
-                      }
-                    >
-                      ↓
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() =>
-                        action(() =>
-                          saveTasks([
-                            ...batch.tasks.slice(0, index + 1),
-                            {
-                              ...structuredClone(t),
-                              id: crypto.randomUUID(),
-                              name: tr("{name} copy").replace("{name}", t.name),
-                            },
-                            ...batch.tasks.slice(index + 1),
-                          ]),
+                        setCollapsed(
+                          collapsed.includes(group.id)
+                            ? collapsed.filter((id) => id !== group.id)
+                            : [...collapsed, group.id],
                         )
                       }
                     >
-                      {tr("Duplicate")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() =>
-                        action(async () => {
-                          if (
-                            await confirmDialog({
-                              title: tr('Remove task "{name}"?').replace("{name}", t.name),
-                              description: tr(
-                                "The task leaves the draft. Images it already generated are kept in the results.",
-                              ),
-                              confirmLabel: tr("Remove"),
-                              destructive: true,
-                            })
-                          ) {
-                            await saveTasks(batch.tasks.filter((x) => x.id !== t.id));
-                            setSelected(selected.filter((id) => id !== t.id));
-                          }
-                        })
-                      }
-                    >
-                      {tr("Remove")}
-                    </Button>
+                      <DisclosureChevron open={!collapsed.includes(group.id)} />
+                      <span className="truncate">{group.id || tr("Ungrouped")}</span>
+                      <span className="text-ui-xs font-normal text-muted-foreground">
+                        {group.tasks.filter((t) => t.enabled).length}/{group.tasks.length}{" "}
+                        {tr("enabled")}
+                      </span>
+                    </button>
                   </div>
-                </div>
-              );
-            })}
+                )}
+                {!collapsed.includes(group.id) &&
+                  group.tasks.map((t) => {
+                    const index = batch.tasks.indexOf(t);
+                    const c = imageBatchTaskConfiguration(t, batch.defaults);
+                    const custom = !!(t.providerId || t.model || t.parameters);
+                    return (
+                      <div
+                        key={t.id}
+                        ref={t.id === taskId ? focusTask : undefined}
+                        tabIndex={t.id === taskId ? 0 : undefined}
+                        className="flex flex-wrap items-start gap-3 border-b px-2 py-3 text-ui outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <Checkbox
+                          aria-label={tr("Select task") + ": " + t.name}
+                          checked={selected.includes(t.id)}
+                          onCheckedChange={(v) =>
+                            setSelected(
+                              v ? [...selected, t.id] : selected.filter((id) => id !== t.id),
+                            )
+                          }
+                        />
+                        <div className="min-w-0 flex-1 basis-48">
+                          <button
+                            type="button"
+                            className="max-w-full truncate text-left font-medium underline-offset-4 hover:underline focus-visible:outline-ring"
+                            onClick={() =>
+                              setEditor({ task: structuredClone(t), base: structuredClone(batch) })
+                            }
+                          >
+                            {index + 1}. {t.name}
+                          </button>
+                          <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-ui-sm text-muted-foreground">
+                            {t.prompt || tr("No prompt")}
+                          </p>
+                          {t.output && (
+                            <p className="mt-1 truncate text-ui-xs text-muted-foreground">
+                              {t.output}
+                            </p>
+                          )}
+                          <p className="mt-1 text-ui-xs text-muted-foreground">
+                            {[
+                              c.model || tr("No model"),
+                              c.parameters.n + " " + tr("images"),
+                              c.parameters.size,
+                              c.parameters.quality &&
+                                tr("Quality") + " " + tr(c.parameters.quality),
+                              c.parameters.background &&
+                                tr("Background") + " " + tr(c.parameters.background),
+                              t.references.length + " " + tr("references"),
+                              hasStyle && tr("Uses batch style"),
+                              custom && tr("Own settings"),
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <label className="mr-2 flex items-center gap-1 text-ui-xs">
+                            <Checkbox
+                              disabled={busy}
+                              checked={t.enabled}
+                              onCheckedChange={(v) =>
+                                action(() =>
+                                  saveTasks(
+                                    batch.tasks.map((x) =>
+                                      x.id === t.id ? { ...x, enabled: v === true } : x,
+                                    ),
+                                  ),
+                                )
+                              }
+                            />
+                            {tr("Enabled")}
+                          </label>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={tr("Move task up") + ": " + t.name}
+                            disabled={busy || index === 0}
+                            onClick={() =>
+                              action(() => {
+                                const next = [...batch.tasks];
+                                [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
+                                return saveTasks(next);
+                              })
+                            }
+                          >
+                            ↑
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={tr("Move task down") + ": " + t.name}
+                            disabled={busy || index === batch.tasks.length - 1}
+                            onClick={() =>
+                              action(() => {
+                                const next = [...batch.tasks];
+                                [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
+                                return saveTasks(next);
+                              })
+                            }
+                          >
+                            ↓
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() =>
+                              action(() =>
+                                saveTasks([
+                                  ...batch.tasks.slice(0, index + 1),
+                                  {
+                                    ...structuredClone(t),
+                                    id: crypto.randomUUID(),
+                                    name: tr("{name} copy").replace("{name}", t.name),
+                                  },
+                                  ...batch.tasks.slice(index + 1),
+                                ]),
+                              )
+                            }
+                          >
+                            {tr("Duplicate")}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() =>
+                              action(async () => {
+                                if (
+                                  await confirmDialog({
+                                    title: tr('Remove task "{name}"?').replace("{name}", t.name),
+                                    description: tr(
+                                      "The task leaves the draft. Images it already generated are kept in the results.",
+                                    ),
+                                    confirmLabel: tr("Remove"),
+                                    destructive: true,
+                                  })
+                                ) {
+                                  await saveTasks(batch.tasks.filter((x) => x.id !== t.id));
+                                  setSelected(selected.filter((id) => id !== t.id));
+                                }
+                              })
+                            }
+                          >
+                            {tr("Remove")}
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            ))}
           </div>
           <div className="max-h-[45%] shrink-0 overflow-auto">
             <BatchExecution
@@ -853,6 +947,28 @@ function BatchWorkspace({
         >
           <BatchResults batch={batch} focusResultId={resultId} onError={onError} />
         </div>
+      )}
+      {bulkParameters && selected.length > 0 && (
+        <BatchBulkParameters
+          tasks={batch.tasks.filter((t) => selected.includes(t.id))}
+          defaults={batch.defaults}
+          onClose={() => setBulkParameters(false)}
+          onApply={(patch) =>
+            saveTasks(
+              batch.tasks.map((t) =>
+                selected.includes(t.id)
+                  ? {
+                      ...t,
+                      parameters: {
+                        ...imageBatchTaskConfiguration(t, batch.defaults).parameters,
+                        ...patch,
+                      },
+                    }
+                  : t,
+              ),
+            )
+          }
+        />
       )}
       {editor && (
         <BatchTaskEditor

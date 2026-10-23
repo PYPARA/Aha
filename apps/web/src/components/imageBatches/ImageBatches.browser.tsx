@@ -7,6 +7,7 @@ import type { ImageBatchState, ImageBatchResult, DesktopBridge } from "@synara/c
 import { BatchProposals } from "./BatchProposals";
 import { BatchExecution } from "./BatchExecution";
 import { BatchResults } from "./BatchResults";
+import { ReferenceTargetDialog } from "./BatchReferenceTargets";
 import { useResourceCollection } from "../resources/resourceLibrary";
 import { useBatchCollectionWorker } from "../resources/useBatchCollectionWorker";
 import type {
@@ -150,6 +151,74 @@ it("applies a proposal and asks the workspace to open the generation check", asy
   await vi.waitFor(() => expect(onApplied).toHaveBeenCalledWith(applied, true));
   expect(mocks.command).toHaveBeenCalledTimes(1);
   expect(mocks.command.mock.calls[0]![0]).toMatchObject({ operation: "apply-proposal" });
+});
+it("previews a proposed batch style and counts images under the proposed defaults", async () => {
+  batch.proposals = [
+    {
+      id: "proposal",
+      requestId: "request",
+      baseVersion: 2,
+      threadId: "thread",
+      turnId: "turn",
+      createdAt: new Date().toISOString(),
+      summary: "Move the shared prefix into the batch style",
+      warnings: [],
+      status: "pending",
+      tasks: batch.tasks,
+      defaults: { stylePrompt: "Cel-shaded, navy and gold.", parameters: { n: 1 } },
+    },
+  ];
+  await mount(<BatchProposals batch={batch} onError={onError} />);
+  await expect
+    .element(page.getByText("Also changes the batch style or default parameters."))
+    .toBeVisible();
+  await page.getByRole("button", { name: "Preview changes", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect.element(dialog).toHaveTextContent("Batch style and defaults");
+  await expect.element(dialog).toHaveTextContent("Cel-shaded, navy and gold.");
+  // Task 0 keeps its own count of 1; the other five drop from 2 to the proposed default of 1.
+  await expect.element(dialog).toHaveTextContent("11 → 6");
+});
+it("adds selected results as references to chosen tasks and enables them", async () => {
+  batch.tasks[1] = { ...batch.tasks[1]!, enabled: false };
+  const result = {
+    id: "result",
+    batchId: "batch",
+    executionId: "execution",
+    attemptId: "attempt",
+    taskId: "task0",
+    taskName: "Task 0",
+    position: 0,
+    asset: {
+      id: "a".repeat(64),
+      name: "sample.png",
+      mimeType: "image/png",
+      url: "/asset",
+      thumbnailUrl: "/asset?variant=thumbnail",
+      width: 1,
+      height: 1,
+      bytes: 1,
+      createdAt: new Date().toISOString(),
+    },
+    prompt: "Prompt 0",
+    model: "image-model",
+    parameters: { n: 1 },
+    createdAt: new Date().toISOString(),
+    adopted: true,
+  } as ImageBatchResult;
+  const onClose = vi.fn();
+  await mount(<ReferenceTargetDialog batch={batch} results={[result]} onClose={onClose} />);
+  await page.getByText("1. Task 0").click();
+  await page.getByText("2. Task 1").click();
+  await page.getByRole("button", { name: "Add references", exact: true }).click();
+  await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  const saved = mocks.command.mock.calls[0]![0];
+  expect(saved).toMatchObject({ operation: "save", version: 2 });
+  expect(saved.tasks[1]).toMatchObject({
+    enabled: true,
+    references: [{ assetId: "a".repeat(64), documentId: null }],
+  });
+  expect(saved.tasks[2].references).toEqual([]);
 });
 it("opens the generation check for the requested version without confirming", async () => {
   const opened = vi.fn();
