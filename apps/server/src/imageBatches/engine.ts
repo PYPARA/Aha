@@ -554,7 +554,29 @@ export class ImageBatchEngine {
         const results = await Promise.all(input.resultIds.map((id) => this.repository.result(id)));
         if (results.some((r) => r.batchId !== state.id))
           throw new Error("Result belongs to another batch.");
-        await this.repository.updateResults(results.map((r) => ({ ...r, adopted: input.adopted })));
+        const chosen = new Set(results.map((r) => r.id));
+        // Exclusive adoption: the chosen candidates become the task's keepers, others are cleared.
+        const displaced =
+          input.exclusive && input.adopted
+            ? (
+                await this.repository.resultsForTasks(state.id, [
+                  ...new Set(results.map((r) => r.taskId)),
+                ])
+              ).filter((r) => r.adopted && !chosen.has(r.id))
+            : [];
+        await this.repository.updateResults([
+          ...results.map((r) => ({ ...r, adopted: input.adopted })),
+          ...displaced.map((r) => ({ ...r, adopted: false })),
+        ]);
+      } else if (input.operation === "delete-results") {
+        const results = await Promise.all(input.resultIds.map((id) => this.repository.result(id)));
+        if (results.some((r) => r.batchId !== state.id))
+          throw new Error("Result belongs to another batch.");
+        // An active execution re-saves its returned images on every tick, so wait until it ends.
+        const active = state.executions.find((e) => !e.finishedAt);
+        if (active && results.some((r) => r.executionId === active.id))
+          throw new Error("Finish the current execution before deleting its results.");
+        await this.repository.deleteResults(state.id, input.resultIds);
       } else if (input.operation === "collection-start") {
         if (state.activeCollections?.includes(input.operationId)) return state;
         const results = await Promise.all(input.resultIds.map((id) => this.repository.result(id)));

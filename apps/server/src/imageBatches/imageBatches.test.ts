@@ -495,6 +495,73 @@ describe("removed tasks", () => {
     ]);
   });
 });
+describe("result curation", () => {
+  it("keeps one adopted candidate per task and deletes results of finished runs", async () => {
+    f.fetcher.mockImplementation(async () => f.response(2));
+    let s = await f.save(await f.create(), [f.task("one", 2)]);
+    s = await f.confirm(s);
+    s = await f.settle(s.id);
+    const [a, b] = (await f.repo.results({ batchId: s.id })).results;
+    await f.engine.command({
+      operation: "adopt",
+      batchId: s.id,
+      resultIds: [a!.id],
+      adopted: true,
+      exclusive: true,
+    });
+    await f.engine.command({
+      operation: "adopt",
+      batchId: s.id,
+      resultIds: [b!.id],
+      adopted: true,
+      exclusive: true,
+    });
+    const adopted = (await f.repo.results({ batchId: s.id, filter: "adopted" })).results;
+    expect(adopted.map((r) => r.id)).toEqual([b!.id]);
+    // Choosing both at once keeps both.
+    await f.engine.command({
+      operation: "adopt",
+      batchId: s.id,
+      resultIds: [a!.id, b!.id],
+      adopted: true,
+      exclusive: true,
+    });
+    expect((await f.repo.results({ batchId: s.id, filter: "adopted" })).total).toBe(2);
+    await f.engine.command({ operation: "delete-results", batchId: s.id, resultIds: [a!.id] });
+    expect((await f.repo.results({ batchId: s.id })).results.map((r) => r.id)).toEqual([b!.id]);
+  });
+  it("refuses to delete results of the running execution", async () => {
+    let release: ((value: Response) => void) | undefined;
+    f.fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => (release = resolve)));
+    f.fetcher.mockImplementation(async () => f.response(1));
+    // Two batch slots, so one request can finish while the other is still held.
+    const wide = await f.images.upsertProvider({
+      name: "Wide",
+      baseUrl: "http://127.0.0.1:9774/v1",
+      enabled: true,
+      models: [{ id: "mock", source: "manual", lastTestAt: null, lastTestStatus: null }],
+      defaultModel: "mock",
+      concurrency: 3,
+      timeoutSeconds: 30,
+    });
+    const onWide = (id: string) => ({ ...f.task(id, 1), providerId: wide.id, model: "mock" });
+    let s = await f.save(await f.create(), [onWide("one"), onWide("two")]);
+    s = await f.confirm(s);
+    await f.engine.tick();
+    await f.images.tick();
+    await vi.waitFor(async () => {
+      await f.engine.tick();
+      await f.images.tick();
+      expect((await f.repo.results({ batchId: s.id })).total).toBe(1);
+    });
+    const [first] = (await f.repo.results({ batchId: s.id })).results;
+    await expect(
+      f.engine.command({ operation: "delete-results", batchId: s.id, resultIds: [first!.id] }),
+    ).rejects.toThrow("Finish the current execution");
+    release!(f.response());
+    await f.settle(s.id);
+  });
+});
 describe("proposal defaults", () => {
   it("applies a proposed style and default parameters and counts images with them", async () => {
     let s = await f.create();

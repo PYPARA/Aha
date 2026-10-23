@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { confirmDialog } from "../ui/confirm-dialog";
 import { OptionSelect } from "../ui/option-select";
 import { SearchInput } from "../ui/search-input";
@@ -31,6 +32,13 @@ import {
   reconcileResourceSelection,
 } from "../resources/resourceSelection";
 import type { ResourceLocateResult, ResourceLinkState } from "@synara/contracts/resourceLibrary";
+
+/** Groups results by task, keeping the order they arrive in. */
+const byTask = (values: readonly ImageBatchResult[]) =>
+  [...new Set(values.map((r) => r.taskId))].map((id) => {
+    const taskResults = values.filter((r) => r.taskId === id);
+    return { id, name: taskResults[0]!.taskName, results: taskResults };
+  });
 
 export function BatchResults({
   batch,
@@ -127,6 +135,45 @@ export function BatchResults({
     setSelection((previous) => reconcileResourceSelection(previous, visibleIds));
   }, [visibleIds.join(",")]);
   const chosen = results.filter((r) => selection.ids.includes(r.id));
+  // Checkboxes add to or remove from the selection without the modifier keys clicks need.
+  const toggle = (id: string) =>
+    setSelection((current) => ({
+      ids: current.ids.includes(id) ? current.ids.filter((x) => x !== id) : [...current.ids, id],
+      focusedId: id,
+      anchorId: id,
+    }));
+  const selectMany = (ids: string[], on: boolean) =>
+    setSelection((current) => ({
+      ...current,
+      ids: on
+        ? [...new Set([...current.ids, ...ids])]
+        : current.ids.filter((id) => !ids.includes(id)),
+    }));
+  // Everything is loaded so the page always shows the whole batch; thumbnails load lazily.
+  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = page;
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
+  const remove = (values: ImageBatchResult[]) =>
+    perform(async () => {
+      if (
+        !(await confirmDialog({
+          title: tr("Delete {count} results?").replace("{count}", String(values.length)),
+          description: tr(
+            "They leave this batch's results. Copies already added to the resource center stay, and the tasks can be regenerated.",
+          ),
+          confirmLabel: tr("Delete"),
+          destructive: true,
+        }))
+      )
+        return;
+      await command({
+        operation: "delete-results",
+        batchId: batch.id,
+        resultIds: values.map((r) => r.id),
+      });
+      setSelection(emptyResourceSelection());
+    });
   const [referenceFor, setReferenceFor] = useState<ImageBatchResult[] | null>(null);
   const [adoptedOffer, setAdoptedOffer] = useState<{
     result: ImageBatchResult;
@@ -134,11 +181,13 @@ export function BatchResults({
   } | null>(null);
   const adopt = (values: ImageBatchResult[], adopted: boolean) =>
     perform(async () => {
+      // Adopting keeps the chosen candidates as their task's keepers and clears the task's others.
       await command({
         operation: "adopt",
         batchId: batch.id,
         resultIds: values.map((r) => r.id),
         adopted,
+        exclusive: adopted,
       });
       // After adopting a sample, offer it as the reference for the rest of its output folder.
       const sample = values.length === 1 && adopted ? values[0]! : null;
@@ -377,152 +426,195 @@ export function BatchResults({
           </div>
         ) : null}
         {groups.map((group) => (
-          <section key={group.id} className="mb-5 space-y-2">
+          <section key={group.id} className="mb-6 space-y-3">
             {foldered && (
-              <h3 className="text-ui font-medium">
-                {group.id || tr("Ungrouped")}{" "}
-                <span className="text-ui-xs font-normal text-muted-foreground">
-                  {group.results.length} {tr("images")}
-                </span>
-              </h3>
-            )}
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,160px),1fr))] gap-3">
-              {group.results.map((r) => (
-                <div
-                  key={r.id}
-                  className={
-                    "min-w-0 rounded-lg border " +
-                    (selection.ids.includes(r.id)
-                      ? "border-foreground/50 bg-muted"
-                      : "border-transparent hover:bg-muted/50")
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  aria-label={tr("Select folder") + ": " + (group.id || tr("Ungrouped"))}
+                  checked={
+                    group.results.length > 0 &&
+                    group.results.every((r) => selection.ids.includes(r.id))
                   }
-                >
-                  <button
-                    type="button"
-                    aria-label={tr("Select result") + ": " + r.taskName + " " + (r.position + 1)}
-                    aria-pressed={selection.ids.includes(r.id)}
-                    data-batch-result={r.id}
-                    className="w-full min-w-0 rounded-lg p-2 pb-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={(e) =>
-                      setSelection(selectResource(selection, r.id, visibleIds, e, multiple))
-                    }
-                    onDoubleClick={(e) => showPreview([r], e.currentTarget)}
-                    onKeyDown={(e) => {
-                      if (e.key === " ") {
-                        e.preventDefault();
-                        showPreview([r], e.currentTarget);
-                      }
-                      if (["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) {
-                        e.preventDefault();
-                        const index = visibleIds.indexOf(r.id),
-                          next =
-                            e.key === "Home"
-                              ? visibleIds[0]
-                              : e.key === "End"
-                                ? visibleIds.at(-1)
-                                : visibleIds[index + (e.key === "ArrowRight" ? 1 : -1)];
-                        if (next) {
-                          setSelection(selectResource(selection, next, visibleIds, e));
-                          document
-                            .querySelector<HTMLButtonElement>(
-                              `[data-batch-result="${CSS.escape(next)}"]`,
-                            )
-                            ?.focus();
-                        }
-                      }
-                      if ((e.metaKey || e.ctrlKey) && e.key === "a") {
-                        e.preventDefault();
-                        setSelection({ ids: visibleIds, focusedId: r.id, anchorId: r.id });
-                      }
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        setSelection(emptyResourceSelection());
-                      }
-                    }}
-                  >
-                    <PreviewSurface checker className="aspect-square w-full rounded-md">
-                      <img
-                        src={imageUrl(r.asset, "thumbnail")}
-                        alt={r.taskName}
-                        loading="lazy"
-                        className="h-full w-full object-contain"
-                      />
-                    </PreviewSurface>
-                    <span className="mt-2 block truncate text-ui-sm" title={r.taskName}>
-                      {r.output ? names.get(r.id)?.name : `${r.taskName} · ${r.position + 1}`}
+                  onCheckedChange={(v) =>
+                    selectMany(
+                      group.results.map((r) => r.id),
+                      v === true,
+                    )
+                  }
+                />
+                <h3 className="text-ui font-medium">
+                  {group.id || tr("Ungrouped")}{" "}
+                  <span className="text-ui-xs font-normal text-muted-foreground">
+                    {group.results.length} {tr("images")}
+                  </span>
+                </h3>
+              </div>
+            )}
+            {/* Candidates of one task sit together, so it is clear which images compete. */}
+            <div className="flex flex-wrap gap-x-6 gap-y-4">
+              {byTask(group.results).map((task) => (
+                <div key={task.id} className="min-w-0 space-y-1">
+                  <p className="max-w-full truncate text-ui-sm" title={task.name}>
+                    {task.name}
+                    <span className="text-ui-xs text-muted-foreground">
+                      {task.results.length > 1 &&
+                        " · " +
+                          tr("{count} candidates").replace("{count}", String(task.results.length))}
+                      {task.results.some((r) => r.adopted)
+                        ? " · " + tr("Adopted")
+                        : task.results.length > 1
+                          ? " · " + tr("Choose one")
+                          : ""}
                     </span>
-                    <span className="block truncate text-ui-xs text-muted-foreground">
-                      {r.output && r.taskName + " · "}
-                      {r.asset.width}×{r.asset.height}
-                      {r.adopted && " · " + tr("Adopted")}
-                    </span>
-                    {resultSizeMismatch(r) && (
-                      <span className="block truncate text-ui-xs text-warning">
-                        {tr("Requested {size}").replace("{size}", resultSizeMismatch(r)!)}
-                      </span>
-                    )}
-                    {r.collection && (
-                      <span className="block text-ui-xs text-muted-foreground">
-                        {tr(
-                          links.data?.[r.id]?.status === "removed"
-                            ? "Removed from resource center"
-                            : links.data?.[r.id]?.status === "other-library"
-                              ? "Collected in another library"
-                              : links.data?.[r.id]?.status === "unavailable"
-                                ? "Resource is unavailable"
-                                : "Collected",
-                        )}
-                      </span>
-                    )}
-                  </button>
-                  {!readOnly && (
-                    // Visible, not hover-only: adopting and reusing a sample are the main next steps.
-                    <div className="flex flex-wrap gap-1 px-2 pb-2">
-                      <Button
-                        size="xs"
-                        variant={r.adopted ? "secondary" : "outline"}
-                        aria-label={
-                          tr(r.adopted ? "Unmark adopted" : "Mark adopted") + ": " + r.taskName
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {task.results.map((r) => (
+                      <div
+                        key={r.id}
+                        className={
+                          "relative w-40 shrink-0 rounded-lg border " +
+                          (selection.ids.includes(r.id)
+                            ? "border-foreground/50 bg-muted"
+                            : "border-transparent hover:bg-muted/50")
                         }
-                        onClick={() => adopt([r], !r.adopted)}
                       >
-                        {tr(r.adopted ? "Unmark adopted" : "Mark adopted")}
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        aria-label={tr("Use as task reference") + ": " + r.taskName}
-                        onClick={() => setReferenceFor([r])}
-                      >
-                        {tr("Use as reference")}
-                      </Button>
-                      {onRegenerate && batch.tasks.some((t) => t.id === r.taskId) && (
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          aria-label={tr("Regenerate") + ": " + r.taskName}
-                          disabled={batch.executions.some((e) => !e.finishedAt)}
-                          onClick={() => onRegenerate([r.taskId])}
+                        <button
+                          type="button"
+                          aria-label={
+                            tr("Select result") + ": " + r.taskName + " " + (r.position + 1)
+                          }
+                          aria-pressed={selection.ids.includes(r.id)}
+                          data-batch-result={r.id}
+                          className="w-full min-w-0 rounded-lg p-2 pb-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={(e) =>
+                            setSelection(selectResource(selection, r.id, visibleIds, e, multiple))
+                          }
+                          onDoubleClick={(e) => showPreview([r], e.currentTarget)}
+                          onKeyDown={(e) => {
+                            if (e.key === " ") {
+                              e.preventDefault();
+                              showPreview([r], e.currentTarget);
+                            }
+                            if (["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) {
+                              e.preventDefault();
+                              const index = visibleIds.indexOf(r.id),
+                                next =
+                                  e.key === "Home"
+                                    ? visibleIds[0]
+                                    : e.key === "End"
+                                      ? visibleIds.at(-1)
+                                      : visibleIds[index + (e.key === "ArrowRight" ? 1 : -1)];
+                              if (next) {
+                                setSelection(selectResource(selection, next, visibleIds, e));
+                                document
+                                  .querySelector<HTMLButtonElement>(
+                                    `[data-batch-result="${CSS.escape(next)}"]`,
+                                  )
+                                  ?.focus();
+                              }
+                            }
+                            if ((e.metaKey || e.ctrlKey) && e.key === "a") {
+                              e.preventDefault();
+                              setSelection({ ids: visibleIds, focusedId: r.id, anchorId: r.id });
+                            }
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              setSelection(emptyResourceSelection());
+                            }
+                          }}
                         >
-                          {tr("Regenerate")}
-                        </Button>
-                      )}
-                    </div>
-                  )}
+                          <PreviewSurface checker className="aspect-square w-full rounded-md">
+                            <img
+                              src={imageUrl(r.asset, "thumbnail")}
+                              alt={r.taskName}
+                              loading="lazy"
+                              className="h-full w-full object-contain"
+                            />
+                          </PreviewSurface>
+                          <span className="mt-2 block truncate text-ui-sm" title={r.taskName}>
+                            {r.output ? names.get(r.id)?.name : `${r.taskName} · ${r.position + 1}`}
+                          </span>
+                          <span className="block truncate text-ui-xs text-muted-foreground">
+                            {r.asset.width}×{r.asset.height}
+                            {r.adopted && " · " + tr("Adopted")}
+                          </span>
+                          {resultSizeMismatch(r) && (
+                            <span className="block truncate text-ui-xs text-warning">
+                              {tr("Requested {size}").replace("{size}", resultSizeMismatch(r)!)}
+                            </span>
+                          )}
+                          {r.collection && (
+                            <span className="block text-ui-xs text-muted-foreground">
+                              {tr(
+                                links.data?.[r.id]?.status === "removed"
+                                  ? "Removed from resource center"
+                                  : links.data?.[r.id]?.status === "other-library"
+                                    ? "Collected in another library"
+                                    : links.data?.[r.id]?.status === "unavailable"
+                                      ? "Resource is unavailable"
+                                      : "Collected",
+                              )}
+                            </span>
+                          )}
+                        </button>
+                        <Checkbox
+                          className="absolute top-3 left-3 bg-background/80"
+                          aria-label={
+                            tr("Select result") + ": " + r.taskName + " " + (r.position + 1)
+                          }
+                          checked={selection.ids.includes(r.id)}
+                          onCheckedChange={() => toggle(r.id)}
+                        />
+                        {!readOnly && (
+                          // Visible, not hover-only: adopting and reusing a sample are the main next steps.
+                          <div className="flex flex-wrap gap-1 px-2 pb-2">
+                            <Button
+                              size="xs"
+                              variant={r.adopted ? "secondary" : "outline"}
+                              aria-label={
+                                tr(r.adopted ? "Unmark adopted" : "Mark adopted") +
+                                ": " +
+                                r.taskName
+                              }
+                              onClick={() => adopt([r], !r.adopted)}
+                            >
+                              {tr(r.adopted ? "Unmark adopted" : "Mark adopted")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              aria-label={tr("Use as task reference") + ": " + r.taskName}
+                              onClick={() => setReferenceFor([r])}
+                            >
+                              {tr("Use as reference")}
+                            </Button>
+                            {onRegenerate && batch.tasks.some((t) => t.id === r.taskId) && (
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                aria-label={tr("Regenerate") + ": " + r.taskName}
+                                disabled={batch.executions.some((e) => !e.finishedAt)}
+                                onClick={() => onRegenerate([r.taskId])}
+                              >
+                                {tr("Regenerate")}
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
           </section>
         ))}
         {page.hasNextPage && (
-          <Button
-            className="mt-4"
-            variant="outline"
-            disabled={page.isFetchingNextPage}
-            onClick={() => void page.fetchNextPage()}
-          >
-            {tr("Load more")}
-          </Button>
+          <p role="status" className="py-3 text-center text-ui-sm text-muted-foreground">
+            {tr("Loading all results… {loaded} of {total}")
+              .replace("{loaded}", String(results.length))
+              .replace("{total}", String(page.data?.pages[0]?.total ?? "—"))}
+          </p>
         )}
       </div>
       {chosen.length > 0 && (
@@ -593,6 +685,19 @@ export function BatchResults({
           {!readOnly && (
             <Button size="sm" variant="ghost" onClick={() => setReferenceFor(chosen)}>
               {tr("Use as task reference")}
+            </Button>
+          )}
+          {!readOnly && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-destructive"
+              disabled={batch.executions.some(
+                (e) => !e.finishedAt && chosen.some((r) => r.executionId === e.id),
+              )}
+              onClick={() => remove(chosen)}
+            >
+              {tr("Delete")}
             </Button>
           )}
           <Button size="sm" variant="ghost" onClick={() => setSpriteTarget(true)}>

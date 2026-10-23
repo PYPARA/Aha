@@ -121,6 +121,7 @@ export function BatchTaskResults({
                             batchId: batch.id,
                             resultIds: [r.id],
                             adopted: !r.adopted,
+                            exclusive: !r.adopted,
                           }).catch(onError)
                         }
                       >

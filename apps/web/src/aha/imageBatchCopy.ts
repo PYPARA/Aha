@@ -129,6 +129,13 @@ export const imageBatchCopy: Record<string, string> = {
   "Not now": "暂不",
   "Reference scope": "参考范围",
   "Match by file name": "按文件名对应",
+  "Select folder": "选择目录",
+  "{count} candidates": "{count} 个候选",
+  "Choose one": "待选择",
+  "Loading all results… {loaded} of {total}": "正在加载全部结果… 已加载 {loaded} / 共 {total}",
+  "Delete {count} results?": "删除 {count} 个结果？",
+  "They leave this batch's results. Copies already added to the resource center stay, and the tasks can be regenerated.":
+    "它们会从本批次的生成结果中删除。已加入资源中心的副本保留，对应任务可以重新生成。",
   Reference: "参考图",
   "Target folder": "目标目录",
   "Each image goes only to the task with the same file name in the target folder.":

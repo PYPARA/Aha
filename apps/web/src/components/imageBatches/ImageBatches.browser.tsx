@@ -414,6 +414,7 @@ it("keeps selection independent of adoption and copies only explicitly selected 
     batchId: "batch",
     resultIds: ["result0"],
     adopted: true,
+    exclusive: true,
   });
 });
 it("retries a lost source-link acknowledgement even when the desktop receipt is unchanged", async () => {

@@ -338,6 +338,16 @@ export const ImageBatchCommand = Schema.Union([
     batchId: Id,
     resultIds: Schema.mutable(Schema.Array(Id)),
     adopted: Schema.Boolean,
+    /** Adopting keeps only these candidates adopted for their tasks; the tasks' others are cleared. */
+    exclusive: Schema.optional(Schema.Boolean),
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("delete-results"),
+    batchId: Id,
+    resultIds: Schema.mutable(Schema.Array(Id)).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(500),
+    ),
   }),
   Schema.Struct({
     operation: Schema.Literal("collection"),

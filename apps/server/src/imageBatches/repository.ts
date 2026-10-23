@@ -197,6 +197,22 @@ export class ImageBatchRepository {
       ),
     );
   }
+  /** Every saved candidate of these tasks, for keeping one adopted result per task. */
+  async resultsForTasks(batchId: string, taskIds: readonly string[]) {
+    if (!taskIds.length) return [];
+    const rows = await Effect.runPromise(
+      this.sql<{
+        payload: string;
+      }>`SELECT payload FROM image_batch_results WHERE batch_id=${batchId} AND task_id IN ${this.sql.in([...taskIds])}`,
+    );
+    return rows.map((row) => decodeResult(row.payload));
+  }
+  async deleteResults(batchId: string, ids: readonly string[]) {
+    await Effect.runPromise(
+      this
+        .sql`DELETE FROM image_batch_results WHERE batch_id=${batchId} AND id IN ${this.sql.in([...ids])}`,
+    );
+  }
   async clearResults(batchId: string) {
     await Effect.runPromise(this.sql`DELETE FROM image_batch_results WHERE batch_id=${batchId}`);
   }
