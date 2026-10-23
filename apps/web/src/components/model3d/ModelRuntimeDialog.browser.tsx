@@ -18,7 +18,7 @@ vi.mock("~/nativeApi", () => ({
 }));
 vi.mock("./ModelChat", () => ({ ModelChat: () => <div>Model conversation</div> }));
 vi.mock("../RouteSurface", () => ({
-  RouteSurfaceHeader: ({children}: {children: React.ReactNode}) => <header>{children}</header>,
+  RouteSurfaceHeader: ({ children }: { children: React.ReactNode }) => <header>{children}</header>,
 }));
 
 let environment: Model3DEnvironment;

@@ -29,6 +29,7 @@ export const model3dCopy: Record<string, string> = {
     "建模时会打开 Aha 管理的专用 Blender 窗口，请在任务运行期间保持窗口打开，完成后回到 Aha 查看候选。",
   "Detecting Blender runtime…": "正在检测 Blender 运行环境…",
   "Preparing Blender dependencies…": "正在准备 Blender 建模依赖…",
+  "Preparing…": "准备中…",
   "Checking Blender connection…": "正在检查 Blender 连接…",
   "Runtime status unavailable": "暂时无法读取运行环境状态",
   "Open Aha desktop to use Blender": "请使用 Aha 桌面版运行 Blender",

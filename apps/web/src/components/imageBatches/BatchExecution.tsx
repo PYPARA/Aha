@@ -515,6 +515,15 @@ export function BatchExecution({
                         void navigate({ to: "/settings", search: { section: "imageProviders" } })
                       }
                     />
+                    <p>
+                      {tr("Channels")}:{" "}
+                      {confirm.providers
+                        .map(
+                          (id) =>
+                            providers.data?.find((provider) => provider.id === id)?.name ?? id,
+                        )
+                        .join(", ") || "—"}
+                    </p>
                     {(runProvider !== batch.defaults.providerId ||
                       runModel !== batch.defaults.model) && (
                       <p className="text-ui-xs text-muted-foreground">
