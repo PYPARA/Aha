@@ -141,4 +141,7 @@ export const resourceCopy: Record<string, string> = {
   "Invalid cache directory.": "缓存目录无效。",
   "Invalid thumbnail.": "缩略图无效。",
   "No image preview.": "此文件不支持图片预览。",
+  "Subfolders from the task output paths are created here:": "将在此处按任务输出路径创建子目录：",
+  "A file already uses this folder name.": "已有同名文件占用了这个目录名。",
+  "Folder path is too deep.": "目录层级过深。",
 };

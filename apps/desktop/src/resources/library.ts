@@ -76,6 +76,7 @@ const CollectionOperations = z.array(
         resultId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
         assetId: z.string().regex(/^[a-f0-9]{64}$/),
         name: z.string(),
+        folder: z.string().optional(),
         origin: Metadata.shape.entries.element.shape.origin.unwrap(),
         status: z.enum(["queued", "writing", "committed", "linked", "failed", "superseded"]),
         resourceId: z.string().optional(),
@@ -88,6 +89,12 @@ const CollectionOperations = z.array(
 );
 const missing = (e: unknown) => (e as NodeJS.ErrnoException)?.code === "ENOENT";
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** Relative folder path made of safe names; empty segments, "." and ".." are rejected. */
+export function folderSegments(value: string) {
+  const segments = value.split("/");
+  if (segments.length > 16) throw new Error("Folder path is too deep.");
+  return segments.map(safeName);
+}
 export function safeName(value: string) {
   const name = value.trim();
   if (
@@ -622,6 +629,33 @@ export class ResourceLibrary {
       (e) => !entries.some((p) => p.id !== e.id && p.kind === "directory" && under(e.path, p.path)),
     );
   }
+  /** Creates and indexes a collection subfolder without following links outside the library. */
+  private async ensureFolder(parent: string, folder: string | undefined) {
+    let rel = parent;
+    const added: ResourceEntry[] = [];
+    for (const segment of folder === undefined ? [] : folderSegments(folder)) {
+      rel = [rel, segment].filter(Boolean).join("/");
+      const full = await this.resolve(rel, true);
+      if (!(await exists(full))) await fs.mkdir(full);
+      const stat = await fs.lstat(full);
+      if (!stat.isDirectory()) throw new Error("A file already uses this folder name.");
+      if (!this.entries.some((entry) => entry.path === rel && !entry.deleted))
+        added.push({
+          id: randomUUID(),
+          path: rel,
+          name: segment,
+          kind: "directory",
+          bytes: stat.size,
+          modifiedAt: stat.mtimeMs,
+          fileKey: `${stat.dev}:${stat.ino}`,
+          hash: "",
+          tags: [],
+          notes: "",
+        });
+    }
+    if (added.length) await this.persist([...this.entries, ...added]);
+    return rel;
+  }
   private async available(
     parent: string,
     name: string,
@@ -991,7 +1025,7 @@ export class ResourceLibrary {
     id: string;
     libraryId: string;
     directoryId: string | null;
-    items: Pick<ResourceCollectionItem, "resultId" | "assetId" | "name" | "origin">[];
+    items: Pick<ResourceCollectionItem, "resultId" | "assetId" | "name" | "folder" | "origin">[];
   }) {
     await this.listCollections();
     const existing = this.collections!.find((operation) => operation.id === input.id);
@@ -1000,10 +1034,11 @@ export class ResourceLibrary {
         existing.libraryId !== input.libraryId ||
         existing.directoryId !== input.directoryId ||
         JSON.stringify(
-          existing.items.map(({ resultId, assetId, name, origin }) => ({
+          existing.items.map(({ resultId, assetId, name, folder, origin }) => ({
             resultId,
             assetId,
             name,
+            ...(folder ? { folder } : {}),
             origin,
           })),
         ) !== JSON.stringify(input.items)
@@ -1022,6 +1057,7 @@ export class ResourceLibrary {
       throw new Error("Duplicate collection result.");
     for (const item of input.items) {
       safeName(item.name);
+      if (item.folder !== undefined) folderSegments(item.folder);
       if (
         !(
           (item.origin.kind === "image-batch" &&
@@ -1103,7 +1139,9 @@ export class ResourceLibrary {
         await fs.rm(temp, { force: true });
         await fs.writeFile(temp, bytes, { flag: "wx", mode: 0o600 });
         const stat = await fs.lstat(temp);
-        item.path = (await this.available(target, item.name)).path;
+        item.path = (
+          await this.available(await this.ensureFolder(target, item.folder), item.name)
+        ).path;
         item.fileKey = `${stat.dev}:${stat.ino}`;
         item.resourceId ??= randomUUID();
         item.status = "writing";

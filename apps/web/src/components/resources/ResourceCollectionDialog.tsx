@@ -220,6 +220,7 @@ export function ResourceCollectionDialog() {
             resultId,
             assetId: source.assetId,
             name: source.name,
+            ...(source.folder ? { folder: source.folder } : {}),
             origin: source.origin!,
           };
         });
@@ -460,6 +461,17 @@ export function ResourceCollectionDialog() {
                       {tr(target ? "New folder" : "New project")}
                     </Button>
                   </div>
+                  {sources?.some((source) => source.folder) && (
+                    <div className="space-y-1 text-ui-sm text-muted-foreground">
+                      <p>{tr("Subfolders from the task output paths are created here:")}</p>
+                      <ul className="list-inside list-disc break-all">
+                        {sources.slice(0, 5).map((source, i) => (
+                          <li key={i}>{[source.folder, source.name].filter(Boolean).join("/")}</li>
+                        ))}
+                        {sources.length > 5 && <li>…</li>}
+                      </ul>
+                    </div>
+                  )}
                 </>
               )}
               {error || library.data?.error || library.error ? (

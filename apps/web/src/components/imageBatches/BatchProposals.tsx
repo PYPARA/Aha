@@ -18,10 +18,14 @@ function taskFields(task: ImageBatchTask | undefined, batch: ImageBatchState) {
   const configuration = imageBatchTaskConfiguration(task, batch.defaults);
   return {
     Name: task.name,
+    "Output path": task.output ?? "—",
     "Final image prompt": task.prompt,
     Enabled: task.enabled ? "✓" : "—",
     "Image count": String(configuration.parameters.n),
     Model: configuration.model,
+    Size: configuration.parameters.size ?? "—",
+    Quality: configuration.parameters.quality ?? "—",
+    Background: configuration.parameters.background ?? "—",
     "Reference images": String(task.references.length),
   };
 }

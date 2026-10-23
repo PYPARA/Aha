@@ -62,6 +62,11 @@ export const imageBatchCopy: Record<string, string> = {
   "Add task": "添加任务",
   "Edit image task": "编辑生图任务",
   "Task name": "任务名称",
+  "Output path": "输出路径",
+  "Use a relative path such as heroes/ember.png, without empty, . or .. parts.":
+    "请填写相对路径，如 heroes/ember.png，不能包含空段、. 或 ..。",
+  "Optional. Adding to the resource center creates these folders under the chosen destination and uses this file name for the adopted image.":
+    "可选。加入资源中心时，会在所选目录下创建这些子目录，已采用的图片使用此文件名。",
   "Final image prompt": "最终生图提示词",
   "No prompt": "尚未填写提示词",
   "No model": "未选模型",

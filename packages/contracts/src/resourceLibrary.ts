@@ -97,6 +97,8 @@ export interface ResourceCollectionItem {
   resultId: string;
   assetId: string;
   name: string;
+  /** Subfolder under the operation's target directory; created when the file is committed. */
+  folder?: string | undefined;
   origin: ResourceOrigin;
   status: "queued" | "writing" | "committed" | "linked" | "failed" | "superseded";
   resourceId?: string | undefined;
@@ -170,7 +172,7 @@ export type ResourceCommand =
       id: string;
       libraryId: string;
       directoryId: string | null;
-      items: Pick<ResourceCollectionItem, "resultId" | "assetId" | "name" | "origin">[];
+      items: Pick<ResourceCollectionItem, "resultId" | "assetId" | "name" | "folder" | "origin">[];
     }
   | { op: "commitCollection"; operationId: string; resultId: string; bytes: Uint8Array }
   | { op: "linkCollection"; operationId: string; resultId: string }

@@ -17,6 +17,7 @@ import {
 } from "../resources/transferTargets";
 import { useBatchCommand, useBatchResults } from "./useImageBatches";
 import { ReferenceTargetDialog } from "./BatchReferenceTargets";
+import { resultFileNames } from "./resultNames";
 import {
   collectResources,
   resourceApi,
@@ -100,6 +101,7 @@ export function BatchResults({
     setSelection((previous) => reconcileResourceSelection(previous, visibleIds));
   }, [visibleIds.join(",")]);
   const chosen = results.filter((r) => selection.ids.includes(r.id));
+  const names = resultFileNames(chosen);
   useEffect(() => {
     setSelection(emptyResourceSelection());
   }, [filter, taskId]);
@@ -130,7 +132,7 @@ export function BatchResults({
   const collect = () => {
     collectResources(
       chosen.map((r) => ({
-        name: resultFilename(r),
+        ...names.get(r.id)!,
         url: imageUrl(r.asset),
         assetId: r.asset.id,
         origin: {
@@ -382,7 +384,7 @@ export function BatchResults({
                 for (const r of chosen)
                   await downloadUrlAsBlob({
                     url: imageUrl(r.asset),
-                    filename: resultFilename(r),
+                    filename: names.get(r.id)!.name,
                     credentials: "include",
                   });
               })
@@ -426,7 +428,7 @@ export function BatchResults({
               navigate,
               target,
               await Promise.all(
-                chosen.map((r) => fetchImageFile(imageUrl(r.asset), resultFilename(r))),
+                chosen.map((r) => fetchImageFile(imageUrl(r.asset), names.get(r.id)!.name)),
               ),
             )
           }
@@ -497,24 +499,5 @@ export function BatchResults({
         </DialogPopup>
       </Dialog>
     </div>
-  );
-}
-export function resultFilename(r: ImageBatchResult) {
-  const characters = [...r.taskName.replace(/[\\/\u0000-\u001f<>:"|?*]/g, "_")].slice(0, 80);
-  let name = "";
-  const encoder = new TextEncoder();
-  for (const character of characters) {
-    if (encoder.encode(name + character).byteLength > 180) break;
-    name += character;
-  }
-  name ||= "image";
-  return (
-    name +
-    "_" +
-    r.attemptId.slice(0, 8) +
-    "_" +
-    (r.position + 1) +
-    "." +
-    r.asset.mimeType.split("/")[1]
   );
 }

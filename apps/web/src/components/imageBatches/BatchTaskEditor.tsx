@@ -15,7 +15,8 @@ import { DrawingModelPicker, DrawingParameters } from "../drawing/DrawingPickers
 import { getImageEditDocument } from "../drawing/useDrawing";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { BatchReferenceList } from "./BatchReferenceList";
-import { imageBatchTaskConfiguration } from "@synara/contracts";
+import { ImageBatchOutputPath, imageBatchTaskConfiguration } from "@synara/contracts";
+import { Schema } from "effect";
 
 export function BatchTaskEditor({
   task,
@@ -54,6 +55,10 @@ export function BatchTaskEditor({
     try {
       if (!draft.name.trim() || !draft.prompt.trim())
         throw new Error(tr("Enter a task name and prompt."));
+      if (draft.output !== undefined && !Schema.is(ImageBatchOutputPath)(draft.output))
+        throw new Error(
+          tr("Use a relative path such as heroes/ember.png, without empty, . or .. parts."),
+        );
       for (const r of draft.references) if (r.documentId) await getImageEditDocument(r.documentId);
       await onSave(draft);
       onClose();
@@ -86,6 +91,24 @@ export function BatchTaskEditor({
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               maxLength={200}
             />
+          </label>
+          <label className="block space-y-1 text-ui">
+            <span>{tr("Output path")}</span>
+            <Input
+              value={draft.output ?? ""}
+              placeholder="heroes/ember.png"
+              maxLength={240}
+              onChange={(e) => {
+                const { output: _, ...rest } = draft;
+                const value = e.target.value.trim();
+                setDraft(value ? { ...rest, output: value } : rest);
+              }}
+            />
+            <span className="block text-ui-xs text-muted-foreground">
+              {tr(
+                "Optional. Adding to the resource center creates these folders under the chosen destination and uses this file name for the adopted image.",
+              )}
+            </span>
           </label>
           <label className="block space-y-1 text-ui">
             <span>{tr("Final image prompt")}</span>

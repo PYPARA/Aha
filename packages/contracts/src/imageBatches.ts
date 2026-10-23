@@ -32,11 +32,19 @@ export const ImageBatchTaskParameters = ImageGenerationParameters.mapFields((fie
   ...fields,
   n: Schema.optional(fields.n),
 }));
+/** A segment may not end with a dot or space, which also rules out "." and "..". */
+const OUTPUT_SEGMENT = String.raw`[^\\/\u0000-\u001f<>:"|?*]*[^\\/\u0000-\u001f<>:"|?*. ]`;
+/** Delivery path relative to the chosen Resource Center folder, e.g. `heroes/ember.png`. */
+export const ImageBatchOutputPath = Schema.String.check(
+  Schema.isMaxLength(240),
+  Schema.isPattern(new RegExp(`^(?:${OUTPUT_SEGMENT}/)*${OUTPUT_SEGMENT}$`, "u")),
+);
 export const ImageBatchTask = Schema.Struct({
   id: Id,
   name: Schema.String.check(Schema.isMaxLength(200)),
   prompt: Text,
   enabled: Schema.Boolean,
+  output: Schema.optional(ImageBatchOutputPath),
   providerId: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
   parameters: Schema.optional(ImageBatchTaskParameters),
@@ -73,6 +81,8 @@ export const ImageBatchAttempt = Schema.Struct({
   id: Id,
   taskId: Id,
   taskName: Schema.String,
+  /** Task output path frozen at confirmation. */
+  output: Schema.optional(Schema.String),
   providerId: Schema.String,
   model: Schema.String,
   parameters: ImageGenerationParameters,
@@ -147,6 +157,7 @@ export const ImageBatchResult = Schema.Struct({
   attemptId: Id,
   taskId: Id,
   taskName: Schema.String,
+  output: Schema.optional(Schema.String),
   position: Version,
   asset: ImageAsset,
   prompt: Text,

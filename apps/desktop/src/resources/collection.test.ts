@@ -11,7 +11,7 @@ const bytes = new TextEncoder().encode("independent generated original");
 const assetId = createHash("sha256").update(bytes).digest("hex");
 const source = (
   id = "result",
-): Pick<ResourceCollectionItem, "resultId" | "assetId" | "name" | "origin"> => ({
+): Pick<ResourceCollectionItem, "resultId" | "assetId" | "name" | "folder" | "origin"> => ({
   resultId: id,
   assetId,
   name: "image.png",
@@ -153,4 +153,51 @@ it("retains 3D version provenance and recovers copies using the same durable rec
   expect((await restored.commitCollection(repeat.id, item.resultId, bytes)).resourceId).toBe(
     entry.id,
   );
+});
+it("creates and indexes output subfolders, reuses them and rejects escaping folders", async () => {
+  const lib = await open();
+  const chosen = await lib.createDirectory("", "Delivery");
+  const op = await lib.prepareCollection({
+    id: randomUUID(),
+    libraryId: lib.libraryId!,
+    directoryId: chosen.id,
+    items: [
+      { ...source("ember"), name: "ember.png", folder: "heroes" },
+      { ...source("blade"), name: "blade.png", folder: "icons/weapons" },
+    ],
+  });
+  expect((await lib.commitCollection(op.id, "ember", bytes)).path).toBe(
+    "Delivery/heroes/ember.png",
+  );
+  expect((await lib.commitCollection(op.id, "blade", bytes)).path).toBe(
+    "Delivery/icons/weapons/blade.png",
+  );
+  expect(await fs.readFile(path.join(directory, "library/Delivery/heroes/ember.png"))).toEqual(
+    Buffer.from(bytes),
+  );
+  const folders = lib
+    .list({ path: "", recursive: true })
+    .entries.filter((entry) => entry.kind === "directory")
+    .map((entry) => entry.path);
+  expect(folders).toEqual(
+    expect.arrayContaining(["Delivery/heroes", "Delivery/icons", "Delivery/icons/weapons"]),
+  );
+  const again = await lib.prepareCollection({
+    id: randomUUID(),
+    libraryId: lib.libraryId!,
+    directoryId: chosen.id,
+    items: [{ ...source("ember-2"), name: "ember-2.png", folder: "heroes" }],
+  });
+  expect((await lib.commitCollection(again.id, "ember-2", bytes)).path).toBe(
+    "Delivery/heroes/ember-2.png",
+  );
+  for (const folder of ["../outside", "a//b", "heroes/.", "/abs"])
+    await expect(
+      lib.prepareCollection({
+        id: randomUUID(),
+        libraryId: lib.libraryId!,
+        directoryId: chosen.id,
+        items: [{ ...source("bad"), folder }],
+      }),
+    ).rejects.toThrow("Invalid");
 });

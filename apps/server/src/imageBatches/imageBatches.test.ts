@@ -293,7 +293,9 @@ describe("batch drafts and proposals", () => {
 describe("staged references", () => {
   it("accepts this batch's results as references and rejects another batch's results", async () => {
     f.fetcher.mockImplementation(async () => f.response(1));
-    let s = await f.save(await f.create(), [f.task("sample", 1)]);
+    let s = await f.save(await f.create(), [
+      { ...f.task("sample", 1), output: "heroes/sample.png" },
+    ]);
     s = await f.confirm(s);
     s = await f.settle(s.id);
     s = await f.engine.command({
@@ -303,6 +305,7 @@ describe("staged references", () => {
       threadId: "thread",
     });
     const [sample] = (await f.repo.results({ batchId: s.id })).results;
+    expect(sample!.output).toBe("heroes/sample.png");
     const reference = { id: "ref", assetId: sample!.asset.id, documentId: null };
     const proposal = (tasks: ImageBatchTask[], state = s) => ({
       batchId: state.id,

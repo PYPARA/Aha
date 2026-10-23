@@ -34,6 +34,7 @@ const Command = z.discriminatedUnion("op", [
           resultId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
           assetId: z.string().regex(/^[a-f0-9]{64}$/),
           name: text,
+          folder: text.optional(),
           origin,
         }),
       )

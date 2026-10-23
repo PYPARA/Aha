@@ -60,6 +60,8 @@ export function useResourceLibrary(enabled = true) {
 }
 export interface ResourceSource {
   name: string;
+  /** Subfolder under the chosen destination, created on collection (batch output paths). */
+  folder?: string | undefined;
   assetId?: string;
   url?: string;
   path?: string;

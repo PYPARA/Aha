@@ -267,6 +267,7 @@ export class ImageBatchEngine {
       id: randomUUID(),
       taskId: task.id,
       taskName: task.name,
+      ...(task.output ? { output: task.output } : {}),
       prompt: task.prompt,
       ...c,
       providerVersion,
@@ -402,6 +403,7 @@ export class ImageBatchEngine {
             const task: ImageBatchTask = {
               id: a.taskId,
               name: a.taskName,
+              ...(a.output ? { output: a.output } : {}),
               prompt: a.prompt,
               enabled: true,
               providerId: a.providerId,
@@ -551,6 +553,7 @@ export class ImageBatchEngine {
                     attemptId: a.id,
                     taskId: a.taskId,
                     taskName: a.taskName,
+                    ...(a.output ? { output: a.output } : {}),
                     position,
                     asset,
                     prompt: imageBatchComposePrompt(a.stylePrompt, a.prompt),
