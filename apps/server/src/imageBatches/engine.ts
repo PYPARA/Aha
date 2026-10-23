@@ -8,6 +8,7 @@ import {
   ImageBatchTask,
   imageBatchComposePrompt,
   imageBatchPlanCounts,
+  imageBatchProposedDefaults,
   imageBatchTaskConfiguration,
   imageBatchTaskReferences,
   imageBatchMissingCount,
@@ -164,13 +165,17 @@ export class ImageBatchEngine {
         if (
           JSON.stringify(existing.tasks) !== JSON.stringify(input.tasks) ||
           existing.summary !== input.summary ||
-          JSON.stringify(existing.warnings) !== JSON.stringify(input.warnings)
+          JSON.stringify(existing.warnings) !== JSON.stringify(input.warnings) ||
+          JSON.stringify(existing.defaults) !== JSON.stringify(input.defaults)
         )
           throw new Error("Proposal request ID was reused with different content.");
         return state;
       }
       if (state.version !== input.baseVersion) throw conflict();
-      this.validateTasks(state, input.tasks);
+      this.validateTasks(
+        { ...state, defaults: imageBatchProposedDefaults(state.defaults, input) },
+        input.tasks,
+      );
       if (
         input.tasks.some((t) =>
           t.sourceIds.some((id) => !state.sources.some((source) => source.id === id)),
@@ -184,9 +189,11 @@ export class ImageBatchEngine {
           .concat((state.defaults.styleReferences ?? []).map((r) => r.assetId)),
       );
       // This batch's own results can be references, so an adopted sample guides later tasks.
-      const unknown = input.tasks.flatMap((t) =>
-        t.references.map((r) => r.assetId).filter((id) => !known.has(id)),
-      );
+      const unknown = input.tasks
+        .flatMap((t) => t.references)
+        .concat(input.defaults?.styleReferences ?? [])
+        .map((r) => r.assetId)
+        .filter((id) => !known.has(id));
       const results = await this.repository.resultAssets(state.id, unknown);
       if (unknown.some((id) => !results.has(id)))
         throw new Error("Reference is not owned by this batch.");
@@ -366,7 +373,9 @@ export class ImageBatchEngine {
           throw new Error("Proposal is no longer pending.");
         if (input.operation === "apply-proposal") {
           if (proposal.baseVersion !== state.version) throw conflict();
-          this.validateTasks(state, proposal.tasks);
+          const defaults = imageBatchProposedDefaults(state.defaults, proposal);
+          this.validateTasks({ ...state, defaults }, proposal.tasks);
+          state.defaults = structuredClone(defaults);
           state.tasks = structuredClone(proposal.tasks);
           state.version++;
           proposal.status = "applied";

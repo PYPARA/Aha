@@ -2,7 +2,9 @@ import { useState } from "react";
 import {
   imageBatchDiff,
   imageBatchPlanCounts,
+  imageBatchProposedDefaults,
   imageBatchTaskConfiguration,
+  type ImageBatchDefaults,
   type ImageBatchState,
   type ImageBatchProposal,
   type ImageBatchTask,
@@ -13,9 +15,9 @@ import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { useBatchCommand } from "./useImageBatches";
 
 /** Readable per-field comparison; the raw task JSON stays in Diagnostic details. */
-function taskFields(task: ImageBatchTask | undefined, batch: ImageBatchState) {
+function taskFields(task: ImageBatchTask | undefined, defaults: ImageBatchDefaults) {
   if (!task) return null;
-  const configuration = imageBatchTaskConfiguration(task, batch.defaults);
+  const configuration = imageBatchTaskConfiguration(task, defaults);
   return {
     Name: task.name,
     "Output path": task.output ?? "—",
@@ -27,6 +29,18 @@ function taskFields(task: ImageBatchTask | undefined, batch: ImageBatchState) {
     Quality: configuration.parameters.quality ?? "—",
     Background: configuration.parameters.background ?? "—",
     "Reference images": String(task.references.length),
+  };
+}
+/** Batch style and default parameters, compared the same way as task fields. */
+function defaultFields(defaults: ImageBatchDefaults) {
+  return {
+    "Style description": defaults.stylePrompt?.trim() || "—",
+    "Style reference images": String(defaults.styleReferences?.length ?? 0),
+    "Default image count": String(defaults.parameters.n),
+    "Default size": defaults.parameters.size ?? "—",
+    "Default quality": defaults.parameters.quality ?? "—",
+    "Default background": defaults.parameters.background ?? "—",
+    "Default format": defaults.parameters.outputFormat ?? "—",
   };
 }
 
@@ -45,6 +59,12 @@ export function BatchProposals({
   const [view, setView] = useState<ImageBatchProposal | null>(null);
   const [busy, setBusy] = useState(false);
   const diff = view ? imageBatchDiff(batch.tasks, view.tasks) : null;
+  const proposed = view ? imageBatchProposedDefaults(batch.defaults, view) : batch.defaults;
+  const previousDefaults = defaultFields(batch.defaults),
+    nextDefaults = defaultFields(proposed);
+  const changedDefaults = (Object.keys(nextDefaults) as (keyof typeof nextDefaults)[]).filter(
+    (field) => previousDefaults[field] !== nextDefaults[field],
+  );
   const apply = async (
     operation: "apply-proposal" | "dismiss-proposal",
     proposal: ImageBatchProposal,
@@ -74,6 +94,11 @@ export function BatchProposals({
           <div key={p.id} className="space-y-2 border-b p-4 text-ui-sm">
             <p className="font-medium">{tr("Pending changes")}</p>
             <p className="whitespace-pre-wrap">{p.summary}</p>
+            {p.defaults && (
+              <p className="text-muted-foreground">
+                {tr("Also changes the batch style or default parameters.")}
+              </p>
+            )}
             {[...new Set(p.warnings)].map((w) => (
               <p key={w} className="whitespace-pre-wrap text-muted-foreground">
                 {w}
@@ -120,8 +145,27 @@ export function BatchProposals({
                 </p>
                 <p>
                   {tr("Planned images")}: {imageBatchPlanCounts(batch.tasks, batch.defaults).images}{" "}
-                  → {imageBatchPlanCounts(view.tasks, batch.defaults).images}
+                  → {imageBatchPlanCounts(view.tasks, proposed).images}
                 </p>
+                {changedDefaults.length > 0 && (
+                  <section className="space-y-2 border-t pt-3">
+                    <h3 className="font-medium">{tr("Batch style and defaults")}</h3>
+                    <dl className="grid gap-x-3 gap-y-1 sm:grid-cols-[auto_1fr_1fr]">
+                      <span className="hidden sm:block" />
+                      <span className="hidden text-muted-foreground sm:block">{tr("Before")}</span>
+                      <span className="hidden text-muted-foreground sm:block">{tr("After")}</span>
+                      {changedDefaults.map((field) => (
+                        <div key={field} className="contents">
+                          <dt className="text-muted-foreground">{tr(field)}</dt>
+                          <dd className="whitespace-pre-wrap break-words">
+                            {previousDefaults[field]}
+                          </dd>
+                          <dd className="whitespace-pre-wrap break-words">{nextDefaults[field]}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                )}
                 {[...new Set(view.warnings)].map((w) => (
                   <p key={w} className="whitespace-pre-wrap text-muted-foreground">
                     {w}
@@ -130,8 +174,8 @@ export function BatchProposals({
                 {[...diff.added, ...diff.changed, ...diff.removed].map((task) => {
                   const before = batch.tasks.find((t) => t.id === task.id),
                     after = view.tasks.find((t) => t.id === task.id);
-                  const previous = taskFields(before, batch),
-                    next = taskFields(after, batch);
+                  const previous = taskFields(before, batch.defaults),
+                    next = taskFields(after, proposed);
                   const fields = Object.keys(next ?? previous ?? {}).filter(
                     (field) =>
                       !previous ||

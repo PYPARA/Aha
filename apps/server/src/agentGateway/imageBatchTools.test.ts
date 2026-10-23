@@ -184,3 +184,33 @@ it("returns the engine's rejection reason so the model can correct a proposal", 
   expect(JSON.stringify(result)).toContain("at most 500 planned images");
   expect(JSON.stringify(result)).not.toContain("Effect.tryPromise");
 });
+it("passes proposed batch defaults through and fills missing style reference IDs", async () => {
+  const f = fixture();
+  await Effect.runPromise(
+    f.tool.handler(
+      {
+        operation: "propose",
+        baseVersion: 4,
+        requestId: "with-style",
+        tasks: [{ id: "one", name: "One", prompt: "Generate", enabled: true }],
+        defaults: {
+          stylePrompt: "Shared prefix",
+          styleReferences: [{ assetId: "a".repeat(64) }],
+          parameters: { n: 1, quality: "high" },
+        },
+      },
+      context,
+    ),
+  );
+  expect(f.propose).toHaveBeenCalledWith(
+    expect.objectContaining({
+      defaults: {
+        stylePrompt: "Shared prefix",
+        styleReferences: [{ id: "style-reference-0", assetId: "a".repeat(64), documentId: null }],
+        parameters: { n: 1, quality: "high" },
+      },
+    }),
+    "thread",
+    "turn",
+  );
+});

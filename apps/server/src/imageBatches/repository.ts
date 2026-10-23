@@ -102,7 +102,12 @@ export class ImageBatchRepository {
       ...(state.defaults.styleReferences ?? []).map((r) => r.assetId),
       ...state.proposals
         .filter((p) => p.status === "pending")
-        .flatMap((p) => p.tasks.flatMap((t) => t.references.map((r) => r.assetId))),
+        .flatMap((p) =>
+          p.tasks
+            .flatMap((t) => t.references)
+            .concat(p.defaults?.styleReferences ?? [])
+            .map((r) => r.assetId),
+        ),
       ...state.executions.flatMap((e) =>
         e.attempts.flatMap((a) => a.references.map((r) => r.assetId)),
       ),

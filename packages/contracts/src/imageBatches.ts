@@ -28,6 +28,27 @@ export const ImageBatchDefaults = Schema.Struct({
   ),
 });
 export type ImageBatchDefaults = typeof ImageBatchDefaults.Type;
+/** Batch-level changes a proposal may make. A present field replaces the current value; the
+ * channel and model stay the user's choice. */
+export const ImageBatchProposalDefaults = Schema.Struct({
+  stylePrompt: ImageBatchDefaults.fields.stylePrompt,
+  styleReferences: ImageBatchDefaults.fields.styleReferences,
+  parameters: Schema.optional(ImageGenerationParameters),
+}).mapFields(Struct.map(Schema.mutableKey));
+export type ImageBatchProposalDefaults = typeof ImageBatchProposalDefaults.Type;
+/** The defaults a proposal would leave in place once applied. */
+export function imageBatchProposedDefaults(
+  current: ImageBatchDefaults,
+  proposal: { readonly defaults?: ImageBatchProposalDefaults | undefined },
+): ImageBatchDefaults {
+  const { stylePrompt, styleReferences, parameters } = proposal.defaults ?? {};
+  return {
+    ...current,
+    ...(stylePrompt !== undefined ? { stylePrompt } : {}),
+    ...(styleReferences !== undefined ? { styleReferences } : {}),
+    ...(parameters ? { parameters } : {}),
+  };
+}
 export const ImageBatchTaskParameters = ImageGenerationParameters.mapFields((fields) => ({
   ...fields,
   n: Schema.optional(fields.n),
@@ -74,6 +95,7 @@ export const ImageBatchProposal = Schema.Struct({
   summary: Text,
   warnings: Schema.mutable(Schema.Array(Text)),
   tasks: Schema.mutable(Schema.Array(ImageBatchTask)),
+  defaults: Schema.optional(ImageBatchProposalDefaults),
   status: Schema.Literals(["pending", "applied", "dismissed"]),
 }).mapFields(Struct.map(Schema.mutableKey));
 export type ImageBatchProposal = typeof ImageBatchProposal.Type;
@@ -309,6 +331,7 @@ export const ImageBatchProposalInput = Schema.Struct({
   summary: Text,
   warnings: Schema.mutable(Schema.Array(Text)),
   tasks: Schema.mutable(Schema.Array(ImageBatchTask)),
+  defaults: Schema.optional(ImageBatchProposalDefaults),
 });
 export type ImageBatchProposalInput = typeof ImageBatchProposalInput.Type;
 export interface ImageBatchesApi {

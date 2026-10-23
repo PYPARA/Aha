@@ -337,6 +337,59 @@ describe("staged references", () => {
     ).rejects.toThrow("not owned");
   });
 });
+describe("proposal defaults", () => {
+  it("applies a proposed style and default parameters and counts images with them", async () => {
+    let s = await f.create();
+    s = await f.engine.command({
+      operation: "bind-thread",
+      batchId: s.id,
+      version: s.version,
+      threadId: "thread",
+    });
+    const input = (defaults: object, tasks = [f.task("one"), f.task("two")]) => ({
+      batchId: s.id,
+      baseVersion: s.version,
+      requestId: randomUUID(),
+      summary: "",
+      warnings: [],
+      tasks,
+      defaults,
+    });
+    await expect(
+      f.engine.propose(
+        input(
+          { parameters: { n: 10 } },
+          Array.from({ length: 51 }, (_, i) => f.task("t" + i)),
+        ),
+        "thread",
+        "turn",
+      ),
+    ).rejects.toThrow("500");
+    await expect(
+      f.engine.propose(
+        input({ styleReferences: [{ id: "s", assetId: "f".repeat(64), documentId: null }] }),
+        "thread",
+        "turn",
+      ),
+    ).rejects.toThrow("not owned");
+    s = await f.engine.propose(
+      input({ stylePrompt: "Cel-shaded, navy and gold.", parameters: { n: 1, quality: "high" } }),
+      "thread",
+      "turn",
+    );
+    const proposal = s.proposals.at(-1)!;
+    s = await f.engine.command({
+      operation: "apply-proposal",
+      batchId: s.id,
+      version: s.version,
+      proposalId: proposal.id,
+    });
+    expect(s.defaults.stylePrompt).toBe("Cel-shaded, navy and gold.");
+    expect(s.defaults.parameters).toEqual({ n: 1, quality: "high" });
+    expect(s.defaults.model).toBeTruthy();
+    expect(imageBatchPlanCounts(s.tasks, s.defaults).images).toBe(2);
+  });
+});
 describe("batch execution consistency", () => {
   it("requires verification when a missing retry descendant is uncertain", async () => {
     f.fetcher.mockImplementation(async () => f.response(1));

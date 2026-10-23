@@ -246,6 +246,13 @@ export const imageBatchCopy: Record<string, string> = {
   "Batch style": "批次风格",
   "Style description": "风格描述",
   "Style reference images": "风格参考图",
+  "Batch style and defaults": "批次风格与默认参数",
+  "Also changes the batch style or default parameters.": "同时会修改批次风格或默认参数。",
+  "Default image count": "默认张数",
+  "Default size": "默认尺寸",
+  "Default quality": "默认质量",
+  "Default background": "默认背景",
+  "Default format": "默认格式",
   "Applied before every task prompt when you confirm generation. Leave empty to use task prompts only.":
     "确认生成时放在每个任务提示词之前；留空则只使用任务提示词。",
   "Uses batch style": "使用批次风格",
