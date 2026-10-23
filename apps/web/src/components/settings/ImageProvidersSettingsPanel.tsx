@@ -6,6 +6,7 @@ import type {
   ImageProviderInput,
   ImageProviderModel,
 } from "@synara/contracts";
+import { IMAGE_PROVIDER_MAX_CONCURRENCY } from "@synara/contracts";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { ensureNativeApi } from "~/nativeApi";
 import { Button } from "../ui/button";
@@ -48,7 +49,6 @@ export function ImageProvidersSettingsPanel({ active }: { active: boolean }) {
   const [manual, setManual] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [testBusy, setTestBusy] = useState<string | null>(null);
   if (!active) return null;
   const open = (provider?: ImageProvider) => {
     setForm(provider ? { ...provider } : newForm());
@@ -104,22 +104,6 @@ export function ImageProvidersSettingsPanel({ active }: { active: boolean }) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
-    }
-  };
-  const test = async (provider: ImageProvider, model: string) => {
-    setTestBusy(`${provider.id}:${model}`);
-    setError(null);
-    try {
-      await drawingApi().testModel({
-        id: provider.id,
-        model,
-        clientRequestId: crypto.randomUUID(),
-      });
-      await client.invalidateQueries({ queryKey: ["drawing", "jobs"] });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTestBusy(null);
     }
   };
   const remove = async (provider: ImageProvider) => {
@@ -194,14 +178,6 @@ export function ImageProvidersSettingsPanel({ active }: { active: boolean }) {
                 {model.lastTestStatus ? (
                   <span className="text-xs text-muted-foreground">{tr(model.lastTestStatus)}</span>
                 ) : null}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!provider.enabled || testBusy !== null}
-                  onClick={() => void test(provider, model.id)}
-                >
-                  {tr("Test generation (1 API call)")}
-                </Button>
               </div>
             ))}
           </div>
@@ -217,9 +193,7 @@ export function ImageProvidersSettingsPanel({ active }: { active: boolean }) {
           <DialogHeader>
             <DialogTitle>{tr(form?.id ? "Edit image provider" : "Add image provider")}</DialogTitle>
             <DialogDescription>
-              {tr(
-                "Discover models without generating images. Generation tests are separate paid API calls.",
-              )}
+              {tr("Discover models without generating images.")}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
@@ -371,7 +345,7 @@ export function ImageProvidersSettingsPanel({ active }: { active: boolean }) {
                     <Input
                       type="number"
                       min={1}
-                      max={8}
+                      max={IMAGE_PROVIDER_MAX_CONCURRENCY}
                       value={form.concurrency}
                       onChange={(e) => update({ concurrency: Number(e.target.value) })}
                     />

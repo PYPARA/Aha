@@ -24,6 +24,8 @@ export const ImageSpriteCapabilities = Schema.Struct({
   maxAspectRatio: Schema.optional(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(1))),
   multiple: Schema.optional(Integer.check(Schema.isBetween({ minimum: 1, maximum: 4096 }))),
 });
+/** Requests one channel may run at once, shared by drawing, batches and sprites. */
+export const IMAGE_PROVIDER_MAX_CONCURRENCY = 50;
 export const ImageProviderModel = Schema.Struct({
   spriteCapabilities: Schema.optional(ImageSpriteCapabilities),
   id: ModelId,
@@ -40,7 +42,9 @@ export const ImageProvider = Schema.Struct({
   enabled: Schema.Boolean,
   models: Schema.Array(ImageProviderModel),
   defaultModel: ModelId,
-  concurrency: Integer.check(Schema.isBetween({ minimum: 1, maximum: 8 })),
+  concurrency: Integer.check(
+    Schema.isBetween({ minimum: 1, maximum: IMAGE_PROVIDER_MAX_CONCURRENCY }),
+  ),
   timeoutSeconds: Integer.check(Schema.isBetween({ minimum: 30, maximum: 1800 })),
   version: Integer,
   updatedAt: IsoDateTime,
@@ -54,7 +58,9 @@ export const ImageProviderInput = Schema.Struct({
   enabled: Schema.Boolean,
   models: Schema.Array(ImageProviderModel).check(Schema.isMinLength(1)),
   defaultModel: ModelId,
-  concurrency: Integer.check(Schema.isBetween({ minimum: 1, maximum: 8 })),
+  concurrency: Integer.check(
+    Schema.isBetween({ minimum: 1, maximum: IMAGE_PROVIDER_MAX_CONCURRENCY }),
+  ),
   timeoutSeconds: Integer.check(Schema.isBetween({ minimum: 30, maximum: 1800 })),
 });
 export type ImageProviderInput = typeof ImageProviderInput.Type;

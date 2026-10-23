@@ -1146,10 +1146,8 @@ export const copy: Record<string, string> = {
   "API Key configured": "已设置 API Key",
   "No API Key configured": "未设置 API Key",
   Concurrency: "并发上限",
-  "Test generation (1 API call)": "测试生图（调用 1 次接口）",
   "Delete image provider?": "删除生图供应商？",
-  "Discover models without generating images. Generation tests are separate paid API calls.":
-    "探测模型不会生成图片。测试生图会单独调用接口，可能产生费用。",
+  "Discover models without generating images.": "探测模型不会生成图片。",
   "Use the API root path. /v1 is not added automatically.": "填写 API 根路径，不会自动添加 /v1。",
   "Leave unchanged": "保留现有 Key",
   "Replace API Key (empty removes it)": "替换 API Key（留空则移除）",
