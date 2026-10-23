@@ -19,6 +19,7 @@ import { imageBatchTaskConfiguration } from "@synara/contracts";
 
 export function BatchTaskEditor({
   task,
+  batchId,
   defaults,
   sources,
   providers,
@@ -28,6 +29,7 @@ export function BatchTaskEditor({
   onReloadBase,
 }: {
   task: ImageBatchTask;
+  batchId: string;
   defaults: ImageBatchDefaults;
   sources: ImageBatchSource[];
   providers: readonly ImageProvider[];
@@ -130,6 +132,7 @@ export function BatchTaskEditor({
             title={tr("Reference images")}
             references={draft.references}
             sources={sources}
+            batchId={batchId}
             max={16 - (defaults.styleReferences?.length ?? 0)}
             disabled={busy}
             onChange={(references) => setDraft((current) => ({ ...current, references }))}

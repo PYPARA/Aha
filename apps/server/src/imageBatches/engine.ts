@@ -183,9 +183,13 @@ export class ImageBatchEngine {
           .concat(state.tasks.flatMap((t) => t.references.map((r) => r.assetId)))
           .concat((state.defaults.styleReferences ?? []).map((r) => r.assetId)),
       );
-      for (const task of input.tasks)
-        for (const r of task.references)
-          if (!known.has(r.assetId)) throw new Error("Reference is not owned by this batch.");
+      // This batch's own results can be references, so an adopted sample guides later tasks.
+      const unknown = input.tasks.flatMap((t) =>
+        t.references.map((r) => r.assetId).filter((id) => !known.has(id)),
+      );
+      const results = await this.repository.resultAssets(state.id, unknown);
+      if (unknown.some((id) => !results.has(id)))
+        throw new Error("Reference is not owned by this batch.");
       state.proposals.push({
         ...input,
         id: randomUUID(),

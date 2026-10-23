@@ -16,6 +16,7 @@ import {
   TransferTargetDialog,
 } from "../resources/transferTargets";
 import { useBatchCommand, useBatchResults } from "./useImageBatches";
+import { ReferenceTargetDialog } from "./BatchReferenceTargets";
 import {
   collectResources,
   resourceApi,
@@ -48,6 +49,7 @@ export function BatchResults({
   const [selection, setSelection] = useState(emptyResourceSelection);
   const [multiple, setMultiple] = useState(false);
   const [spriteTarget, setSpriteTarget] = useState(false);
+  const [referenceTarget, setReferenceTarget] = useState(false);
   const [preview, setPreview] = useState<ImageBatchResult[]>([]);
   const previewTrigger = useRef<HTMLElement | null>(null);
   const focusedLink = useRef<string | null>(null);
@@ -397,10 +399,22 @@ export function BatchResults({
               {tr("Continue in drawing")}
             </Button>
           )}
+          {!readOnly && (
+            <Button size="sm" variant="ghost" onClick={() => setReferenceTarget(true)}>
+              {tr("Use as task reference")}
+            </Button>
+          )}
           <Button size="sm" variant="ghost" onClick={() => setSpriteTarget(true)}>
             {tr("Use in sprite")}
           </Button>
         </div>
+      )}
+      {referenceTarget && (
+        <ReferenceTargetDialog
+          batch={batch}
+          results={chosen}
+          onClose={() => setReferenceTarget(false)}
+        />
       )}
       {spriteTarget && (
         <TransferTargetDialog

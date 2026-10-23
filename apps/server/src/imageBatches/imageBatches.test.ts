@@ -290,6 +290,50 @@ describe("batch drafts and proposals", () => {
     expect((await f.engine.get(s.id)).sources).toHaveLength(1);
   });
 });
+describe("staged references", () => {
+  it("accepts this batch's results as references and rejects another batch's results", async () => {
+    f.fetcher.mockImplementation(async () => f.response(1));
+    let s = await f.save(await f.create(), [f.task("sample", 1)]);
+    s = await f.confirm(s);
+    s = await f.settle(s.id);
+    s = await f.engine.command({
+      operation: "bind-thread",
+      batchId: s.id,
+      version: s.version,
+      threadId: "thread",
+    });
+    const [sample] = (await f.repo.results({ batchId: s.id })).results;
+    const reference = { id: "ref", assetId: sample!.asset.id, documentId: null };
+    const proposal = (tasks: ImageBatchTask[], state = s) => ({
+      batchId: state.id,
+      baseVersion: state.version,
+      requestId: randomUUID(),
+      summary: "",
+      warnings: [],
+      tasks,
+    });
+    s = await f.engine.propose(
+      proposal([s.tasks[0]!, { ...f.task("later"), references: [reference] }]),
+      "thread",
+      "turn",
+    );
+    expect(s.proposals.at(-1)!.tasks[1]!.references[0]!.assetId).toBe(sample!.asset.id);
+    let other = await f.create();
+    other = await f.engine.command({
+      operation: "bind-thread",
+      batchId: other.id,
+      version: other.version,
+      threadId: "other-thread",
+    });
+    await expect(
+      f.engine.propose(
+        proposal([{ ...f.task("foreign"), references: [reference] }], other),
+        "other-thread",
+        "turn",
+      ),
+    ).rejects.toThrow("not owned");
+  });
+});
 describe("batch execution consistency", () => {
   it("requires verification when a missing retry descendant is uncertain", async () => {
     f.fetcher.mockImplementation(async () => f.response(1));

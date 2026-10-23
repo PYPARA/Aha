@@ -1,6 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ImageAsset, ImageBatchSource, ImageInputReference } from "@synara/contracts";
 import { Button } from "../ui/button";
+import { OptionSelect } from "../ui/option-select";
+import { useBatchResults } from "./useImageBatches";
 import { imageUrl, uploadDrawingImage } from "../drawing/useDrawing";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 
@@ -9,6 +11,7 @@ export function BatchReferenceList({
   title,
   references,
   sources,
+  batchId,
   max,
   disabled,
   onChange,
@@ -18,6 +21,8 @@ export function BatchReferenceList({
   title: string;
   references: ImageInputReference[];
   sources: readonly ImageBatchSource[];
+  /** Offers this batch's saved results as references (task editor only). */
+  batchId?: string | undefined;
   max: number;
   disabled?: boolean;
   onChange: (references: ImageInputReference[]) => void;
@@ -30,6 +35,10 @@ export function BatchReferenceList({
   const known = (assetId: string) =>
     uploaded[assetId] ?? sources.find((s) => s.asset?.id === assetId)?.asset ?? null;
   const limit = tr("At most {count} reference images are allowed.").replace("{count}", String(max));
+  const pick = (assetId: string) => {
+    if (references.length >= max || references.some((r) => r.assetId === assetId)) return;
+    onChange([...references, { id: crypto.randomUUID(), assetId, documentId: null }]);
+  };
   return (
     <div className="space-y-2 text-ui">
       <h3 className="font-medium">{title}</h3>
@@ -97,14 +106,7 @@ export function BatchReferenceList({
               disabled={disabled}
               aria-label={tr("Use reference") + ": " + s.name}
               className="rounded-md p-1 focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => {
-                if (references.length >= max || references.some((r) => r.assetId === s.asset!.id))
-                  return;
-                onChange([
-                  ...references,
-                  { id: crypto.randomUUID(), assetId: s.asset!.id, documentId: null },
-                ]);
-              }}
+              onClick={() => pick(s.asset!.id)}
             >
               <img
                 src={imageUrl(s.asset!, "thumbnail")}
@@ -114,6 +116,98 @@ export function BatchReferenceList({
             </button>
           ))}
       </div>
+      {batchId && (
+        <ResultReferences
+          batchId={batchId}
+          disabled={disabled || references.length >= max}
+          picked={(assetId) => references.some((r) => r.assetId === assetId)}
+          onLoaded={(assets) =>
+            setUploaded((current) =>
+              assets.every((a) => current[a.id]) ? current : { ...current, ...byId(assets) },
+            )
+          }
+          onPick={pick}
+        />
+      )}
+    </div>
+  );
+}
+
+const byId = (assets: readonly ImageAsset[]) => Object.fromEntries(assets.map((a) => [a.id, a]));
+
+/** Saved results of the same batch, so an adopted sample can guide later tasks. */
+function ResultReferences({
+  batchId,
+  disabled,
+  picked,
+  onLoaded,
+  onPick,
+}: {
+  batchId: string;
+  disabled?: boolean | undefined;
+  picked: (assetId: string) => boolean;
+  onLoaded: (assets: ImageAsset[]) => void;
+  onPick: (assetId: string) => void;
+}) {
+  const tr = useAhaTranslation();
+  const [filter, setFilter] = useState<"adopted" | "all">("adopted");
+  const page = useBatchResults({ batchId, filter });
+  const results = page.data?.pages.flatMap((p) => p.results) ?? [];
+  useEffect(() => {
+    if (results.length) onLoaded(results.map((r) => r.asset));
+  }, [results.map((r) => r.id).join(",")]);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="min-w-0 flex-1 text-ui-sm font-medium">{tr("From this batch's results")}</h4>
+        <div className="w-32">
+          <OptionSelect
+            label={tr("Result filter")}
+            value={filter}
+            onValueChange={(v) => setFilter(v as typeof filter)}
+          >
+            <option value="adopted">{tr("Adopted")}</option>
+            <option value="all">{tr("All results")}</option>
+          </OptionSelect>
+        </div>
+      </div>
+      {!results.length && !page.isPending && (
+        <p className="text-ui-sm text-muted-foreground">
+          {tr(
+            filter === "adopted"
+              ? "No adopted results yet. Generate and adopt a sample first."
+              : "No results",
+          )}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {results.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            disabled={disabled || picked(r.asset.id)}
+            aria-label={tr("Use reference") + ": " + r.taskName + " " + (r.position + 1)}
+            className="rounded-md p-1 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            onClick={() => onPick(r.asset.id)}
+          >
+            <img
+              src={imageUrl(r.asset, "thumbnail")}
+              alt={r.taskName}
+              className="size-16 rounded object-contain"
+            />
+          </button>
+        ))}
+      </div>
+      {page.hasNextPage && (
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={page.isFetchingNextPage}
+          onClick={() => void page.fetchNextPage()}
+        >
+          {tr("Load more")}
+        </Button>
+      )}
     </div>
   );
 }

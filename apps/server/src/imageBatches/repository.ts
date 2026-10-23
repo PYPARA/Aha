@@ -161,6 +161,16 @@ export class ImageBatchRepository {
         rows.length > 100 && last ? JSON.stringify({ at: last.createdAt, id: last.id }) : null,
     };
   }
+  /** Asset IDs among `assetIds` that are saved results of this batch. */
+  async resultAssets(batchId: string, assetIds: readonly string[]) {
+    if (!assetIds.length) return new Set<string>();
+    const rows = await Effect.runPromise(
+      this.sql<{
+        assetId: string;
+      }>`SELECT DISTINCT asset_id AS assetId FROM image_batch_results WHERE batch_id=${batchId} AND asset_id IN ${this.sql.in([...assetIds])}`,
+    );
+    return new Set(rows.map((row) => row.assetId));
+  }
   async result(id: string) {
     const rows = await Effect.runPromise(
       this.sql<{ payload: string }>`SELECT payload FROM image_batch_results WHERE id=${id}`,

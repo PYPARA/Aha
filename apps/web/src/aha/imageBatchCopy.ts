@@ -13,6 +13,18 @@ export const imageBatchCopy: Record<string, string> = {
     "请先完成或恢复待处理的资源入库操作，再清理批次原图。",
 
   "Add reference image": "添加参考图",
+  "From this batch's results": "从本批结果选择",
+  "Use reference": "用作参考图",
+  "Use as task reference": "作为任务参考图",
+  "{count} images will be added to the reference images of the chosen tasks.":
+    "将把 {count} 张图片加入所选任务的参考图。",
+  '"{name}" would exceed {count} reference images.': "「{name}」的参考图将超过 {count} 张。",
+  "Enable the chosen tasks": "同时启用所选任务",
+  "This only updates the draft. Nothing is generated until you confirm generation.":
+    "这只会更新草稿，确认生成前不会生成任何图片。",
+  "Add references": "加入参考图",
+  "No adopted results yet. Generate and adopt a sample first.":
+    "还没有已采用的结果。请先生成并采用样张。",
   Running: "执行中",
   Selected: "已选",
   "Previous execution version": "上次执行版本",

@@ -857,6 +857,7 @@ function BatchWorkspace({
       {editor && (
         <BatchTaskEditor
           task={editor.task}
+          batchId={batch.id}
           defaults={editor.base.defaults}
           sources={batch.sources}
           providers={providers.data ?? []}
