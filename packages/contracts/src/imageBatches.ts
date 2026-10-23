@@ -205,7 +205,9 @@ export const ImageBatchSummary = Schema.Struct({
   name: Schema.String,
   updatedAt: Schema.String,
   archived: Schema.Boolean,
+  /** All tasks in the draft; `enabled` counts those the next confirmation would send. */
   tasks: Version,
+  enabled: Schema.optional(Version),
   planned: Version,
   generated: Version,
   issues: Version,

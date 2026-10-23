@@ -145,7 +145,11 @@ export default function ImageBatchWorkbench({
             >
               <span className="block truncate text-ui font-medium">{b.name}</span>
               <span className="mt-1 block text-ui-xs text-muted-foreground">
-                {b.tasks} {tr("tasks")} · {b.generated}/{b.planned} {tr("images")}
+                {b.tasks} {tr("tasks")}
+                {b.enabled !== undefined && b.enabled < b.tasks
+                  ? " · " + tr("{count} enabled").replace("{count}", String(b.enabled))
+                  : ""}{" "}
+                · {b.generated}/{b.planned} {tr("images")}
               </span>
               <span className="block text-ui-xs text-muted-foreground">
                 {tr(
@@ -466,7 +470,11 @@ function BatchWorkspace({
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
         <h2 className="min-w-0 flex-1 truncate text-ui font-medium">{batch.name}</h2>
         <span className="text-ui-xs text-muted-foreground">
-          {counts.tasks} {tr("tasks")} · {counts.images} {tr("planned images")}
+          {batch.tasks.length} {tr("tasks")}
+          {counts.tasks < batch.tasks.length
+            ? " · " + tr("{count} enabled").replace("{count}", String(counts.tasks))
+            : ""}{" "}
+          · {counts.images} {tr("planned images")}
         </span>
         <Button size="sm" variant="ghost" onClick={() => setConfiguration(structuredClone(batch))}>
           {tr("Batch settings")}

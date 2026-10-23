@@ -115,6 +115,7 @@ export const imageBatchCopy: Record<string, string> = {
   "No tasks match the filter.": "没有符合筛选条件的任务。",
   "Select group": "选择分组",
   Ungrouped: "未分组",
+  "{count} enabled": "已启用 {count}",
   enabled: "已启用",
   "Own settings": "单独设置",
   "Set parameters": "设置参数",
