@@ -145,11 +145,10 @@ it("keeps preview colors when adding an icon, cancels edits, and applies adjustm
       <Editor />
     </AhaAppearanceProvider>,
   );
-  await expect.element(screen.getByRole("combobox", { name: "Skin library" })).toBeVisible();
-  await screen.getByRole("combobox", { name: "Skin library" }).click();
-  await screen.getByRole("option", { name: "芙宁娜·众水之歌" }).click();
+  await expect.element(screen.getByRole("radiogroup", { name: "Skin library" })).toBeVisible();
+  await screen.getByRole("radio", { name: "芙宁娜·众水之歌" }).click();
   await expect.element(screen.getByTestId("preview-color")).toHaveTextContent("#0b172a");
-  await screen.getByRole("button", { name: "选择皮肤图标" }).click();
+  await screen.getByRole("button", { name: "更换图标" }).click();
   await expect.element(screen.getByTestId("preview-color")).toHaveTextContent("#0b172a");
   await screen.getByRole("button", { name: "Adjust color" }).click();
   await screen.getByRole("button", { name: "Keep global light" }).click();
@@ -159,8 +158,7 @@ it("keeps preview colors when adding an icon, cancels edits, and applies adjustm
     .toHaveTextContent(DEFAULT_THEME_STATE.chromeThemes.dark.surface);
   expect(JSON.parse(localStorage.getItem("synara:theme")!).mode).toBe("light");
   expect(apply).not.toHaveBeenCalled();
-  await screen.getByRole("combobox", { name: "Skin library" }).click();
-  await screen.getByRole("option", { name: "芙宁娜·众水之歌" }).click();
+  await screen.getByRole("radio", { name: "芙宁娜·众水之歌" }).click();
   await screen.getByRole("button", { name: "Adjust color" }).click();
   await screen.getByRole("button", { name: "应用", exact: true }).click();
   await expect.poll(() => state.activeId).toBe("furina-chanson");
@@ -177,13 +175,11 @@ it("restores the original default style from a preview and keeps global settings
       <ResettableEditor />
     </AhaAppearanceProvider>,
   );
-  await screen.getByRole("combobox", { name: "Skin library" }).click();
-  await screen.getByRole("option", { name: "芙宁娜·众水之歌" }).click();
+  await screen.getByRole("radio", { name: "芙宁娜·众水之歌" }).click();
   await screen.getByRole("button", { name: "应用", exact: true }).click();
   await expect.poll(() => state.activeId).toBe("furina-chanson");
   const savedFurina = structuredClone(state.skins.find((skin) => skin.id === "furina-chanson"));
-  await screen.getByRole("combobox", { name: "Skin library" }).click();
-  await screen.getByRole("option", { name: "默认样式", exact: true }).click();
+  await screen.getByRole("radio", { name: "默认样式", exact: true }).click();
   await expect.element(screen.getByTestId("preview-color")).toHaveTextContent("#654321");
   await screen.getByRole("button", { name: "Keep global light" }).click();
   await screen.getByRole("button", { name: "Restore default style", exact: true }).click();
@@ -205,8 +201,7 @@ it("keeps the applied appearance when restoring the default style fails", async 
       <ResettableEditor />
     </AhaAppearanceProvider>,
   );
-  await screen.getByRole("combobox", { name: "Skin library" }).click();
-  await screen.getByRole("option", { name: "芙宁娜·众水之歌" }).click();
+  await screen.getByRole("radio", { name: "芙宁娜·众水之歌" }).click();
   await screen.getByRole("button", { name: "应用", exact: true }).click();
   await expect.poll(() => state.activeId).toBe("furina-chanson");
   const saved = structuredClone(state);

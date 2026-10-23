@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   preview: vi.fn(),
 }));
 vi.mock("../hooks/useTheme", () => ({
-  useTheme: () => ({ themeState: mocks.theme.state }),
+  useTheme: () => ({ themeState: mocks.theme.state, resolvedTheme: "dark" }),
   applyAhaThemeState: mocks.apply,
   previewAhaThemeState: mocks.preview,
   beginAhaThemePreview: vi.fn(),
@@ -140,15 +140,17 @@ beforeEach(async () => {
   } as NonNullable<typeof window.desktopBridge>;
 });
 async function choose(screen: Awaited<ReturnType<typeof render>>, name = "芙宁娜·众水之歌") {
-  await screen.getByRole("combobox", { name: "Skin library" }).click();
-  await screen.getByRole("option", { name, exact: true }).click();
+  await screen.getByRole("radio", { name, exact: true }).click();
   await expect.poll(() => document.documentElement.dataset.ahaClear).toBe("false");
 }
 it("previews, cancels and applies without native apply during preview; clear mode leaves skin icon visible", async () => {
   const screen = await render(view());
-  await expect.element(screen.getByRole("combobox", { name: "Skin library" })).toBeVisible();
+  await expect.element(screen.getByRole("radiogroup", { name: "Skin library" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "应用", exact: true }).query()).toBeNull();
   await choose(screen);
   expect(apply).not.toHaveBeenCalled();
+  await expect.element(screen.getByRole("slider", { name: "图片不透明度" })).toBeVisible();
+  await expect.element(screen.getByText("60%", { exact: true })).toBeVisible();
   await expect
     .poll(() =>
       screen
@@ -184,8 +186,9 @@ it("keeps imported skin in library after cancel and previews it again", async ()
     return result(entry.id);
   });
   const screen = await render(view());
-  await expect.element(screen.getByRole("combobox", { name: "Skin library" })).toBeVisible();
-  await screen.getByRole("button", { name: "导入皮肤包", exact: true }).click();
+  await expect.element(screen.getByRole("radiogroup", { name: "Skin library" })).toBeVisible();
+  await screen.getByRole("button", { name: "更多皮肤操作" }).click();
+  await screen.getByRole("menuitem", { name: "导入皮肤包" }).click();
   await expect.poll(() => document.documentElement.dataset.ahaClear).toBe("false");
   await screen.getByRole("button", { name: "取消", exact: true }).click();
   await choose(screen, "Imported blue");
@@ -194,9 +197,9 @@ it("keeps imported skin in library after cancel and previews it again", async ()
 });
 it("ignores a late preview when leaving settings and preserves saved appearance on errors", async () => {
   const screen = await render(view());
-  await expect.element(screen.getByRole("combobox", { name: "Skin library" })).toBeVisible();
+  await expect.element(screen.getByRole("radiogroup", { name: "Skin library" })).toBeVisible();
   preview.mockRejectedValueOnce(new Error("Missing skin asset"));
-  await screen.getByRole("button", { name: "预览皮肤", exact: true }).click();
+  await screen.getByRole("radio", { name: "芙宁娜·众水之歌" }).click();
   await expect.element(screen.getByRole("alert")).toHaveTextContent("Missing skin asset");
   expect(apply).not.toHaveBeenCalled();
   let release: ((value: SkinPreview) => void) | undefined;
@@ -206,7 +209,7 @@ it("ignores a late preview when leaving settings and preserves saved appearance 
         release = resolve;
       }),
   );
-  await screen.getByRole("button", { name: "预览皮肤", exact: true }).click();
+  await screen.getByRole("radio", { name: "芙宁娜·众水之歌" }).click();
   await screen.unmount();
   release?.(result("furina-chanson"));
   await expect.poll(() => document.documentElement.dataset.ahaClear).toBe("true");

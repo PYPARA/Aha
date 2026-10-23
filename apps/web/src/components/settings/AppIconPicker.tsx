@@ -1,36 +1,16 @@
 // Select application artwork independently; the next skin switch follows that skin again.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useAhaTranslation, useAhaAppearance } from "~/aha/AppearanceProvider";
+import { defaultSkinFirst } from "~/aha/skin-colors";
+import { useAhaImageUrl } from "~/aha/useAhaImageUrl";
 import { Spinner } from "~/components/ui/spinner";
 import { cn } from "~/lib/utils";
 
 function IconThumbnail({ iconId }: { readonly iconId: string | null }) {
-  const [image, setImage] = useState<{ id: string; url: string } | null>(null);
-  useEffect(() => {
-    if (!iconId) return;
-    let live = true;
-    let url: string | undefined;
-    void window.desktopBridge?.ahaAppearance
-      ?.readImage(iconId)
-      .then((image) => {
-        if (!live) return;
-        url = URL.createObjectURL(new Blob([new Uint8Array(image.bytes)], { type: image.mime }));
-        setImage({ id: iconId, url });
-      })
-      .catch(() => undefined);
-    return () => {
-      live = false;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [iconId]);
+  const url = useAhaImageUrl(iconId);
   return (
-    <img
-      src={image?.id === iconId ? image.url : "/aha-logo.png"}
-      alt=""
-      draggable={false}
-      className="size-12 object-contain"
-    />
+    <img src={url ?? "/aha-logo.png"} alt="" draggable={false} className="size-12 object-contain" />
   );
 }
 
@@ -41,9 +21,7 @@ export function AppIconPicker() {
   const [error, setError] = useState<string | null>(null);
   if (!skins) return <Spinner aria-label={tr("Loading app icons")} className="size-4" />;
 
-  const choices = skins.skins.toSorted(
-    (a, b) => Number(b.id === "synara-default") - Number(a.id === "synara-default"),
-  );
+  const choices = defaultSkinFirst(skins.skins);
   const selectedId = skins.appIconOverrideSkinId ?? skins.activeId;
   const select = async (skinId: string | null) => {
     const api = window.desktopBridge?.ahaAppearance?.skins;

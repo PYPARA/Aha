@@ -1,4 +1,4 @@
-import { SkinPaletteSchema, type SkinPalette } from "@synara/contracts/ahaSkins";
+import { SkinPaletteSchema, type SkinEntry, type SkinPalette } from "@synara/contracts/ahaSkins";
 import { type ThemeState, serializeThemeState } from "../theme/theme.logic";
 export function skinPaletteFromTheme(state: ThemeState): SkinPalette {
   return SkinPaletteSchema.parse(
@@ -23,4 +23,10 @@ export function skinName(id: string, name: string, en: boolean) {
   if (id === "aha-elation") return "Xuzhao · Elation";
   if (id === "furina-chanson") return "Furina · Chanson of Many Waters";
   return name === "当前自定义外观" ? "Current custom appearance" : name;
+}
+// The default skin leads every skin list; the rest keep library order.
+export function defaultSkinFirst(skins: readonly SkinEntry[]) {
+  return skins.toSorted(
+    (a, b) => Number(b.id === "synara-default") - Number(a.id === "synara-default"),
+  );
 }
