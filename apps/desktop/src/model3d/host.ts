@@ -27,6 +27,10 @@ async function readModel(file: string) {
     throw new Error("Model exceeds 100 MiB.");
   return fs.readFile(file);
 }
+// Builds must answer before the server's 180 s request timeout gives up on them, so a
+// stuck phase surfaces as a named error instead of a silent host timeout.
+const BUILD_DEADLINE_MS = { threejs: 90_000, blender: 170_000 };
+const DISPOSE_DEADLINE_MS = 5_000;
 interface CompilerTask {
   id: string;
   build: typeof Model3DBuild.Type;
@@ -48,14 +52,30 @@ export class Model3DHost {
   private server: http.Server | null = null;
   private compilers = new Map<string, () => void>();
   private cancelled = new Set<string>();
+  private phases = new Map<string, { phase: string; started: number }>();
   private blender: BlenderRuntime;
   constructor(
     readonly root: string,
     private runtimeRoot: string,
     private runtimeUrl: () => string,
     private preload: string,
+    private log: (message: string) => void = () => {},
   ) {
     this.blender = new BlenderRuntime(runtimeRoot, os.homedir());
+  }
+  private trace(jobId: string, phase: string) {
+    const entry = this.phases.get(jobId);
+    if (!entry) return;
+    entry.phase = phase;
+    this.log(`job ${jobId} ${phase} +${Date.now() - entry.started}ms`);
+  }
+  private stopJob(jobId: string) {
+    this.cancelled.add(jobId);
+    // Cancellations can arrive before dispatch or after completion; bound this tombstone.
+    const expires = setTimeout(() => this.cancelled.delete(jobId), 180_000);
+    expires.unref();
+    this.compilers.get(jobId)?.();
+    return this.blender.cancel(jobId);
   }
   async start() {
     this.server = http.createServer((request, response) => {
@@ -118,12 +138,8 @@ export class Model3DHost {
     }
     if (method === "cancel") {
       const jobId = id(input.jobId);
-      this.cancelled.add(jobId);
-      // Cancellations can arrive before dispatch or after completion; bound this tombstone.
-      const expires = setTimeout(() => this.cancelled.delete(jobId), 180_000);
-      expires.unref();
-      this.compilers.get(jobId)?.();
-      await this.blender.cancel(jobId);
+      this.log(`job ${jobId} cancel requested`);
+      await this.stopJob(jobId);
       return {};
     }
     const projectId = id(input.projectId);
@@ -167,10 +183,48 @@ export class Model3DHost {
       );
     if (method !== "build" && method !== "import")
       throw new Error("Unsupported model host operation.");
-    const jobId = id(input.jobId),
+    return this.runJob(method, project, id(input.jobId));
+  }
+  private async runJob(method: "build" | "import", project: Model3DProject, jobId: string) {
+    this.phases.set(jobId, { phase: "received", started: Date.now() });
+    this.log(`job ${jobId} ${method} received`);
+    let timer: NodeJS.Timeout | undefined, expire!: (error: Error) => void;
+    const expired = new Promise<never>((_, reject) => (expire = reject));
+    const arm = (ms: number) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const phase = this.phases.get(jobId)?.phase ?? "unknown";
+        void this.stopJob(jobId).catch(() => {});
+        expire(
+          new Error(
+            `Model host did not finish within ${ms / 1000} s (stuck at: ${phase}). The task was stopped.`,
+          ),
+        );
+      }, ms);
+    };
+    try {
+      const result = await Promise.race([this.job(method, project, jobId, arm), expired]);
+      this.trace(jobId, "done");
+      return result;
+    } catch (error) {
+      this.trace(jobId, `failed: ${modelErrorText(error).split("\n")[0]}`);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      this.phases.delete(jobId);
+    }
+  }
+  private async job(
+    method: "build" | "import",
+    project: Model3DProject,
+    jobId: string,
+    arm: (ms: number) => void,
+  ) {
+    const projectId = project.id,
       job = project.jobs.find((j) => j.id === jobId);
     if (!job || !["queued", "running"].includes(job.status))
       throw new Error("Model task is not active.");
+    this.trace(jobId, "reading input");
     const directory = await modelPath(this.root, projectId, "jobs", jobId);
     const frozen = JSON.parse(
       await fs.readFile(await modelPath(directory, "input.json"), "utf8"),
@@ -178,6 +232,8 @@ export class Model3DHost {
     const build = Schema.decodeUnknownSync(Model3DBuild)(frozen.build);
     if (Buffer.byteLength(build.source) > MODEL3D_LIMITS.sourceBytes)
       throw new Error("Model source exceeds 1 MiB.");
+    if (method === "build")
+      arm(build.mode === "blender" ? BUILD_DEADLINE_MS.blender : BUILD_DEADLINE_MS.threejs);
     const parent = build.parentVersionId
       ? project.versions.find((v) => v.id === build.parentVersionId)
       : null;
@@ -191,12 +247,16 @@ export class Model3DHost {
       if (sha(modelInput) !== parent.hash) throw new Error("Parent model checksum mismatch.");
     }
     if (method === "import") {
+      // The deadline starts after the dialog: choosing a file is the user's time, not the host's.
+      this.trace(jobId, "waiting for import selection");
       const selection = await dialog.showOpenDialog({
         title: "Import GLB or a complete glTF package",
         properties: ["openFile"],
         filters: [{ name: "3D models", extensions: ["glb", "gltf"] }],
       });
       if (selection.canceled || !selection.filePaths[0]) return { cancelled: true };
+      arm(BUILD_DEADLINE_MS.threejs);
+      this.trace(jobId, "reading import");
       modelInput = await importModelFile(selection.filePaths[0]);
     }
     let hasBlend = false;
@@ -209,6 +269,7 @@ export class Model3DHost {
     );
     try {
       if (build.mode === "blender" && method !== "import") {
+        this.trace(jobId, "running Blender");
         await this.blender.build({
           projectId,
           jobId,
@@ -228,6 +289,7 @@ export class Model3DHost {
       if (this.cancelled.has(jobId)) throw new Error("Model task cancelled.");
       if (modelInput && modelInput.length > MODEL3D_LIMITS.fileBytes)
         throw new Error("Model exceeds 100 MiB.");
+      this.trace(jobId, "reading textures");
       const result = await this.compile({
         id: jobId,
         build: hasBlend ? { ...build, materialEdits: [] } : build,
@@ -250,6 +312,7 @@ export class Model3DHost {
           warnings: [...new Set([...result.report.warnings, ...check.warnings])],
         };
       }
+      this.trace(jobId, "writing output");
       await atomicModelFile(await modelPath(directory, "model.glb"), result.bytes);
       await atomicModelFile(await modelPath(directory, "thumbnail.png"), result.thumbnail);
       return {
@@ -266,6 +329,7 @@ export class Model3DHost {
     }
   }
   private async compile(task: CompilerTask): Promise<CompilerResult> {
+    this.trace(task.id, "opening compiler");
     const window = new BrowserWindow({
       show: false,
       width: 512,
@@ -341,10 +405,12 @@ export class Model3DHost {
       const onReady = (event: Electron.IpcMainEvent) => {
         if (event.sender !== window.webContents) return;
         ready = true;
+        this.trace(task.id, "compiling");
         window.webContents.send("model3d:task", task);
       };
       const onComplete = (event: Electron.IpcMainEvent, value: unknown) => {
         if (event.sender !== window.webContents) return;
+        this.trace(task.id, "checking compiler output");
         try {
           const data = value as {
             id?: string;
@@ -381,6 +447,7 @@ export class Model3DHost {
       window.webContents.once("render-process-gone", () =>
         finish(new Error("The isolated model compiler stopped.")),
       );
+      this.trace(task.id, "loading compiler page");
       void window.loadURL(url).catch((error: unknown) => finish(new Error(modelErrorText(error))));
     });
   }
@@ -502,9 +569,23 @@ export class Model3DHost {
   }
   async dispose() {
     for (const cancel of this.compilers.values()) cancel();
-    await this.blender.stop();
-    if (this.server) await new Promise<void>((resolve) => this.server!.close(() => resolve()));
-    if (process.platform !== "win32") await fs.rm(this.pipe, { force: true });
+    const server = this.server;
+    this.server = null;
+    // close() waits for in-flight requests; a stuck build must not hold quit open.
+    const closed = server
+      ? new Promise<void>((resolve) => server.close(() => resolve()))
+      : Promise.resolve();
+    server?.closeAllConnections();
+    let timer: NodeJS.Timeout | undefined;
+    const finished = await Promise.race([
+      Promise.all([this.blender.stop().catch(() => {}), closed]).then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), DISPOSE_DEADLINE_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (!finished) this.log(`dispose did not finish within ${DISPOSE_DEADLINE_MS / 1000} s`);
+    if (process.platform !== "win32") await fs.rm(this.pipe, { force: true }).catch(() => {});
   }
 }
 

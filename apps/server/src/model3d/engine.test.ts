@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { Model3DEngine } from "./engine";
-import type { modelHostCall } from "./hostClient";
+import { ModelHostTimeoutError, type modelHostCall } from "./hostClient";
 import type { Model3DBuild, Model3DProject, Model3DValidationReport } from "@synara/contracts";
 
 let root: string;
@@ -189,6 +189,17 @@ describe("3D immutable projects and task publication", () => {
     expect(project.adoptedVersionId).toBe(first.id);
     await engine.verifyVersion(project.id, first);
     expect(project.jobs.at(-1)?.build.source).toBe("broken candidate");
+  });
+  it("fails a build the host never answers and tells the host to stop it", async () => {
+    const host = makeHost(),
+      engine = new Model3DEngine(root, host as typeof modelHostCall);
+    await engine.initialize();
+    host.mockImplementationOnce(async () => {
+      throw new ModelHostTimeoutError();
+    });
+    const project = await submit(engine, await create(engine));
+    expect(project.jobs.at(-1)).toMatchObject({ status: "failed", error: "Model host timed out." });
+    expect(host).toHaveBeenCalledWith("cancel", { jobId: project.jobs.at(-1)!.id });
   });
   it("deduplicates a stable request and rejects stale or conflicting writes", async () => {
     const host = makeHost(),

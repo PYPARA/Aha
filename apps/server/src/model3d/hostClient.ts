@@ -1,5 +1,11 @@
 import * as http from "node:http";
 
+export class ModelHostTimeoutError extends Error {
+  constructor() {
+    super("Model host timed out.");
+  }
+}
+
 export function modelHostCall<T>(
   method: string,
   params: Record<string, unknown> = {},
@@ -38,7 +44,7 @@ export function modelHostCall<T>(
       },
     );
     request.on("error", reject);
-    request.setTimeout(180_000, () => request.destroy(new Error("Model host timed out.")));
+    request.setTimeout(180_000, () => request.destroy(new ModelHostTimeoutError()));
     request.end(JSON.stringify(params));
   });
 }

@@ -727,6 +727,7 @@ async function ensureModel3DHost(): Promise<void> {
         isDevelopment ? process.env.VITE_DEV_SERVER_URL! : backendHttpUrl + "/",
       ).href,
     Path.join(__dirname, "model3dPreload.js"),
+    (message) => writeDesktopLogHeader(`[model3d] ${message}`),
   );
   await host.start();
   model3dHost = host;

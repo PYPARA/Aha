@@ -15,7 +15,7 @@ import {
 } from "@synara/contracts";
 import { ahaUserDirectories } from "@synara/shared/ahaUserDirectories";
 import { modelPath, atomicModelFile, modelErrorText } from "@synara/shared/model3dFiles";
-import { modelHostCall } from "./hostClient";
+import { ModelHostTimeoutError, modelHostCall } from "./hostClient";
 import { validateBytes } from "gltf-validator";
 
 type Mutable<T> = { -readonly [P in keyof T]: T[P] extends readonly (infer U)[] ? U[] : T[P] };
@@ -418,6 +418,9 @@ export class Model3DEngine {
         await this.save(p);
       });
     } catch (error) {
+      // An unanswered host may still be compiling; stop it so it cannot hold the runtime.
+      if (error instanceof ModelHostTimeoutError)
+        void this.host("cancel", { jobId }).catch(() => {});
       await this.lock(projectId, async () => {
         const p = await this.get(projectId),
           job = p.jobs.find((j) => j.id === jobId);
