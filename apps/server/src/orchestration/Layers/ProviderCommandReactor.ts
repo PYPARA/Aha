@@ -1,6 +1,8 @@
 import { IMAGE_BATCH_GUIDANCE } from "../../agentGateway/imageBatchTools";
 import { MODEL3D_GUIDANCE } from "../../agentGateway/model3dTools";
 import { model3DForThread } from "../../model3d/engine";
+import { GEN3D_GUIDANCE } from "../../agentGateway/gen3dTools";
+import { gen3DForThread } from "../../gen3d/engine";
 import { makeSpriteReferenceReader } from "../../agentGateway/spriteReferences";
 import { createHash } from "node:crypto";
 import { ImageGenerationService } from "../../imageGeneration/Services/ImageGenerationService";
@@ -3141,8 +3143,17 @@ const make = Effect.gen(function* () {
       ? yield* Effect.promise(() => spriteImages.batches.repository.forThread(input.threadId))
       : null;
     const model3d = yield* Effect.promise(() => model3DForThread(input.threadId));
-    if ((batch && spritePrompt) || (model3d && (batch || spritePrompt)))
+    const gen3d = yield* Effect.promise(() => gen3DForThread(input.threadId));
+    if ([batch, spritePrompt || null, model3d, gen3d].filter((bound) => !!bound).length > 1)
       return yield* Effect.fail(new Error("Conversation is bound to two creative workbenches."));
+    const gen3dAuthorization = gen3d?.runs.find((r) => r.status === "active");
+    const gen3dPrompt = gen3d
+      ? `<gen3d_instructions>\n${GEN3D_GUIDANCE}\nProject: ${gen3d.id}. ${
+          gen3dAuthorization
+            ? `Active authorization: up to ${gen3dAuthorization.maxRounds - gen3dAuthorization.usedRounds} more builds this turn.`
+            : "No iteration authorization: at most one build this turn."
+        } Call gen3d get for the blueprint, versions and source.\n</gen3d_instructions>`
+      : "";
     if (batch && spriteImages)
       yield* Effect.promise(async () => {
         const reader = makeSpriteReferenceReader({
@@ -3191,6 +3202,7 @@ const make = Effect.gen(function* () {
       model3d
         ? `<model3d_instructions>\n${MODEL3D_GUIDANCE}\nProject: ${model3d.id}, mode: ${model3d.mode}. Call model3d get for current source, versions and objects.\n</model3d_instructions>`
         : "",
+      gen3dPrompt,
       spritePrompt,
       batchPrompt,
       projectContextPacket,
@@ -3267,7 +3279,8 @@ const make = Effect.gen(function* () {
                     messageText.length -
                     PROVIDER_INPUT_SAFETY_MARGIN_CHARS -
                     providerPromptOverheadChars -
-                    spritePrompt.length,
+                    spritePrompt.length -
+                    gen3dPrompt.length,
                 ),
               }),
             ).pipe(
@@ -3284,6 +3297,7 @@ const make = Effect.gen(function* () {
         model3d
           ? `<model3d_instructions>\n${MODEL3D_GUIDANCE}\nRead model3d get for the current project and preview version.\n</model3d_instructions>`
           : "",
+        gen3dPrompt,
         messageText,
         steerSkillInlineText,
       ]

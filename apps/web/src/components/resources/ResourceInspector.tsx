@@ -196,6 +196,22 @@ export function ResourceInspector({
                     </Button>
                   </>
                 )}
+                {entry.origin.kind === "gen3d" && entry.origin.projectId ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      editor.guard(() => {
+                        void navigate({
+                          to: "/gen3d",
+                          search: { projectId: entry.origin!.projectId! },
+                        });
+                      })
+                    }
+                  >
+                    {tr("Open 3D generation project")}
+                  </Button>
+                ) : null}
                 {entry.origin.kind === "model3d" && entry.origin.projectId ? (
                   <Button
                     size="sm"

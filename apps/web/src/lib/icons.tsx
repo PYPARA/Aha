@@ -104,6 +104,7 @@ export const BackToParentIcon: LucideIcon = centralIconWrapper("arrow-share-left
 export const WorkflowIcon: LucideIcon = centralIconWrapper("agents");
 export const ComposerSendArrowIcon: LucideIcon = centralIconWrapper("arrow-up");
 export const SkillCubeIcon: LucideIcon = centralIconWrapper("building-blocks");
+export const Gen3DIcon: LucideIcon = centralIconWrapper("3d-sphere");
 export const NewThreadIcon: LucideIcon = centralIconWrapper("compose-pencil");
 // Command palette (⌘K) action glyphs: one Central outline set so the rows read as a family.
 export const ImportThreadIcon: LucideIcon = centralIconWrapper("import");

@@ -467,6 +467,14 @@
     "./model3dFiles": {
       "types": "./src/model3dFiles.ts",
       "import": "./src/model3dFiles.ts"
+    },
+    "./gen3dScore": {
+      "types": "./src/gen3dScore.ts",
+      "import": "./src/gen3dScore.ts"
+    },
+    "./gen3dSdf": {
+      "types": "./src/gen3dSdf.ts",
+      "import": "./src/gen3dSdf.ts"
     }
   },
   "scripts": {

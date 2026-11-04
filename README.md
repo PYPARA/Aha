@@ -48,6 +48,12 @@ Aha 是基于 [Synara](https://github.com/Emanuele-web04/synara) 二次开发的
 
 详细流程与运行环境要求见 [3D 工坊指南](docs/guides/MODEL3D_WORKSHOP.md)。
 
+### 3D 生成：照着三视图迭代建模
+
+从一张三视图参考开始（上传或用绘图渠道生成），AI 用 Three.js 和 SDF 建模，每次构建都和参考剪影比对评分，再按差异图修改，在授权轮数内自动迭代。每轮结果都保留为候选，可比对、采用、导出 GLB 或保存到资源中心。
+
+详细流程见 [3D 生成指南](docs/guides/GEN3D.md)。
+
 ### 资源中心：按项目整理，让素材继续流转
 
 映射本地资源目录，用目录树、搜索、标签与来源筛选浏览素材，支持预览、多选、移动和导出。图片可送入聊天、绘图、批量生图或精灵项目；生成结果与导出资源可手动入库，并保留来源，方便回到对应工作台继续创作。
@@ -128,6 +134,7 @@ Aha 使用独立应用身份与 `aha-next:` 协议，关闭官方 Synara 自动�
 | [批量生图](docs/guides/IMAGE_BATCHES.md)   | 需求编排、任务执行、结果挑选与入库 |
 | [精灵动画](docs/guides/SPRITE_WORKFLOW.md) | 角色、动作、修帧、导出与恢复       |
 | [3D 工坊](docs/guides/MODEL3D_WORKSHOP.md) | 建模、候选版本、材质与导出         |
+| [3D 生成](docs/guides/GEN3D.md)            | 三视图蓝图、迭代建模、比对与导出   |
 | [资源中心](docs/guides/RESOURCE_CENTER.md) | 目录、搜索、预览与素材整理         |
 | [UI 实现规则](docs/UI_GUIDELINES.md)       | 公共布局、控件、主题与交互规范     |
 | [上游来源](UPSTREAM.md)                    | 固定版本、合并记录、兼容与精简边界 |

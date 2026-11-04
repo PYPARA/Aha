@@ -53,6 +53,10 @@ export default defineConfig([
   },
   {
     ...shared,
+    entry: ["src/gen3dPreload.ts"],
+  },
+  {
+    ...shared,
     entry: ["src/browserAnnotations/guestPreload.ts"],
   },
   {

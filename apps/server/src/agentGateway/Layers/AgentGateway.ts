@@ -1,5 +1,6 @@
 import { makeImageBatchTools } from "../imageBatchTools";
 import { makeModel3DTools } from "../model3dTools";
+import { makeGen3DTools } from "../gen3dTools";
 import { ImageGenerationService } from "../../imageGeneration/Services/ImageGenerationService";
 import { makeSpriteReferenceReader } from "../spriteReferences";
 import { makeSpriteTools } from "../spriteTools";
@@ -1628,6 +1629,7 @@ export const makeAgentGateway = Effect.gen(function* () {
 
   const tools: ReadonlyArray<ToolEntry> = [
     ...makeModel3DTools(),
+    ...makeGen3DTools(),
     ...(Option.isSome(spriteImages) && hubMessages
       ? makeSpriteTools(
           spriteImages.value,

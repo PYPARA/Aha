@@ -7,7 +7,7 @@ import { ResourceLibrary } from "./library";
 const ids = z.array(z.string().min(1).max(128)).min(1).max(10000);
 const text = z.string().max(4096);
 const origin = z.object({
-  kind: z.enum(["drawing", "chat", "local", "game", "image-batch", "sprite", "model3d"]),
+  kind: z.enum(["drawing", "chat", "local", "game", "image-batch", "sprite", "model3d", "gen3d"]),
   threadId: text.optional(),
   messageId: text.optional(),
   jobId: text.optional(),
@@ -80,7 +80,7 @@ const Command = z.discriminatedUnion("op", [
       searchIn: z.enum(["name", "nameAndPath"]).optional(),
       tag: text.optional(),
       originKind: z
-        .enum(["drawing", "chat", "local", "game", "image-batch", "sprite", "model3d"])
+        .enum(["drawing", "chat", "local", "game", "image-batch", "sprite", "model3d", "gen3d"])
         .optional(),
       type: z.enum(["all", "image", "audio", "video", "document", "model3d", "other"]).optional(),
       sort: z.enum(["name", "modified"]).optional(),

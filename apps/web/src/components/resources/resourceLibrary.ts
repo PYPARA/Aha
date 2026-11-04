@@ -94,6 +94,7 @@ export function collectResources(sources: ResourceSource[]) {
           "image-batches",
           "sprite-animation",
           "model3d",
+          "gen3d",
           "resources",
           "settings",
           "",

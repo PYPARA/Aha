@@ -1,5 +1,6 @@
 import { ImageEditDocumentCreateInput } from "@synara/contracts";
 import { model3DEngine } from "./model3d/engine";
+import { gen3DEngine } from "./gen3d/engine";
 import { readEventLoopStatus } from "./eventLoopMonitor";
 import { ImageGenerationService } from "./imageGeneration/Services/ImageGenerationService";
 import { IMAGE_INPUT_MAX_BYTES } from "@synara/contracts";
@@ -250,11 +251,55 @@ export function makeEffectHttpRouteLayer(
     localImageEffectRouteLayer,
     drawingAssetEffectRouteLayer,
     model3dAssetEffectRouteLayer,
+    gen3dAssetEffectRouteLayer,
     binaryUploadEffectRouteLayer,
     attachmentsEffectRouteLayer,
     staticAndDevEffectRouteLayer,
   );
 }
+
+// /api/gen3d/assets/<projectId>/versions/<versionId>/<file>, .../blueprint/<view>, .../references/<id>
+export const gen3dAssetEffectRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/gen3d/assets/*",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (!url) return HttpServerResponse.text("Bad Request", { status: 400 });
+    const config = yield* ServerConfig;
+    if (!isLegacyTokenAuthorized({ config, url })) yield* requireAuthenticatedRequest;
+    const parts = url.pathname.split("/").slice(4);
+    if (parts.length < 3 || parts.length > 4)
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    const [projectId, kind, id, file] = parts as [string, string, string, string | undefined];
+    const bytes = yield* Effect.tryPromise(async () =>
+      (await gen3DEngine()).read(projectId, kind, id, file),
+    );
+    const name = file ?? id;
+    return HttpServerResponse.uint8Array(bytes, {
+      headers: {
+        ...localPreviewCorsHeaders({ config, request, url }),
+        "Content-Type": name.endsWith(".glb")
+          ? "model/gltf-binary"
+          : name.endsWith(".json")
+            ? "application/json"
+            : "image/png",
+        // Blueprints are replaced in place when re-extracted; versions and references are immutable.
+        "Cache-Control":
+          kind === "blueprint" ? "private, no-cache" : "private, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed(
+        error instanceof AuthError
+          ? authErrorResponse(error)
+          : HttpServerResponse.text("Not Found", { status: 404 }),
+      ),
+    ),
+  ),
+);
 
 export const model3dAssetEffectRouteLayer = HttpRouter.add(
   "GET",

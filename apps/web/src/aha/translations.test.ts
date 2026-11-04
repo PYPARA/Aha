@@ -3,6 +3,7 @@ import { copy } from "./translations";
 import { resourceCopy } from "./resourceCopy";
 import { spriteV5Copy } from "./spriteV5Copy";
 import { model3dCopy } from "./model3dCopy";
+import { gen3dCopy } from "./gen3dCopy";
 import { imageBatchCopy } from "./imageBatchCopy";
 
 it("never silently overrides a feature copy key with a different translation", () => {
@@ -11,6 +12,7 @@ it("never silently overrides a feature copy key with a different translation", (
     spriteV5Copy,
     imageBatchCopy,
     model3dCopy,
+    gen3dCopy,
   }).flatMap(([file, entries]) =>
     Object.entries(entries)
       .filter(([key, value]) => copy[key] !== value)

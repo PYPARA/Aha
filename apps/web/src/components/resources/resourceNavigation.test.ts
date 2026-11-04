@@ -6,11 +6,12 @@ import {
   buildRailItemOrder,
 } from "~/appRail.logic";
 describe("resource center navigation", () => {
-  it("places 3D Workshop between sprite animation and resources for saved and fresh rail orders", () => {
+  it("places 3D Workshop and 3D Generation between sprite animation and resources for saved and fresh rail orders", () => {
     for (const saved of [[], ["home", "spaces", "inbox"], ["drawing", "home", "spaces"]]) {
       const result = normalizeRailItemOrder(saved);
       expect(result.indexOf("model3d")).toBe(result.indexOf("spriteAnimation") + 1);
-      expect(result.indexOf("resources")).toBe(result.indexOf("model3d") + 1);
+      expect(result.indexOf("gen3d")).toBe(result.indexOf("model3d") + 1);
+      expect(result.indexOf("resources")).toBe(result.indexOf("gen3d") + 1);
       expect(new Set(result).size).toBe(result.length);
     }
   });

@@ -37,6 +37,7 @@ export type RailRouteItemId =
   | "drawing"
   | "imageBatches"
   | "model3d"
+  | "gen3d"
   | "spriteAnimation"
   | "resources";
 export type RailItemId = RailPanelItemId | RailRouteItemId;
@@ -52,6 +53,7 @@ export const RAIL_ORDERABLE_ITEM_IDS = [
   "imageBatches",
   "spriteAnimation",
   "model3d",
+  "gen3d",
   "resources",
   "inbox",
   "spaces",
@@ -86,12 +88,13 @@ export function normalizeRailItemOrder(order: readonly string[]): RailOrderableI
   );
   const withResources = placeNewIdAfter(withDrawing, order, "resources", "drawing");
   const withSprites = placeNewIdAfter(withResources, order, "spriteAnimation", "drawing");
-  return placeNewIdAfter(
+  const withModels = placeNewIdAfter(
     placeNewIdAfter(withSprites, order, "imageBatches", "drawing"),
     order,
     "model3d",
     "spriteAnimation",
   );
+  return placeNewIdAfter(withModels, order, "gen3d", "model3d");
 }
 
 export function normalizeHiddenRailItems(hidden: readonly string[]): RailOrderableItemId[] {
@@ -216,6 +219,7 @@ export function resolveActiveRailShortcutKey(input: {
 export function railItemShowsPanel(id: RailItemId): boolean {
   return (
     id !== "model3d" &&
+    id !== "gen3d" &&
     id !== "spriteAnimation" &&
     id !== "resources" &&
     id !== "drawing" &&
@@ -234,6 +238,7 @@ function matchesRoute(pathname: string, route: string): boolean {
 /** The route rail item that owns a pathname, or null for thread and chat-index routes. */
 export function railItemForPathname(pathname: string): RailRouteItemId | null {
   if (matchesRoute(pathname, "/model3d")) return "model3d";
+  if (matchesRoute(pathname, "/gen3d")) return "gen3d";
   if (matchesRoute(pathname, "/sprite-animation")) return "spriteAnimation";
   if (matchesRoute(pathname, "/resources")) return "resources";
   if (matchesRoute(pathname, "/drawing")) return "drawing";

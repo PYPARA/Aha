@@ -1,4 +1,5 @@
 import type { Model3DApi } from "./model3d";
+import type { Gen3DApi } from "./gen3d";
 import type { ImageBatchesApi } from "./imageBatches";
 import type { SpriteLibraryBridge } from "./spriteLibrary";
 import type {
@@ -1537,6 +1538,7 @@ export interface NativeApi {
     onEvent: (callback: (event: TodoStreamEvent) => void) => () => void;
   };
   model3d: Model3DApi;
+  gen3d: Gen3DApi;
   imageBatches: ImageBatchesApi;
   imageGeneration: {
     spriteForThread: (input: { threadId: string }) => Promise<SpriteState | null>;

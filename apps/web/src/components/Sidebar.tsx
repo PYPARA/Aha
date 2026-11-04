@@ -6861,15 +6861,17 @@ export default function Sidebar() {
         ? "Batch images"
         : id === "model3d"
           ? "3D Workshop"
-          : id === "spriteAnimation"
-            ? "Sprite animation"
-            : id === "resources"
-              ? "Resource center"
-              : id === "drawing"
-                ? "Drawing"
-                : id === "studio"
-                  ? "Hubs"
-                  : sidebarNavDescriptors[id].label;
+          : id === "gen3d"
+            ? "3D Generation"
+            : id === "spriteAnimation"
+              ? "Sprite animation"
+              : id === "resources"
+                ? "Resource center"
+                : id === "drawing"
+                  ? "Drawing"
+                  : id === "studio"
+                    ? "Hubs"
+                    : sidebarNavDescriptors[id].label;
   const railItemFor = (id: RailOrderableItemId): AppRailItem => {
     const base = { id, glyphs: railItemGlyphs(id), label: railItemLabel(id) };
     if (id === "home" || id === "spaces") {
@@ -6906,6 +6908,16 @@ export default function Sidebar() {
         onSelect: () => {
           selectRailRouteItem("model3d");
           void navigate({ to: "/model3d", search: {} });
+        },
+      };
+    if (id === "gen3d")
+      return {
+        ...base,
+        badge: null,
+        active: railActiveItem === "gen3d",
+        onSelect: () => {
+          selectRailRouteItem("gen3d");
+          void navigate({ to: "/gen3d", search: {} });
         },
       };
     if (id === "spriteAnimation")
@@ -6973,6 +6985,7 @@ export default function Sidebar() {
       "imageBatches",
       "spriteAnimation",
       "model3d",
+      "gen3d",
       "resources",
       "inbox",
       "kanban",

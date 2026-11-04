@@ -19,6 +19,7 @@ import { Route as ChatPluginsRouteImport } from './routes/_chat.plugins'
 import { Route as ChatModel3dRouteImport } from './routes/_chat.model3d'
 import { Route as ChatInboxRouteImport } from './routes/_chat.inbox'
 import { Route as ChatImageBatchesRouteImport } from './routes/_chat.image-batches'
+import { Route as ChatGen3dRouteImport } from './routes/_chat.gen3d'
 import { Route as ChatDrawingRouteImport } from './routes/_chat.drawing'
 import { Route as ChatAutomationsRouteImport } from './routes/_chat.automations'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
@@ -79,6 +80,11 @@ const ChatInboxRoute = ChatInboxRouteImport.update({
 const ChatImageBatchesRoute = ChatImageBatchesRouteImport.update({
   id: '/image-batches',
   path: '/image-batches',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatGen3dRoute = ChatGen3dRouteImport.update({
+  id: '/gen3d',
+  path: '/gen3d',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatDrawingRoute = ChatDrawingRouteImport.update({
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/$threadId': typeof ChatThreadIdRoute
   '/automations': typeof ChatAutomationsRouteWithChildren
   '/drawing': typeof ChatDrawingRoute
+  '/gen3d': typeof ChatGen3dRoute
   '/image-batches': typeof ChatImageBatchesRoute
   '/inbox': typeof ChatInboxRoute
   '/model3d': typeof ChatModel3dRoute
@@ -169,6 +176,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/$threadId': typeof ChatThreadIdRoute
   '/drawing': typeof ChatDrawingRoute
+  '/gen3d': typeof ChatGen3dRoute
   '/image-batches': typeof ChatImageBatchesRoute
   '/inbox': typeof ChatInboxRoute
   '/model3d': typeof ChatModel3dRoute
@@ -193,6 +201,7 @@ export interface FileRoutesById {
   '/_chat/$threadId': typeof ChatThreadIdRoute
   '/_chat/automations': typeof ChatAutomationsRouteWithChildren
   '/_chat/drawing': typeof ChatDrawingRoute
+  '/_chat/gen3d': typeof ChatGen3dRoute
   '/_chat/image-batches': typeof ChatImageBatchesRoute
   '/_chat/inbox': typeof ChatInboxRoute
   '/_chat/model3d': typeof ChatModel3dRoute
@@ -219,6 +228,7 @@ export interface FileRouteTypes {
     | '/$threadId'
     | '/automations'
     | '/drawing'
+    | '/gen3d'
     | '/image-batches'
     | '/inbox'
     | '/model3d'
@@ -240,6 +250,7 @@ export interface FileRouteTypes {
   to:
     | '/$threadId'
     | '/drawing'
+    | '/gen3d'
     | '/image-batches'
     | '/inbox'
     | '/model3d'
@@ -263,6 +274,7 @@ export interface FileRouteTypes {
     | '/_chat/$threadId'
     | '/_chat/automations'
     | '/_chat/drawing'
+    | '/_chat/gen3d'
     | '/_chat/image-batches'
     | '/_chat/inbox'
     | '/_chat/model3d'
@@ -357,6 +369,13 @@ declare module '@tanstack/react-router' {
       path: '/image-batches'
       fullPath: '/image-batches'
       preLoaderRoute: typeof ChatImageBatchesRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/gen3d': {
+      id: '/_chat/gen3d'
+      path: '/gen3d'
+      fullPath: '/gen3d'
+      preLoaderRoute: typeof ChatGen3dRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/drawing': {
@@ -475,6 +494,7 @@ interface ChatRouteChildren {
   ChatThreadIdRoute: typeof ChatThreadIdRoute
   ChatAutomationsRoute: typeof ChatAutomationsRouteWithChildren
   ChatDrawingRoute: typeof ChatDrawingRoute
+  ChatGen3dRoute: typeof ChatGen3dRoute
   ChatImageBatchesRoute: typeof ChatImageBatchesRoute
   ChatInboxRoute: typeof ChatInboxRoute
   ChatModel3dRoute: typeof ChatModel3dRoute
@@ -496,6 +516,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatThreadIdRoute: ChatThreadIdRoute,
   ChatAutomationsRoute: ChatAutomationsRouteWithChildren,
   ChatDrawingRoute: ChatDrawingRoute,
+  ChatGen3dRoute: ChatGen3dRoute,
   ChatImageBatchesRoute: ChatImageBatchesRoute,
   ChatInboxRoute: ChatInboxRoute,
   ChatModel3dRoute: ChatModel3dRoute,

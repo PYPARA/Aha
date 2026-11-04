@@ -252,7 +252,10 @@ export function ResourceCollectionDialog() {
   const durable =
     !!sources?.length &&
     sources.every(
-      (source) => source.origin?.kind === "image-batch" || source.origin?.kind === "model3d",
+      (source) =>
+        source.origin?.kind === "image-batch" ||
+        source.origin?.kind === "model3d" ||
+        source.origin?.kind === "gen3d",
     );
   const directoryId =
     target === "" ? null : (library.data?.directories.find((e) => e.path === target)?.id ?? null);
@@ -335,7 +338,10 @@ export function ResourceCollectionDialog() {
         throw new Error("Choose a project or folder.");
       if (
         sources.every(
-          (source) => source.origin?.kind === "image-batch" || source.origin?.kind === "model3d",
+          (source) =>
+            source.origin?.kind === "image-batch" ||
+            source.origin?.kind === "model3d" ||
+            source.origin?.kind === "gen3d",
         )
       ) {
         const directoryId =
@@ -350,7 +356,7 @@ export function ResourceCollectionDialog() {
         ];
         const items = sources.map((source) => {
           const resultId =
-            source.origin?.kind === "model3d"
+            source.origin?.kind === "model3d" || source.origin?.kind === "gen3d"
               ? source.origin.projectId + "_" + source.origin.versionId
               : source.origin?.resultId;
           if (!source.assetId || !resultId) throw new Error("Batch original is unavailable.");

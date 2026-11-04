@@ -111,6 +111,7 @@ const RAIL_ITEM_GLYPH_NAMES: Record<Exclude<RailItemId, HugeiconRailItemId>, str
   imageBatches: "albums",
   spriteAnimation: "clapboard",
   model3d: "building-blocks",
+  gen3d: "3d-sphere",
   resources: "folder-2",
   kanban: "columns-3-wide",
   settings: "settings-gear-4",

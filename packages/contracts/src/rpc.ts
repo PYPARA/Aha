@@ -5,6 +5,7 @@ import {
   Model3DCommandResult,
   Model3DEvent,
 } from "./model3d";
+import { Gen3DProject, Gen3DList, Gen3DCommand, Gen3DCommandResult, Gen3DEvent } from "./gen3d";
 import {
   ImageBatchCommand,
   ImageBatchListInput,
@@ -2298,6 +2299,32 @@ const WsImageGenerationRpcGroup = RpcGroup.make(
   Rpc.make(WS_METHODS.model3dCommand, {
     payload: Schema.Struct({ command: Model3DCommand }),
     success: Model3DCommandResult,
+    error: WsRpcError,
+  }),
+  Rpc.make(WS_METHODS.gen3dList, {
+    payload: Schema.Struct({}),
+    success: Gen3DList,
+    error: WsRpcError,
+  }),
+  Rpc.make(WS_METHODS.subscribeGen3D, {
+    payload: Schema.Struct({}),
+    success: Gen3DEvent,
+    error: WsRpcError,
+    stream: true,
+  }),
+  Rpc.make(WS_METHODS.gen3dGet, {
+    payload: Schema.Struct({ id: Schema.String }),
+    success: Gen3DProject,
+    error: WsRpcError,
+  }),
+  Rpc.make(WS_METHODS.gen3dForThread, {
+    payload: Schema.Struct({ threadId: Schema.String }),
+    success: Schema.NullOr(Gen3DProject),
+    error: WsRpcError,
+  }),
+  Rpc.make(WS_METHODS.gen3dCommand, {
+    payload: Schema.Struct({ command: Gen3DCommand }),
+    success: Gen3DCommandResult,
     error: WsRpcError,
   }),
   WsImageBatchCommandRpc,

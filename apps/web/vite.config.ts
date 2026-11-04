@@ -202,6 +202,7 @@ export default defineConfig({
       input: {
         main: path.resolve(import.meta.dirname, "index.html"),
         model3dRuntime: path.resolve(import.meta.dirname, "model3d-runtime.html"),
+        gen3dRuntime: path.resolve(import.meta.dirname, "gen3d-runtime.html"),
       },
       checks: {
         // React Compiler is expected to dominate transform time in this app.

@@ -10,6 +10,7 @@ describe("Aha user directories", () => {
       resource: "/Volumes/Files/Documents/Aha/Resource",
       sprite: "/Volumes/Files/Documents/Aha/Sprite",
       models3d: "/Volumes/Files/Documents/Aha/Models3D",
+      gen3d: "/Volumes/Files/Documents/Aha/Gen3D",
     });
   });
   it("falls back to a platform-correct Documents path for standalone servers", () => {

@@ -1,4 +1,5 @@
 import { Model3DCommand, Model3DEvent } from "./model3d";
+import { Gen3DCommand, Gen3DEvent } from "./gen3d";
 import {
   ImageBatchCommand,
   ImageBatchListInput,
@@ -411,6 +412,11 @@ export const WS_METHODS = {
   model3dGet: "model3d.get",
   model3dCommand: "model3d.command",
   model3dForThread: "model3d.forThread",
+  gen3dList: "gen3d.list",
+  subscribeGen3D: "gen3d.subscribe",
+  gen3dGet: "gen3d.get",
+  gen3dCommand: "gen3d.command",
+  gen3dForThread: "gen3d.forThread",
   imageBatchCommand: "imageBatch.command",
   imageBatchList: "imageBatch.list",
   imageBatchGet: "imageBatch.get",
@@ -471,6 +477,7 @@ export const WS_METHODS = {
 
 export const WS_CHANNELS = {
   model3dEvent: "model3d.event",
+  gen3dEvent: "gen3d.event",
   automationEvent: "automation.event",
   todoEvent: "todo.event",
   imageJobEvent: "imageJob.event",
@@ -724,6 +731,11 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.model3dGet, Schema.Struct({ id: Schema.String })),
   tagRequestBody(WS_METHODS.model3dForThread, Schema.Struct({ threadId: Schema.String })),
   tagRequestBody(WS_METHODS.model3dCommand, Schema.Struct({ command: Model3DCommand })),
+  tagRequestBody(WS_METHODS.subscribeGen3D, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.gen3dList, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.gen3dGet, Schema.Struct({ id: Schema.String })),
+  tagRequestBody(WS_METHODS.gen3dForThread, Schema.Struct({ threadId: Schema.String })),
+  tagRequestBody(WS_METHODS.gen3dCommand, Schema.Struct({ command: Gen3DCommand })),
   tagRequestBody(WS_METHODS.imageBatchCommand, Schema.Struct({ command: ImageBatchCommand })),
   tagRequestBody(WS_METHODS.imageBatchList, ImageBatchListInput),
   tagRequestBody(WS_METHODS.imageBatchGet, ImageIdInput),
@@ -820,6 +832,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.automationEvent]: typeof AutomationStreamEvent.Type;
   readonly [WS_CHANNELS.todoEvent]: typeof TodoStreamEvent.Type;
   readonly [WS_CHANNELS.model3dEvent]: Model3DEvent;
+  readonly [WS_CHANNELS.gen3dEvent]: Gen3DEvent;
   readonly [WS_CHANNELS.imageJobEvent]: ImageJobEvent;
   readonly [WS_CHANNELS.projectAgentEvent]: typeof ProjectAgentStreamEvent.Type;
   readonly [WS_CHANNELS.gitActionProgress]: typeof GitActionProgressEvent.Type;
@@ -874,6 +887,7 @@ export const WsPushAutomationEvent = makeWsPushSchema(
   AutomationStreamEvent,
 );
 export const WsPushModel3DEvent = makeWsPushSchema(WS_CHANNELS.model3dEvent, Model3DEvent);
+export const WsPushGen3DEvent = makeWsPushSchema(WS_CHANNELS.gen3dEvent, Gen3DEvent);
 export const WsPushImageJobEvent = makeWsPushSchema(WS_CHANNELS.imageJobEvent, ImageJobEvent);
 export const WsPushTodoEvent = makeWsPushSchema(WS_CHANNELS.todoEvent, TodoStreamEvent);
 export const WsPushProjectAgentEvent = makeWsPushSchema(
@@ -914,6 +928,7 @@ export const WsPushOrchestrationThreadEvent = makeWsPushSchema(
 
 export const WsPushChannelSchema = Schema.Literals([
   WS_CHANNELS.model3dEvent,
+  WS_CHANNELS.gen3dEvent,
   WS_CHANNELS.gitActionProgress,
   WS_CHANNELS.gitWorktreeSetupProgress,
   WS_CHANNELS.projectProvisionProgress,
@@ -946,6 +961,7 @@ export const WsPush = Schema.Union([
   WsPushAutomationEvent,
   WsPushTodoEvent,
   WsPushModel3DEvent,
+  WsPushGen3DEvent,
   WsPushImageJobEvent,
   WsPushProjectAgentEvent,
   WsPushGitActionProgress,

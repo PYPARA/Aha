@@ -56,7 +56,9 @@ export function useBatchCollectionWorker() {
                 url: resolveWsHttpUrl(
                   item.origin.kind === "model3d"
                     ? `/api/model3d/assets/${encodeURIComponent(item.origin.projectId!)}/${encodeURIComponent(item.origin.versionId!)}/model.glb`
-                    : `/api/drawing/assets/${item.assetId}`,
+                    : item.origin.kind === "gen3d"
+                      ? `/api/gen3d/assets/${encodeURIComponent(item.origin.projectId!)}/versions/${encodeURIComponent(item.origin.versionId!)}/model.glb`
+                      : `/api/drawing/assets/${item.assetId}`,
                 ),
               });
               item = await resourceApi<ResourceCollectionItem>({
@@ -76,10 +78,10 @@ export function useBatchCollectionWorker() {
               continue;
             }
           }
-          if (!item.resourceId || (item.origin.kind !== "model3d" && !item.origin.batchId))
-            continue;
+          const modelOrigin = item.origin.kind === "model3d" || item.origin.kind === "gen3d";
+          if (!item.resourceId || (!modelOrigin && !item.origin.batchId)) continue;
           try {
-            if (item.origin.kind !== "model3d")
+            if (!modelOrigin)
               await ensureNativeApi().imageBatches.command({
                 operation: "collection",
                 batchId: item.origin.batchId!,

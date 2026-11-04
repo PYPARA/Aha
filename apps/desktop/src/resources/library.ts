@@ -48,7 +48,16 @@ const Metadata = z.object({
       deleted: z.boolean().optional(),
       origin: z
         .object({
-          kind: z.enum(["drawing", "chat", "local", "game", "image-batch", "sprite", "model3d"]),
+          kind: z.enum([
+            "drawing",
+            "chat",
+            "local",
+            "game",
+            "image-batch",
+            "sprite",
+            "model3d",
+            "gen3d",
+          ]),
           threadId: z.string().optional(),
           messageId: z.string().optional(),
           jobId: z.string().optional(),
@@ -1119,7 +1128,7 @@ export class ResourceLibrary {
             item.origin.batchId &&
             item.origin.taskId &&
             item.origin.attemptId) ||
-          (item.origin.kind === "model3d" &&
+          ((item.origin.kind === "model3d" || item.origin.kind === "gen3d") &&
             item.origin.projectId &&
             item.origin.versionId &&
             item.resultId === item.origin.projectId + "_" + item.origin.versionId)
@@ -1160,7 +1169,8 @@ export class ResourceLibrary {
       const prior = this.entries.find(
         (entry) =>
           (entry.origin?.kind === "image-batch" && entry.origin.resultId === resultId) ||
-          (entry.origin?.kind === "model3d" &&
+          (entry.origin?.kind === item.origin.kind &&
+            (item.origin.kind === "model3d" || item.origin.kind === "gen3d") &&
             entry.origin.projectId === item.origin.projectId &&
             entry.origin.versionId === item.origin.versionId),
       );

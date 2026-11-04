@@ -13,6 +13,7 @@ export function ahaUserDirectories(
     resource: p.join(root, "Resource"),
     sprite: p.join(root, "Sprite"),
     models3d: p.join(root, "Models3D"),
+    gen3d: p.join(root, "Gen3D"),
     chats: p.join(root, "Chats"),
     studio: p.join(root, "Studio"),
     groups: p.join(root, "Groups"),

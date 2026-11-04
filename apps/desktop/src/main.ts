@@ -1,5 +1,6 @@
 import { registerSpriteLibrary } from "./sprites/ipc";
 import { Model3DHost } from "./model3d/host";
+import { Gen3DHost } from "./gen3d/host";
 import { attachNativeContextMenu } from "./nativeContextMenuBridge";
 import { ahaUserDirectories } from "@synara/shared/ahaUserDirectories";
 import { registerResourceLibrary } from "./resources/ipc";
@@ -731,6 +732,23 @@ async function ensureModel3DHost(): Promise<void> {
   );
   await host.start();
   model3dHost = host;
+}
+
+let gen3dHost: Gen3DHost | null = null;
+async function ensureGen3DHost(): Promise<void> {
+  if (gen3dHost) return;
+  const host = new Gen3DHost(
+    ahaUserDirectories(app.getPath("home"), app.getPath("documents")).gen3d,
+    () =>
+      new URL(
+        "gen3d-runtime.html",
+        isDevelopment ? process.env.VITE_DEV_SERVER_URL! : backendHttpUrl + "/",
+      ).href,
+    Path.join(__dirname, "gen3dPreload.js"),
+    (message) => writeDesktopLogHeader(`[gen3d] ${message}`),
+  );
+  await host.start();
+  gen3dHost = host;
 }
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
@@ -4177,6 +4195,9 @@ function backendEnv(): NodeJS.ProcessEnv {
     ...(model3dHost
       ? { AHA_MODEL3D_HOST_PIPE: model3dHost.pipe, AHA_MODEL3D_HOST_TOKEN: model3dHost.token }
       : {}),
+    ...(gen3dHost
+      ? { AHA_GEN3D_HOST_PIPE: gen3dHost.pipe, AHA_GEN3D_HOST_TOKEN: gen3dHost.token }
+      : {}),
     SYNARA_AUTH_TOKEN: backendAuthToken,
     SYNARA_DESKTOP_SHUTDOWN_TOKEN: DESKTOP_BACKEND_SHUTDOWN_TOKEN,
   };
@@ -4951,6 +4972,8 @@ async function shutdownDesktopRuntime(reason: string): Promise<void> {
       appSnapManager = null;
       await model3dHost?.dispose();
       model3dHost = null;
+      await gen3dHost?.dispose();
+      gen3dHost = null;
       await shutdownBrowserServices({
         revokeHost: () => disposeBrowserHostPipeServerForShutdown(reason),
         closePages: () => browserManager.dispose(),
@@ -6162,6 +6185,11 @@ async function bootstrap(): Promise<void> {
     await ensureModel3DHost();
   } catch (error) {
     console.warn("[Aha 3D] Local execution host is unavailable", error);
+  }
+  try {
+    await ensureGen3DHost();
+  } catch (error) {
+    console.warn("[Aha 3D generation] Local execution host is unavailable", error);
   }
   try {
     await ensureBrowserHostPipeServer();

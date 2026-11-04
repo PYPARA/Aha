@@ -14,6 +14,7 @@ import { THREAD_RETENTION_COMMAND_ID_PREFIX } from "../../threadRetention";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery";
 import { model3DForThread, model3DEngine } from "../../model3d/engine";
+import { gen3DForThread, gen3DEngine } from "../../gen3d/engine";
 import {
   ThreadDeletionReactor,
   type ThreadDeletionReactorShape,
@@ -270,6 +271,7 @@ const make = Effect.gen(function* () {
     const { threadId } = event.payload;
     yield* Effect.promise(async () => {
       if (await model3DForThread(threadId)) await (await model3DEngine()).detachThread(threadId);
+      if (await gen3DForThread(threadId)) await (await gen3DEngine()).detachThread(threadId);
     });
     yield* detachThreadDevice(threadId);
     const cleanupSucceeded = yield* cleanupThreadBeforePurge(threadId);

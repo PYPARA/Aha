@@ -299,12 +299,19 @@ export function ResourceToolbar({
               }
               options={[
                 { value: "all", label: tr("All sources") },
-                ...["image-batch", "sprite", "model3d", "drawing", "chat", "local", "game"].map(
-                  (value) => ({
-                    value,
-                    label: tr(value),
-                  }),
-                ),
+                ...[
+                  "image-batch",
+                  "sprite",
+                  "model3d",
+                  "gen3d",
+                  "drawing",
+                  "chat",
+                  "local",
+                  "game",
+                ].map((value) => ({
+                  value,
+                  label: tr(value),
+                })),
               ]}
             />
           </div>

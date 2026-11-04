@@ -59,7 +59,8 @@ import { AutomationService } from "./automation/Services/AutomationService";
 import { TodoService } from "./todo/Services/TodoService";
 import { ImageGenerationService } from "./imageGeneration/Services/ImageGenerationService";
 import { model3DEngine, model3DForThread } from "./model3d/engine";
-import type { Model3DEvent } from "@synara/contracts";
+import { gen3DEngine, gen3DForThread } from "./gen3d/engine";
+import type { Gen3DEvent, Model3DEvent } from "@synara/contracts";
 import { ImageApiError } from "./imageGeneration/imageApi";
 import { isServerBetaFeatureEnabled } from "./betaFeatureGate";
 import { readInlineVisual } from "./inlineVisualStore";
@@ -3214,7 +3215,10 @@ const makeWsRpcHandlersLayer = () =>
                   ...(input.threadIds ?? []),
                   ...(input.context?.threadId ? [input.context.threadId] : []),
                 ])) {
-                  if (yield* Effect.promise(() => model3DForThread(threadId)))
+                  if (
+                    (yield* Effect.promise(() => model3DForThread(threadId))) ||
+                    (yield* Effect.promise(() => gen3DForThread(threadId)))
+                  )
                     return yield* Effect.fail(
                       new Error("Conversation already belongs to a 3D project."),
                     );
@@ -3250,7 +3254,7 @@ const makeWsRpcHandlersLayer = () =>
                     const sprite = await Effect.runPromise(
                       imageGenerationService.spriteForThread(input.command.threadId),
                     );
-                    if (batch || sprite)
+                    if (batch || sprite || (await gen3DForThread(input.command.threadId)))
                       throw new Error(
                         "Conversation already belongs to another creative workbench.",
                       );
@@ -3283,12 +3287,97 @@ const makeWsRpcHandlersLayer = () =>
               { label: "model3d.events" },
             ),
           ),
+        [WS_METHODS.gen3dList]: () =>
+          rpcEffect(
+            model3dEffect(async () => (await gen3DEngine()).list()),
+            "Could not list 3D generation projects",
+          ),
+        [WS_METHODS.gen3dGet]: (input) =>
+          rpcEffect(
+            model3dEffect(async () => (await gen3DEngine()).get(input.id)),
+            "Could not read 3D generation project",
+          ),
+        [WS_METHODS.gen3dForThread]: (input) =>
+          rpcEffect(
+            model3dEffect(async () => (await gen3DEngine()).forThread(input.threadId)),
+            "Could not read 3D generation conversation",
+          ),
+        [WS_METHODS.gen3dCommand]: (input) =>
+          requireWsOwnerSession.pipe(
+            Effect.andThen(
+              rpcEffect(
+                Effect.gen(function* () {
+                  const command = input.command;
+                  if (command.operation === "import-reference-asset") {
+                    // Drawing results are read through the drawing service, never by path.
+                    if (
+                      !command.projectId ||
+                      command.revision === undefined ||
+                      !command.imageAssetId
+                    )
+                      return yield* Effect.fail(new Error("Choose a drawing result to import."));
+                    const asset = yield* imageGenerationService.getAsset(command.imageAssetId);
+                    const bytes = yield* imageGenerationService.readAsset(asset, "original");
+                    return yield* model3dEffect(async () =>
+                      (await gen3DEngine()).addReferenceBytes(
+                        command.projectId!,
+                        command.revision!,
+                        bytes,
+                        {
+                          name: "three-view-" + asset.id.slice(0, 8) + ".png",
+                          origin: "drawing",
+                          imageJobId: command.imageJobId ?? null,
+                        },
+                      ),
+                    );
+                  }
+                  if (command.operation === "bind-thread" && command.threadId) {
+                    const threadId = command.threadId;
+                    const batch = yield* Effect.promise(() =>
+                      imageGenerationService.batches.repository.forThread(threadId),
+                    );
+                    const sprite = yield* imageGenerationService.spriteForThread(threadId);
+                    const model3d = yield* Effect.promise(() => model3DForThread(threadId));
+                    if (batch || sprite || model3d)
+                      return yield* Effect.fail(
+                        new Error("Conversation already belongs to another creative workbench."),
+                      );
+                  }
+                  return yield* model3dEffect(async () => (await gen3DEngine()).command(command));
+                }),
+                "3D generation operation failed",
+              ),
+            ),
+          ),
+        [WS_METHODS.subscribeGen3D]: (_, { clientId }) =>
+          streamAdmission.guard(
+            clientId,
+            { key: "gen3d.events" },
+            bufferLiveUiStream(
+              Stream.callback<Gen3DEvent>((queue) =>
+                Effect.gen(function* () {
+                  const engine = yield* Effect.promise(gen3DEngine);
+                  const listener = (event: Gen3DEvent) => {
+                    Effect.runFork(Queue.offer(queue, event).pipe(Effect.asVoid));
+                  };
+                  engine.events.on("changed", listener);
+                  yield* Effect.addFinalizer(() =>
+                    Effect.sync(() => {
+                      engine.events.off("changed", listener);
+                    }),
+                  );
+                }),
+              ),
+              { label: "gen3d.events" },
+            ),
+          ),
         [WS_METHODS.imageBatchCommand]: (input) =>
           rpcEffect(
             Effect.tryPromise(async () => {
               if (
                 input.command.operation === "bind-thread" &&
-                (await model3DForThread(input.command.threadId))
+                ((await model3DForThread(input.command.threadId)) ||
+                  (await gen3DForThread(input.command.threadId)))
               )
                 throw new Error("Conversation already belongs to a 3D project.");
               return imageGenerationService.batches.command(input.command);

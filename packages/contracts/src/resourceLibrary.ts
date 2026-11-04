@@ -5,7 +5,7 @@ export const RESOURCE_CHANNELS = {
   progress: "aha:resources:progress",
 } as const;
 export interface ResourceOrigin {
-  kind: "drawing" | "chat" | "local" | "game" | "image-batch" | "sprite" | "model3d";
+  kind: "drawing" | "chat" | "local" | "game" | "image-batch" | "sprite" | "model3d" | "gen3d";
   threadId?: string | undefined;
   messageId?: string | undefined;
   jobId?: string | undefined;
@@ -13,7 +13,7 @@ export interface ResourceOrigin {
   taskId?: string | undefined;
   attemptId?: string | undefined;
   resultId?: string | undefined;
-  /** Sprite project that exported the file (kind "sprite"). */
+  /** Sprite, 3D workshop or 3D generation project that exported the file. */
   projectId?: string | undefined;
   versionId?: string | undefined;
   prompt?: string | undefined;

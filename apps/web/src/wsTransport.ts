@@ -41,6 +41,7 @@ import {
   type TodoStreamEvent,
   type ImageJobEvent,
   type Model3DEvent,
+  type Gen3DEvent,
   type GitActionProgressEvent,
   type GitCreateDetachedWorktreeResult,
   type GitRunStackedActionResult,
@@ -2251,6 +2252,14 @@ export class WsTransport {
             "model3d.events",
             client[WS_METHODS.subscribeModel3D]({}),
             (event: Model3DEvent) => this.emit(WS_CHANNELS.model3dEvent, event),
+            restartChannel,
+          );
+        } else if (channel === WS_CHANNELS.gen3dEvent) {
+          this.startStream(
+            client,
+            "gen3d.events",
+            client[WS_METHODS.subscribeGen3D]({}),
+            (event: Gen3DEvent) => this.emit(WS_CHANNELS.gen3dEvent, event),
             restartChannel,
           );
         } else if (channel === WS_CHANNELS.imageJobEvent) {
