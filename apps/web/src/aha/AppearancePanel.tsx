@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "~/i18n";
 import type { AhaAppearance } from "@synara/contracts/ahaAppearance";
 import { REGIONS, type BackgroundRegion } from "@synara/contracts/ahaLegacyAppearance";
 import type { SkinPalette, SkinPreview } from "@synara/contracts/ahaSkins";
@@ -91,7 +92,8 @@ export function AhaAppearancePanel() {
       cancelAhaThemePreview();
     };
   }, [preview, previewSkin]);
-  const en = draft.language === "en";
+  const { locale } = useTranslation();
+  const en = !locale.startsWith("zh");
   const t = (zh: string, english: string) => (en ? english : zh);
   const api = window.desktopBridge?.ahaAppearance;
   const activeSkinId = selectedSkin ?? skins?.activeId;
@@ -529,27 +531,7 @@ export function AhaAppearancePanel() {
           </>
         )}
       </SettingsSection>
-      <SettingsSection title={t("语言与字重", "Language and weight")}>
-        <SettingsRow
-          title={t("界面语言", "Language")}
-          description={t(
-            "核心页面提供双语，其他页面暂保留英文。",
-            "Core pages are bilingual; other upstream pages retain English.",
-          )}
-          control={
-            <SettingsSelectControl
-              value={draft.language}
-              valueContent={en ? "English" : "简体中文"}
-              ariaLabel="Language"
-              onValueChange={(value) =>
-                edit({ ...draft, language: value === "en" ? "en" : "zh-CN" })
-              }
-            >
-              <SelectItem value="zh-CN">简体中文</SelectItem>
-              <SelectItem value="en">English</SelectItem>
-            </SettingsSelectControl>
-          }
-        />
+      <SettingsSection title={t("字重", "Font weight")}>
         {(
           [
             ["uiWeight", t("界面字重", "UI weight")],

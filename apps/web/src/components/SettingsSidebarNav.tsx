@@ -1,4 +1,3 @@
-import { useAhaTranslation } from "../aha/AppearanceProvider";
 // FILE: SettingsSidebarNav.tsx
 // Purpose: Settings section sidebar navigation with central icons and reference-style pill rows.
 //          Doubles as a settings search surface: typing swaps the section list for ranked
@@ -40,6 +39,7 @@ import {
   SETTINGS_SIDEBAR_SECTION_CLASS_NAME,
   SETTINGS_SIDEBAR_SECTION_LABEL_CLASS_NAME,
 } from "../settingsSidebarNavStyles";
+import { useTranslation } from "~/i18n";
 
 // Cap the result list so a broad query stays a quick scan rather than a wall of rows.
 const SETTINGS_SEARCH_RESULTS_LIMIT = 12;
@@ -52,7 +52,7 @@ function SettingsSearchResultRow(props: {
   entry: SettingsSearchEntry;
   onSelect: (entry: SettingsSearchEntry) => void;
 }) {
-  const tr = useAhaTranslation();
+  const { t } = useTranslation();
   const { entry, onSelect } = props;
   const icon = SETTINGS_SECTION_ICON_BY_ID.get(entry.section) ?? "settings-gear-4";
   // Mirrors the project header + nested thread layout: the section reuses the nav row
@@ -68,7 +68,7 @@ function SettingsSearchResultRow(props: {
           <CentralIcon name={icon} className={SETTINGS_SIDEBAR_ICON_CLASS_NAME} />
         </SidebarLeadingIcon>
         <span className={SETTINGS_SIDEBAR_ITEM_LABEL_CLASS_NAME}>
-          {tr(settingsSectionLabel(entry.section))}
+          {t(settingsSectionLabel(entry.section))}
         </span>
       </button>
       <button
@@ -81,7 +81,7 @@ function SettingsSearchResultRow(props: {
         )}
         onClick={() => onSelect(entry)}
       >
-        <span className="min-w-0 truncate">{tr(entry.title)}</span>
+        <span className="min-w-0 truncate">{t(entry.title)}</span>
       </button>
     </li>
   );
@@ -98,7 +98,8 @@ export function SettingsSidebarNav(props: {
    */
   searchContext?: SettingsSearchContext | undefined;
 }) {
-  const tr = useAhaTranslation();
+  const { t } = useTranslation();
+
   const { onSelectSection } = props;
   const [query, setQuery] = useState("");
   const trimmedQuery = query.trim();
@@ -139,8 +140,8 @@ export function SettingsSidebarNav(props: {
           spellCheck={false}
           autoCorrect="off"
           autoCapitalize="off"
-          placeholder={tr("Search settings...")}
-          aria-label={tr("Search settings")}
+          placeholder={t("settings:settings_searchPlaceholder")}
+          aria-label={t("settings:searchSettings")}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={handleSearchKeyDown}
         />
@@ -148,10 +149,12 @@ export function SettingsSidebarNav(props: {
 
       {isSearching ? (
         results.length === 0 ? (
-          <p className={SETTINGS_SIDEBAR_SECTION_LABEL_CLASS_NAME}>{tr("No matching settings.")}</p>
+          <p className={SETTINGS_SIDEBAR_SECTION_LABEL_CLASS_NAME}>
+            {t("settings:noMatchingSettings")}
+          </p>
         ) : (
           <ul
-            aria-label={tr("Settings search results")}
+            aria-label={t("settings:settings_searchResults")}
             className={cn("flex flex-col", SETTINGS_SIDEBAR_LIST_GAP_CLASS_NAME)}
           >
             {results.map((entry) => (
@@ -160,7 +163,7 @@ export function SettingsSidebarNav(props: {
           </ul>
         )
       ) : (
-        <nav aria-label={tr("Settings sections")} className="flex flex-col">
+        <nav aria-label={t("settings:settings_sections")} className="flex flex-col">
           {SETTINGS_NAV_GROUPS.map((group) => {
             const items = SETTINGS_NAV_ITEMS.filter((item) => item.group === group.id);
             if (items.length === 0) {
@@ -177,7 +180,7 @@ export function SettingsSidebarNav(props: {
                   id={`settings-nav-${group.id}`}
                   className={SETTINGS_SIDEBAR_SECTION_LABEL_CLASS_NAME}
                 >
-                  {tr(group.label)}
+                  {t(group.label)}
                 </h2>
                 <ul className={cn("flex flex-col", SETTINGS_SIDEBAR_LIST_GAP_CLASS_NAME)}>
                   {items.map((item) => {
@@ -202,7 +205,7 @@ export function SettingsSidebarNav(props: {
                             />
                           </SidebarLeadingIcon>
                           <span className={SETTINGS_SIDEBAR_ITEM_LABEL_CLASS_NAME}>
-                            {tr(item.label)}
+                            {t(item.label)}
                           </span>
                           {item.badge ? (
                             <Badge
@@ -210,7 +213,7 @@ export function SettingsSidebarNav(props: {
                               size="sm"
                               className="ml-auto rounded-full px-1.5 font-normal text-muted-foreground"
                             >
-                              {item.badge}
+                              {t(item.badge)}
                             </Badge>
                           ) : null}
                         </button>

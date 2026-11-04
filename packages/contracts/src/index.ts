@@ -1,6 +1,7 @@
 export * from "./model3d";
 export * from "./gen3d";
 export * from "./imageBatches";
+export * from "./editorDebug";
 export * from "./auth";
 export * from "./automation";
 export * from "./baseSchemas";
@@ -41,6 +42,7 @@ export * from "./githubInbox";
 export * from "./orchestration";
 export * from "./asyncUserInput";
 export * from "./editor";
+export * from "./editorIntelligence";
 export * from "./environment";
 export * from "./project";
 export * from "./projectAgent";
@@ -69,3 +71,7 @@ export * from "./spriteProcessing";
 export * from "./spriteSizing";
 
 export * from "./spriteEdit";
+
+export * from "./uiLocale";
+
+export * from "./usageLimit";

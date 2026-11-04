@@ -3,6 +3,7 @@
 // Purpose: Verifies provider intent orchestration, queueing, rollback, and transcript bootstrap flows.
 // Layer: Orchestration integration tests
 // Depends on: ProviderCommandReactorLive with in-memory provider and persistence services.
+import { ProviderSessionRuntimeRepository } from "../../persistence/Services/ProviderSessionRuntime.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type {
   ModelSelection,
@@ -92,6 +93,7 @@ import { ProjectAgentService } from "../../projectAgent/Services/ProjectAgentSer
 import {
   ProviderAdapterRequestError,
   ProviderAdapterValidationError,
+  ProviderValidationError,
 } from "../../provider/Errors.ts";
 import {
   ProviderHealth,
@@ -210,6 +212,8 @@ describe("ProviderCommandReactor", () => {
     readonly cancelClaudeCompactionDiscovery?: NonNullable<
       ProviderServiceShape["cancelClaudeCompactionDiscovery"]
     >;
+    readonly providerServiceLayer?: Layer.Layer<ProviderService, unknown>;
+    readonly listRetainedSessions?: NonNullable<ProviderServiceShape["listRetainedSessions"]>;
   }) {
     const now = new Date().toISOString();
     const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "synara-reactor-"));
@@ -225,6 +229,7 @@ describe("ProviderCommandReactor", () => {
     // restart that drops the input cursor must not pick it back up here.
     const persistedResumeCursorProviders = new Map<ThreadId, ProviderSession["provider"]>();
     const pendingPriorTranscriptBootstraps = new Set<ThreadId>();
+    const runtimeLifecycleGenerations = new Map<ThreadId, string>();
     const listSessions = vi.fn<ProviderServiceShape["listSessions"]>(() =>
       Effect.succeed(runtimeSessions),
     );
@@ -236,11 +241,7 @@ describe("ProviderCommandReactor", () => {
       const sessionIndex = nextSessionIndex++;
       const sessionModelSelection =
         typeof input === "object" && input !== null && "modelSelection" in input
-          ? ((
-              input as {
-                modelSelection?: ModelSelection;
-              }
-            ).modelSelection ?? modelSelection)
+          ? ((input as { modelSelection?: ModelSelection }).modelSelection ?? modelSelection)
           : modelSelection;
       const resumeCursor =
         typeof input === "object" && input !== null && "resumeCursor" in input
@@ -273,6 +274,7 @@ describe("ProviderCommandReactor", () => {
         updatedAt: now,
       };
       runtimeSessions.push(session);
+      runtimeLifecycleGenerations.set(threadId, `harness-session-${sessionIndex}`);
       return Effect.succeed(session);
     });
     const startSessionWithOutcome = vi.fn<
@@ -289,8 +291,7 @@ describe("ProviderCommandReactor", () => {
         nativeResumeAttempted && (input?.confirmNativeResume?.(effectiveResumeCursor) ?? true);
       if (
         (outcomeOptions?.registerPriorTranscriptBootstrapOnFreshStart === true ||
-          ((sessionInput.provider === "devin" || sessionInput.provider === "grok") &&
-            nativeResumeAttempted)) &&
+          nativeResumeAttempted) &&
         !nativeResumeSucceeded
       ) {
         pendingPriorTranscriptBootstraps.add(threadId);
@@ -319,10 +320,18 @@ describe("ProviderCommandReactor", () => {
     });
     const completePriorTranscriptBootstrap = vi.fn<
       NonNullable<ProviderServiceShape["completePriorTranscriptBootstrap"]>
-    >(({ threadId }) =>
-      Effect.sync(() => {
-        pendingPriorTranscriptBootstraps.delete(threadId);
-      }),
+    >(({ threadId, expectedLifecycleGeneration }) =>
+      expectedLifecycleGeneration !== undefined &&
+      runtimeLifecycleGenerations.get(threadId) !== expectedLifecycleGeneration
+        ? Effect.fail(
+            new ProviderValidationError({
+              operation: "test.completePriorTranscriptBootstrap",
+              issue: "The accepted turn belongs to a replaced provider generation.",
+            }),
+          )
+        : Effect.sync(() => {
+            pendingPriorTranscriptBootstraps.delete(threadId);
+          }),
     );
     const sendTurn = vi.fn<ProviderServiceShape["sendTurn"]>((_: unknown) =>
       Effect.succeed({
@@ -357,11 +366,7 @@ describe("ProviderCommandReactor", () => {
         ...(input.activeTurnId !== undefined ? { activeTurnId: input.activeTurnId } : {}),
       };
       if (input.activeTurnId === undefined) {
-        delete (
-          next as {
-            activeTurnId?: TurnId;
-          }
-        ).activeTurnId;
+        delete (next as { activeTurnId?: TurnId }).activeTurnId;
       }
       if (index >= 0) {
         runtimeSessions[index] = next;
@@ -369,6 +374,16 @@ describe("ProviderCommandReactor", () => {
         runtimeSessions.push(next);
       }
     };
+    const getRuntimeSessionStopTarget = vi.fn<
+      NonNullable<ProviderServiceShape["getRuntimeSessionStopTarget"]>
+    >(({ threadId }) =>
+      listSessions().pipe(
+        Effect.map((sessions) => ({
+          session: sessions.find((session) => session.threadId === threadId) ?? null,
+          lifecycleGeneration: runtimeLifecycleGenerations.get(threadId) ?? null,
+        })),
+      ),
+    );
     const steerTurn = vi.fn<ProviderServiceShape["steerTurn"]>((_: unknown) =>
       Effect.succeed({
         threadId: ThreadId.makeUnsafe("thread-1"),
@@ -434,11 +449,7 @@ describe("ProviderCommandReactor", () => {
       Effect.sync(() => {
         const threadId =
           typeof input === "object" && input !== null && "threadId" in input
-            ? (
-                input as {
-                  threadId?: ThreadId;
-                }
-              ).threadId
+            ? (input as { threadId?: ThreadId }).threadId
             : undefined;
         if (!threadId) {
           return;
@@ -452,24 +463,21 @@ describe("ProviderCommandReactor", () => {
         pendingPriorTranscriptBootstraps.delete(threadId);
       }),
     );
-    const stopRuntimeSession = vi.fn((input: unknown) =>
-      Effect.sync(() => {
-        const threadId =
-          typeof input === "object" && input !== null && "threadId" in input
-            ? (
-                input as {
-                  threadId?: ThreadId;
-                }
-              ).threadId
-            : undefined;
-        if (!threadId) {
-          return;
-        }
-        const index = runtimeSessions.findIndex((session) => session.threadId === threadId);
-        if (index >= 0) {
-          runtimeSessions.splice(index, 1);
-        }
-      }),
+    const stopRuntimeSession = vi.fn<NonNullable<ProviderServiceShape["stopRuntimeSession"]>>(
+      (input) =>
+        Effect.sync(() => {
+          const threadId =
+            typeof input === "object" && input !== null && "threadId" in input
+              ? (input as { threadId?: ThreadId }).threadId
+              : undefined;
+          if (!threadId) {
+            return;
+          }
+          const index = runtimeSessions.findIndex((session) => session.threadId === threadId);
+          if (index >= 0) {
+            runtimeSessions.splice(index, 1);
+          }
+        }),
     );
     const clearSessionResumeCursor = vi.fn<
       NonNullable<ProviderServiceShape["clearSessionResumeCursor"]>
@@ -479,21 +487,13 @@ describe("ProviderCommandReactor", () => {
           typeof input === "object" &&
           input !== null &&
           "preserveActiveRuntime" in input &&
-          (
-            input as {
-              preserveActiveRuntime?: boolean;
-            }
-          ).preserveActiveRuntime === true;
+          (input as { preserveActiveRuntime?: boolean }).preserveActiveRuntime === true;
         if (preserveActiveRuntime) {
           return;
         }
         const threadId =
           typeof input === "object" && input !== null && "threadId" in input
-            ? (
-                input as {
-                  threadId?: ThreadId;
-                }
-              ).threadId
+            ? (input as { threadId?: ThreadId }).threadId
             : undefined;
         if (!threadId) {
           return;
@@ -552,6 +552,7 @@ describe("ProviderCommandReactor", () => {
       start: input?.hubOutputReactor?.start ?? Effect.void,
       drain: input?.hubOutputReactor?.drain ?? Effect.void,
     };
+
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
     const service: ProviderServiceShape = {
       startSession: startSession as ProviderServiceShape["startSession"],
@@ -578,6 +579,10 @@ describe("ProviderCommandReactor", () => {
           }),
       clearSessionResumeCursor,
       listSessions,
+      getRuntimeSessionStopTarget,
+      withRuntimeSessionStopTarget: (input, use) =>
+        getRuntimeSessionStopTarget(input).pipe(Effect.flatMap(use)),
+      ...(input?.listRetainedSessions ? { listRetainedSessions: input.listRetainedSessions } : {}),
       getPersistedSessionProfile:
         input?.getPersistedSessionProfile ?? (() => Effect.succeed(undefined)),
       getCapabilities: (_provider) =>
@@ -601,6 +606,7 @@ describe("ProviderCommandReactor", () => {
       closeRuntimeEvents: Effect.void,
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
     };
+
     const projectAgentLayer = Layer.succeed(ProjectAgentService, {
       formatContextPacketForTurn: () => Effect.succeed(input?.formatContextPacket ?? ""),
     } as unknown as (typeof ProjectAgentService)["Service"]);
@@ -634,7 +640,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
       Layer.provideMerge(TurnCheckpointCoordinatorLive),
-      Layer.provideMerge(Layer.succeed(ProviderService, service)),
+      Layer.provideMerge(input?.providerServiceLayer ?? Layer.succeed(ProviderService, service)),
       Layer.provideMerge(
         input?.computerService
           ? Layer.succeed(ComputerService, input.computerService)
@@ -700,7 +706,18 @@ describe("ProviderCommandReactor", () => {
     const runtime = ManagedRuntime.make(layer);
     runtimes.add(runtime);
     const emitRuntimeEvent = (event: ProviderRuntimeEvent) =>
-      Effect.runPromise(PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid));
+      Effect.runPromise(
+        PubSub.publish(
+          runtimeEventPubSub,
+          // Adapters retain the lifecycle generation supplied at their start
+          // and attach it to terminal events; the service publishes it intact.
+          (event.type === "turn.completed" || event.type === "turn.aborted") &&
+            event.lifecycleGeneration === undefined
+            ? { ...event, lifecycleGeneration: runtimeLifecycleGenerations.get(event.threadId) }
+            : event,
+        ).pipe(Effect.asVoid),
+      );
+
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     // Fault injection for command admission. The reactor resolves
     // `dispatch` off the shared engine service on every call, so swapping the
@@ -710,14 +727,9 @@ describe("ProviderCommandReactor", () => {
     };
     const passthroughDispatch = engineDispatchTarget.dispatch;
     const interceptEngineDispatch = (
-      interceptor: (command: OrchestrationCommand) =>
-        | Effect.Effect<
-            {
-              sequence: number;
-            },
-            OrchestrationDispatchError
-          >
-        | undefined,
+      interceptor: (
+        command: OrchestrationCommand,
+      ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError> | undefined,
     ) => {
       engineDispatchTarget.dispatch = (command, context) =>
         interceptor(command) ?? passthroughDispatch(command, context);
@@ -795,6 +807,7 @@ describe("ProviderCommandReactor", () => {
         start: () => Effect.runPromise(fresh.start.pipe(Scope.provide(freshScope))),
       };
     };
+
     await Effect.runPromise(
       engine.dispatch({
         type: "project.create",
@@ -831,8 +844,13 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
       }),
     );
+
     return {
       engine,
+      realProviderService: await runtime.runPromise(Effect.service(ProviderService)),
+      providerRuntimeRepository: Option.getOrUndefined(
+        await runtime.runPromise(Effect.serviceOption(ProviderSessionRuntimeRepository)),
+      ),
       projectionSnapshotQuery,
       seedCompletion: () =>
         runtime!.runPromise(sql`
@@ -872,6 +890,7 @@ describe("ProviderCommandReactor", () => {
       restoreCheckpoint,
       stopSession,
       stopRuntimeSession,
+      getRuntimeSessionStopTarget,
       clearSessionResumeCursor,
       renameBranch,
       publishBranch,
@@ -924,7 +943,7 @@ describe("ProviderCommandReactor", () => {
                   ownerId: "local-loopback",
                   sizeBytes: attachment.sizeBytes,
                   sha256: "0".repeat(64),
-                  stagingExpiresAt: new Date(Date.now() + 60000).toISOString(),
+                  stagingExpiresAt: new Date(Date.now() + 60_000).toISOString(),
                   now: stagedAt,
                 }),
               ),
@@ -970,17 +989,13 @@ describe("ProviderCommandReactor", () => {
       ) => {
         const persisted: OrchestrationEvent[] = [];
         for (const event of events) {
-          const versions = await runtime.runPromise(sql<{
-            readonly version: number;
-          }>`
+          const versions = await runtime.runPromise(sql<{ readonly version: number }>`
             SELECT COALESCE(MAX(stream_version), -1) + 1 AS version
             FROM orchestration_events
             WHERE aggregate_kind = ${event.aggregateKind}
               AND stream_id = ${event.aggregateId}
           `);
-          const inserted = await runtime.runPromise(sql<{
-            readonly sequence: number;
-          }>`
+          const inserted = await runtime.runPromise(sql<{ readonly sequence: number }>`
             INSERT INTO orchestration_events (
               event_id, aggregate_kind, stream_id, stream_version, event_type,
               occurred_at, command_id, causation_event_id, correlation_id,
@@ -1794,41 +1809,70 @@ describe("ProviderCommandReactor", () => {
       ).toBe(false);
     });
   });
-  it.each(["opencode", "devin", "grok"] as const)(
+  it.each(["opencode", "devin", "grok", "codex", "claudeAgent"] as const)(
     "injects transcript context when %s rejects the persisted resume cursor",
     async (provider) => {
+      let rejectNativeResume = true;
       const harness = await createHarness({
         threadModelSelection: { provider, model: "openai/gpt-5" },
-        confirmNativeResume: () => false,
+        confirmNativeResume: () => !rejectNativeResume,
       });
       const now = new Date().toISOString();
+      const threadId = ThreadId.makeUnsafe("thread-1");
+
       await dispatchHarnessUserTurn(harness, {
         messageId: `${provider}-rejected-resume-seed`,
         text: "The retained codename is heliotrope.",
         createdAt: now,
       });
       await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-      await Effect.runPromise(
-        harness.stopRuntimeSession({ threadId: ThreadId.makeUnsafe("thread-1") }),
-      );
+      await Effect.runPromise(harness.stopRuntimeSession({ threadId }));
+      if (provider === "codex") {
+        harness.sendTurn.mockImplementationOnce(() =>
+          Effect.fail(
+            new ProviderAdapterValidationError({
+              provider,
+              operation: "turn/start",
+              issue: "Rejected before provider acknowledgement",
+            }),
+          ),
+        );
+        await dispatchHarnessUserTurn(harness, {
+          messageId: `${provider}-rejected-resume-unaccepted`,
+          text: "This recovery attempt was not accepted.",
+          createdAt: now,
+        });
+        await harness.drain();
+        expect(harness.pendingPriorTranscriptBootstraps.has(threadId)).toBe(true);
+        expect(harness.completePriorTranscriptBootstrap).not.toHaveBeenCalled();
+      }
+      const followUpSendIndex = harness.sendTurn.mock.calls.length;
+
       await dispatchHarnessUserTurn(harness, {
         messageId: `${provider}-rejected-resume-follow-up`,
         text: "What is the retained codename?",
         createdAt: now,
       });
-      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
-      const followUpInput = harness.sendTurn.mock.calls[1]?.[0] as {
+      await waitFor(() => harness.sendTurn.mock.calls.length === followUpSendIndex + 1);
+      await harness.drain();
+
+      const followUpInput = harness.sendTurn.mock.calls[followUpSendIndex]?.[0] as {
         readonly input?: string;
       };
       expect(followUpInput.input).toContain("<thread_context>");
       expect(followUpInput.input).toContain("The retained codename is heliotrope.");
       expect(followUpInput.input?.match(/What is the retained codename\?/g)).toHaveLength(1);
-      expect(harness.completePriorTranscriptBootstrap).not.toHaveBeenCalled();
-      expect(
-        (await readHarnessThread(harness))?.activities.filter(
-          (activity) => activity.kind === "provider.context.changed",
-        ),
-      ).toEqual([]);
+      if (provider === "codex") {
+        // Codex's acknowledgement accepts the recap; no terminal event is needed.
+        expect(harness.completePriorTranscriptBootstrap).toHaveBeenCalledTimes(1);
+      } else {
+        expect(harness.completePriorTranscriptBootstrap).not.toHaveBeenCalled();
+        expect(
+          (await readHarnessThread(harness))?.activities.filter(
+            (activity) => activity.kind === "provider.context.changed",
+          ),
+        ).toEqual([]);
+      }
       await emitHarnessTurnTerminal(harness, {
         eventId: `${provider}-rejected-resume-bootstrap-completed`,
         provider,
@@ -1842,11 +1886,25 @@ describe("ProviderCommandReactor", () => {
         payload: {
           provider,
           nativeHistory: "unavailable",
-          sessionRestarted: true,
-          restartReason: "native-resume-failed",
           recapInjected: true,
+          ...(provider === "codex"
+            ? {}
+            : { sessionRestarted: true, restartReason: "native-resume-failed" }),
         },
       });
+      rejectNativeResume = false;
+      const resumedSendIndex = harness.sendTurn.mock.calls.length;
+      await Effect.runPromise(harness.stopRuntimeSession({ threadId }));
+      await dispatchHarnessUserTurn(harness, {
+        messageId: `${provider}-accepted-resume-follow-up`,
+        text: "Continue with the restored native history.",
+        createdAt: now,
+      });
+      await waitFor(() => harness.sendTurn.mock.calls.length === resumedSendIndex + 1);
+      expect(harness.sendTurn.mock.calls[resumedSendIndex]?.[0].input).toBe(
+        "Continue with the restored native history.",
+      );
+      expect(harness.completePriorTranscriptBootstrap).toHaveBeenCalledTimes(1);
     },
   );
 });

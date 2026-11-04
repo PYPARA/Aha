@@ -685,6 +685,7 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         [136, "ImageEditDocuments"],
         [137, "ProjectionMessageTurnActivityIndex"],
         [138, "ImageBatches"],
+        [141, "ProjectionThreadsUsageLimitRecovery"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -775,6 +776,7 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
           { migration_id: 136, name: "ImageEditDocuments" },
           { migration_id: 137, name: "ProjectionMessageTurnActivityIndex" },
           { migration_id: 138, name: "ImageBatches" },
+          { migration_id: 141, name: "ProjectionThreadsUsageLimitRecovery" },
         ],
       );
       const groupConfigColumns = yield* sql<{ readonly name: string }>`
@@ -945,6 +947,7 @@ agentGatewayRetentionLegacyLayer(
           [136, "ImageEditDocuments"],
           [137, "ProjectionMessageTurnActivityIndex"],
           [138, "ImageBatches"],
+          [141, "ProjectionThreadsUsageLimitRecovery"],
         ]);
 
         const columns = yield* sql<{ readonly name: string }>`
@@ -1078,6 +1081,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [136, "ImageEditDocuments"],
         [137, "ProjectionMessageTurnActivityIndex"],
         [138, "ImageBatches"],
+        [141, "ProjectionThreadsUsageLimitRecovery"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -1152,6 +1156,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [136, "ImageEditDocuments"],
           [137, "ProjectionMessageTurnActivityIndex"],
           [138, "ImageBatches"],
+          [141, "ProjectionThreadsUsageLimitRecovery"],
         ],
       );
 
@@ -1280,6 +1285,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [136, "ImageEditDocuments"],
         [137, "ProjectionMessageTurnActivityIndex"],
         [138, "ImageBatches"],
+        [141, "ProjectionThreadsUsageLimitRecovery"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -1350,6 +1356,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [136, "ImageEditDocuments"],
           [137, "ProjectionMessageTurnActivityIndex"],
           [138, "ImageBatches"],
+          [141, "ProjectionThreadsUsageLimitRecovery"],
         ],
       );
       const preservedSpaces = yield* sql<{ readonly spaceId: string }>`

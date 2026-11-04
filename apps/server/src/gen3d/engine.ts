@@ -43,7 +43,12 @@ import { rigSkeleton } from "@synara/shared/gen3dVersions";
 import { validateBytes } from "gltf-validator";
 import { Gen3DHostTimeoutError, gen3dHostCall } from "./hostClient";
 
-type Mutable<T> = { -readonly [P in keyof T]: T[P] extends readonly (infer U)[] ? U[] : T[P] };
+// Optional arrays (`textures?`) stay mutable too: unwrap `undefined` before matching.
+type Mutable<T> = {
+  -readonly [P in keyof T]: NonNullable<T[P]> extends readonly (infer U)[]
+    ? U[] | Extract<T[P], undefined>
+    : T[P];
+};
 type Project = Mutable<Gen3DProject>;
 const now = () => new Date().toISOString();
 const active = (status: string) => ["queued", "running", "validating"].includes(status);

@@ -1,4 +1,3 @@
-import { useAhaTranslation, originalCopy } from "../../aha/AppearanceProvider";
 // FILE: SettingsPanelPrimitives.tsx
 // Purpose: Shared settings section card and row primitives (Codex-style bordered groups).
 // Layer: Settings UI components
@@ -6,8 +5,8 @@ import { useAhaTranslation, originalCopy } from "../../aha/AppearanceProvider";
 //          SettingsListRow, SettingsRow, SettingsSelectPopup
 
 import { type ComponentProps, type ReactNode } from "react";
+import { useTranslation } from "~/i18n";
 import { cn } from "~/lib/utils";
-import { settingRowAnchorId } from "~/settingsNavigation";
 import {
   SETTINGS_CARD_CLASS_NAME,
   SETTINGS_CARD_ROW_CLASS_NAME,
@@ -60,34 +59,44 @@ export function SettingsCard({
  */
 export function SettingsSectionShell({
   title,
+  translateTitle = true,
   action,
   id,
   children,
 }: {
   title: string;
+  translateTitle?: boolean;
   action?: ReactNode;
   id?: string;
   children: ReactNode;
 }) {
-  const tr = useAhaTranslation();
+  const { t } = useTranslation();
   return (
     <section id={id} className={cn(SETTINGS_PANEL_SECTION_CLASS_NAME, id && "scroll-mt-24")}>
       {action != null ? (
         <div className="flex items-center justify-between gap-2">
-          <h2 className={SETTINGS_SECTION_LABEL_CLASS_NAME}>{tr(title)}</h2>
+          <h2 className={SETTINGS_SECTION_LABEL_CLASS_NAME}>{translateTitle ? t(title) : title}</h2>
           {action}
         </div>
       ) : (
-        <h2 className={SETTINGS_SECTION_LABEL_CLASS_NAME}>{tr(title)}</h2>
+        <h2 className={SETTINGS_SECTION_LABEL_CLASS_NAME}>{translateTitle ? t(title) : title}</h2>
       )}
       {children}
     </section>
   );
 }
 
-export function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
+export function SettingsSection({
+  title,
+  children,
+  translateTitle,
+}: {
+  title: string;
+  children: ReactNode;
+  translateTitle?: boolean;
+}) {
   return (
-    <SettingsSectionShell title={title}>
+    <SettingsSectionShell title={title} translateTitle={translateTitle ?? true}>
       <SettingsCard>{children}</SettingsCard>
     </SettingsSectionShell>
   );
@@ -203,6 +212,7 @@ export function SettingsListRow({
 
 export function SettingsRow({
   title,
+  id,
   description,
   status,
   resetAction,
@@ -211,6 +221,9 @@ export function SettingsRow({
   onClick,
 }: {
   title: ReactNode;
+  /** Stable navigation target, independent of display copy and locale. */
+  id?: string;
+  /** Optional for Aha rows whose control is self-explanatory. */
   description?: string;
   status?: ReactNode;
   resetAction?: ReactNode;
@@ -218,14 +231,11 @@ export function SettingsRow({
   children?: ReactNode;
   onClick?: () => void;
 }) {
-  const tr = useAhaTranslation();
-  // String-titled rows expose a stable anchor so the sidebar search can deep-link to them
-  // via `?target=…`; scroll-margin keeps the row clear of the sticky settings header.
-  const anchorId = typeof title === "string" ? settingRowAnchorId(originalCopy(title)) : undefined;
+  const { t } = useTranslation();
   return (
     <div
-      id={anchorId}
-      className={cn(SETTINGS_CARD_ROW_CLASS_NAME, anchorId && "scroll-mt-24")}
+      id={id}
+      className={cn(SETTINGS_CARD_ROW_CLASS_NAME, id && "scroll-mt-24")}
       data-slot="settings-row"
     >
       <div
@@ -238,14 +248,14 @@ export function SettingsRow({
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex min-h-5 items-center gap-1.5">
             <h3 className={SETTINGS_CARD_ROW_TITLE_CLASS_NAME}>
-              {typeof title === "string" ? tr(title) : title}
+              {typeof title === "string" ? t(title) : title}
             </h3>
             <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
               {resetAction}
             </span>
           </div>
           <p className={SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME}>
-            {description ? tr(description) : null}
+            {description ? t(description) : null}
           </p>
           {status ? <div className="pt-1 text-ui-sm text-muted-foreground">{status}</div> : null}
         </div>

@@ -24,7 +24,16 @@ import {
   SpritePlanConfirmInput,
   SpriteRetryConfirmInput,
 } from "./spriteAnimation";
+import {
+  EditorDebugStartInput,
+  EditorDebugStartResult,
+  EditorDebugActionInput,
+  EditorDebugActionResult,
+  EditorDebugPollInput,
+  EditorDebugSnapshot,
+} from "./editorDebug";
 import { Schema } from "effect";
+import { EditorIntelligenceInput, EditorIntelligenceResult } from "./editorIntelligence";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
@@ -661,6 +670,28 @@ export const WsProjectsSearchContentRpc = Rpc.make(WS_METHODS.projectsSearchCont
 export const WsProjectsPrewarmSearchIndexRpc = Rpc.make(WS_METHODS.projectsPrewarmSearchIndex, {
   payload: ProjectPrewarmSearchIndexInput,
   success: ProjectPrewarmSearchIndexResult,
+  error: WsRpcError,
+});
+
+export const WsEditorDebugStartRpc = Rpc.make(WS_METHODS.editorDebugStart, {
+  payload: EditorDebugStartInput,
+  success: EditorDebugStartResult,
+  error: WsRpcError,
+});
+export const WsEditorDebugActionRpc = Rpc.make(WS_METHODS.editorDebugAction, {
+  payload: EditorDebugActionInput,
+  success: EditorDebugActionResult,
+  error: WsRpcError,
+});
+export const WsEditorDebugPollRpc = Rpc.make(WS_METHODS.editorDebugPoll, {
+  payload: EditorDebugPollInput,
+  success: EditorDebugSnapshot,
+  error: WsRpcError,
+});
+
+export const WsEditorIntelligenceRpc = Rpc.make(WS_METHODS.editorIntelligence, {
+  payload: EditorIntelligenceInput,
+  success: EditorIntelligenceResult,
   error: WsRpcError,
 });
 
@@ -2055,7 +2086,8 @@ export const WsSubscribeProjectAgentEventsRpc = Rpc.make(WS_METHODS.subscribePro
 
 export const WsBootstrapRpcGroup = RpcGroup.make(WsBootstrapNegotiateRpc);
 
-const WsCoreFeatureRpcGroup = RpcGroup.make(
+// Keep declaration inference bounded without widening any RPC payload or result.
+const wsOrchestrationRpcGroup = RpcGroup.make(
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationSettleTurnDispatchRpc,
   WsOrchestrationImportThreadRpc,
@@ -2080,12 +2112,19 @@ const WsCoreFeatureRpcGroup = RpcGroup.make(
   WsOrchestrationSubscribeThreadRpc,
   WsOrchestrationUnsubscribeThreadRpc,
   WsOrchestrationSubscribeDomainEventsRpc,
+);
+
+const wsApplicationRpcGroup = RpcGroup.make(
   WsProjectsDiscoverScriptsRpc,
   WsProjectsListDirectoriesRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsSearchLocalEntriesRpc,
   WsProjectsSearchContentRpc,
   WsProjectsPrewarmSearchIndexRpc,
+  WsEditorIntelligenceRpc,
+  WsEditorDebugStartRpc,
+  WsEditorDebugActionRpc,
+  WsEditorDebugPollRpc,
   WsProjectsReadFileRpc,
   WsProjectsSubscribeFileChangeRpc,
   WsProjectsResolveWorkspaceFileReferencesRpc,
@@ -2355,8 +2394,10 @@ const WsImageGenerationRpcGroup = RpcGroup.make(
 );
 
 export const WsFeatureRpcGroup: RpcGroup.RpcGroup<
-  RpcGroup.Rpcs<typeof WsCoreFeatureRpcGroup> | RpcGroup.Rpcs<typeof WsImageGenerationRpcGroup>
-> = WsCoreFeatureRpcGroup.merge(WsImageGenerationRpcGroup);
+  | RpcGroup.Rpcs<typeof wsOrchestrationRpcGroup>
+  | RpcGroup.Rpcs<typeof wsApplicationRpcGroup>
+  | RpcGroup.Rpcs<typeof WsImageGenerationRpcGroup>
+> = wsOrchestrationRpcGroup.merge(wsApplicationRpcGroup).merge(WsImageGenerationRpcGroup);
 
 // Project-agent RPCs live in a satellite group: folding them into
 // WsFeatureRpcGroup pushes its inferred type past the declaration emit limit.

@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "~/aha/AppearanceProvider";
 // FILE: RunningChatsQuitDialog.tsx
 // Purpose: Confirms desktop quit, including when no chats are running.
 // Layer: Root web overlay
@@ -26,7 +27,7 @@ import {
   type RunningChatsQuitCopy,
 } from "~/lib/runningChatsQuitConfirmation";
 import { cn } from "~/lib/utils";
-import { useAhaTranslation } from "~/aha/AppearanceProvider";
+import { useTranslation } from "~/i18n";
 
 export interface RunningChatsQuitDecision {
   /** Remember the listed chats and continue them automatically on the next launch. */
@@ -59,7 +60,8 @@ export function RunningChatsQuitDialog({
   onStay,
   onQuit,
 }: RunningChatsQuitDialogProps) {
-  const copy = chats != null ? runningChatsQuitCopy(chats, APP_DISPLAY_NAME) : null;
+  const { t } = useTranslation();
+  const copy = chats != null ? runningChatsQuitCopy(chats, APP_DISPLAY_NAME, t) : null;
 
   return (
     <AlertDialog
@@ -109,6 +111,8 @@ function RunningChatsQuitDialogContent({
   readonly quitting: boolean;
   readonly onQuit: (decision: RunningChatsQuitDecision) => void;
 }) {
+  const { t } = useTranslation();
+
   const { settings, updateSettings } = useAppSettings();
   const tr = useAhaTranslation();
   const resume = settings.resumeChatsAfterQuit;
@@ -172,7 +176,7 @@ function RunningChatsQuitDialogContent({
             render={<Button variant="ghost" size="sm" className={cn(uiFont, "gap-1.5")} />}
           >
             {copy.stayLabel}
-            <span className={KEY_HINT_CLASS}>Esc</span>
+            <span className={KEY_HINT_CLASS}>{t("common:esc")}</span>
           </AlertDialogClose>
           <Button
             autoFocus={chats.length > 0}

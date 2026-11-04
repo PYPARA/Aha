@@ -1,6 +1,6 @@
 {
   "name": "@synara/contracts",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "private": true,
   "files": [
     "dist"
@@ -46,6 +46,10 @@
     "./imageSize": {
       "types": "./src/imageSize.ts",
       "import": "./src/imageSize.ts"
+    },
+    "./uiLocale": {
+      "types": "./src/uiLocale.ts",
+      "import": "./src/uiLocale.ts"
     }
   },
   "scripts": {

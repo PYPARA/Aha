@@ -6,6 +6,7 @@ import { inspectMigrationBackupPlan } from "./MigrationBackup.ts";
 import { migrationEntries, planMigrationLineageAliasRepairs, runMigrations } from "./Migrations.ts";
 import ImageGenerationMigration from "./Migrations/135_ImageGeneration.ts";
 import ActivityIndexMigration from "./Migrations/137_ProjectionMessageTurnActivityIndex.ts";
+import UsageLimitRecoveryMigration from "./Migrations/141_ProjectionThreadsUsageLimitRecovery.ts";
 import * as NodeSqliteClient from "./NodeSqliteClient.ts";
 
 const expectedTracker = migrationEntries.map(([id, name]) => ({ migration_id: id, name }));
@@ -43,12 +44,12 @@ it.effect(
       const before = yield* readDrawing();
       const prefixBefore = (yield* readTracker(sql)).filter((row) => row.migration_id <= 131);
       const backup = yield* inspectMigrationBackupPlan;
-      assert.deepStrictEqual(backup, { sourceVersion: "v132", targetVersion: 138 });
+      assert.deepStrictEqual(backup, { sourceVersion: "v132", targetVersion: 141 });
 
       const executed = yield* runMigrations();
       assert.deepStrictEqual(
         executed.map(([id]) => id),
-        [132, 133, 134, 135, 136, 137, 138],
+        [132, 133, 134, 135, 136, 137, 138, 141],
       );
       assert.deepStrictEqual(yield* readDrawing(), before);
       const tracker = yield* readTracker(sql);
@@ -92,6 +93,7 @@ it.effect("adds drawing to a native Synara 1.0.3 database and supports a fresh d
       [136, "ImageEditDocuments"],
       [137, "ProjectionMessageTurnActivityIndex"],
       [138, "ImageBatches"],
+      [141, "ProjectionThreadsUsageLimitRecovery"],
     ]);
     assert.deepStrictEqual(yield* readTracker(sql), expectedTracker);
     const tables =
@@ -135,11 +137,11 @@ for (const priorId of [135, 136] as const) {
       const documents = priorId === 136 ? yield* sql`SELECT * FROM image_edit_documents` : [];
       assert.deepStrictEqual(yield* inspectMigrationBackupPlan, {
         sourceVersion: `v${priorId}`,
-        targetVersion: 138,
+        targetVersion: 141,
       });
       assert.deepStrictEqual(
         (yield* runMigrations()).map(([id]) => id),
-        priorId === 135 ? [136, 137, 138] : [137, 138],
+        priorId === 135 ? [136, 137, 138, 141] : [137, 138, 141],
       );
       assert.deepStrictEqual(yield* sql`SELECT * FROM image_jobs`, jobs);
       if (priorId === 136) {
@@ -176,17 +178,38 @@ it.effect(
         yield* sql`SELECT sql FROM sqlite_master WHERE name = 'idx_projection_thread_messages_turn_activity'`;
       assert.deepStrictEqual(yield* inspectMigrationBackupPlan, {
         sourceVersion: "v135",
-        targetVersion: 138,
+        targetVersion: 141,
       });
       assert.deepStrictEqual(
         (yield* runMigrations()).map(([id]) => id),
-        [135, 136, 137, 138],
+        [135, 136, 137, 138, 141],
       );
       assert.deepStrictEqual(yield* readTracker(sql), expectedTracker);
       assert.deepStrictEqual(
         yield* sql`SELECT sql FROM sqlite_master WHERE name = 'idx_projection_thread_messages_turn_activity'`,
         beforeIndex,
       );
+      assert.deepStrictEqual(yield* runMigrations(), []);
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
+
+it.effect(
+  "imports a native Synara 1.1.0 tracker (135 activity index + 141) without losing upstream rows",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 134 });
+      yield* ActivityIndexMigration;
+      yield* UsageLimitRecoveryMigration;
+      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (135, 'ProjectionMessageTurnActivityIndex')`;
+      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (141, 'ProjectionThreadsUsageLimitRecovery')`;
+      // The 141 claim sits above Aha's drawing slots, so the tracker replays from 135:
+      // every migration in that range is idempotent and the schema is preserved.
+      assert.deepStrictEqual(
+        (yield* runMigrations()).map(([id]) => id),
+        [135, 136, 137, 138, 141],
+      );
+      assert.deepStrictEqual(yield* readTracker(sql), expectedTracker);
       assert.deepStrictEqual(yield* runMigrations(), []);
     }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
 );

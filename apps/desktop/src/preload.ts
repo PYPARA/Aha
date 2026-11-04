@@ -9,6 +9,7 @@ import type {
   DesktopBridge,
   DesktopComputerPreviewFrame,
   DesktopDiagnosticActivity,
+  DesktopWindowTranslucency,
 } from "@synara/contracts";
 import { normalizeDesktopWsUrl, resolveDesktopWsUrlFromEnv } from "./desktopWsBridge";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
@@ -29,6 +30,17 @@ function getDesktopWsUrl(): string | null {
     return resolveDesktopWsUrlFromEnv(process.env);
   }
 }
+
+function getWindowTranslucency(): DesktopWindowTranslucency | undefined {
+  try {
+    const value: unknown = ipcRenderer.sendSync(IPC.windowTranslucency);
+    return value === "native" || value === "compositor" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const windowTranslucency = getWindowTranslucency();
 
 function getBetaDiagnosticsBridge(): DesktopBridge["betaDiagnostics"] {
   try {
@@ -186,6 +198,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   },
   ...(betaDiagnosticsBridge ? { betaDiagnostics: betaDiagnosticsBridge } : {}),
   getWsUrl: getDesktopWsUrl,
+  getSystemLanguages: () => ipcRenderer.sendSync(IPC.getSystemLanguages),
   // Absolute path for OS-dropped File objects (folders with spaces/parens, etc.).
   getPathForFile: (file: File) => {
     try {
@@ -199,7 +212,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   saveFile: (input) => ipcRenderer.invoke(IPC.saveFile, input),
   confirm: (message) => ipcRenderer.invoke(IPC.confirm, message),
   setTheme: (theme) => ipcRenderer.invoke(IPC.setTheme, theme),
+  setLanguagePreference: (preference) => ipcRenderer.invoke(IPC.setLanguagePreference, preference),
   setWindowMaterial: (input) => ipcRenderer.invoke(IPC.setWindowMaterial, input),
+  ...(windowTranslucency ? { windowTranslucency } : {}),
   getAppIcon: () => ipcRenderer.invoke(IPC.getAppIcon),
   setAppIcon: (icon) => ipcRenderer.invoke(IPC.setAppIcon, icon),
   showContextMenu: (items, position) => ipcRenderer.invoke(IPC.contextMenu, items, position),

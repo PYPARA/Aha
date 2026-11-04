@@ -666,8 +666,7 @@ describe("CheckpointReactor", () => {
     );
   });
   it("throttles live turn-diff captures per thread and ends a burst with its last edit", async () => {
-    // Advance the throttle clock explicitly: real Git work can outlast this
-    // window on a busy machine without changing which edits form this burst.
+    // About twice the ~0.25 s the five drained edits below take locally.
     const throttleWindowMs = 500;
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
@@ -704,12 +703,11 @@ describe("CheckpointReactor", () => {
       turnId,
     });
     await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurnStart(threadId, turnId));
+
     const liveRef = checkpointRefForThreadTurnLive(threadId, turnId);
-    let throttleNow = Date.now();
-    vi.spyOn(Date, "now").mockImplementation(() => throttleNow);
     const captures = vi.spyOn(harness.checkpointStore, "captureCheckpoint");
     const liveCaptures = () =>
-      captures.mock.calls.filter(([input]) => input.checkpointRef === liveRef).length;
+      captures.mock.calls.filter(([input]) => input.checkpointRef.startsWith(`${liveRef}_`)).length;
     const emitFileChange = (index: number) => {
       fs.writeFileSync(path.join(harness.cwd, `burst-${index}.txt`), `edit ${index}\n`, "utf8");
       harness.provider.emit({
@@ -723,6 +721,7 @@ describe("CheckpointReactor", () => {
         payload: { itemType: "file_change", status: "completed" },
       });
     };
+
     // Each edit is processed on its own (no newer journaled edit supersedes it),
     // so only the throttle keeps this burst from capturing once per edit.
     for (let index = 1; index <= 5; index++) {
@@ -731,7 +730,7 @@ describe("CheckpointReactor", () => {
       await harness.drain();
     }
     expect(liveCaptures()).toBe(1);
-    throttleNow += throttleWindowMs;
+
     const burstFiles = [1, 2, 3, 4, 5].map((index) => `burst-${index}.txt`);
     await waitForThread(harness.engine, (entry) =>
       entry.checkpoints.some(
@@ -741,9 +740,38 @@ describe("CheckpointReactor", () => {
       ),
     );
     expect(liveCaptures()).toBe(2);
-    expect(gitRefExists(harness.cwd, liveRef)).toBe(false);
-    // An edit inside the next window stays pending; turn completion drops it.
+    const retainedLiveRefs = () =>
+      captures.mock.calls
+        .map(([input]) => input.checkpointRef)
+        .filter((ref) => ref.startsWith(`${liveRef}_`) && gitRefExists(harness.cwd, ref));
+    await vi.waitFor(() => expect(retainedLiveRefs()).toHaveLength(1));
+
+    // A stale completion for another turn must not cancel this turn's pending
+    // capture or replace its journal watermark with a terminal fence.
     emitFileChange(6);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await harness.drain();
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-old-turn-completed-claude-burst"),
+      provider: "claudeAgent",
+      createdAt: new Date().toISOString(),
+      threadId,
+      turnId: asTurnId("old-burst-turn"),
+      payload: { state: "completed" },
+    });
+    await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.checkpoints.some((checkpoint) =>
+          checkpoint.files?.some((file) => file.path === "burst-6.txt"),
+        ),
+      2000,
+    );
+    expect(liveCaptures()).toBe(3);
+
+    // An edit inside the next window stays pending; its own completion drops it.
+    emitFileChange(7);
     await new Promise((resolve) => setTimeout(resolve, 25));
     await harness.drain();
     harness.provider.emit({
@@ -760,10 +788,10 @@ describe("CheckpointReactor", () => {
         (checkpoint) => checkpoint.checkpointTurnCount === 1 && checkpoint.status === "ready",
       ),
     );
-    throttleNow += throttleWindowMs;
     await new Promise((resolve) => setTimeout(resolve, throttleWindowMs + 200));
     await harness.drain();
-    expect(liveCaptures()).toBe(2);
+    expect(liveCaptures()).toBe(3);
+    expect(retainedLiveRefs()).toHaveLength(0);
     const thread = (await Effect.runPromise(harness.engine.getReadModel())).threads.find(
       (entry) => entry.id === threadId,
     );
@@ -772,6 +800,7 @@ describe("CheckpointReactor", () => {
     expect(thread?.checkpoints[0]?.files?.map((file) => file.path).toSorted()).toEqual([
       ...burstFiles,
       "burst-6.txt",
+      "burst-7.txt",
     ]);
   });
 });

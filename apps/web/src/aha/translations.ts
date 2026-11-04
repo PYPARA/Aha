@@ -11,6 +11,21 @@ export const copy: Record<string, string> = {
   ...imageBatchCopy,
   ...model3dCopy,
   ...gen3dCopy,
+  "One interface language everywhere": "全界面统一语言",
+  "Simplified Chinese now covers the whole interface, native menus and permission prompts. Choose Chinese, English or System in Settings → General.":
+    "简体中文覆盖全部界面、系统菜单和权限提示。可在“设置 → 通用”中选择中文、英文或跟随系统。",
+  "Built-in code editor": "内置代码编辑器",
+  "Files, editable diffs and previews share one editing engine with TypeScript and JavaScript intelligence, navigation, rename and debugging. The debugger downloads on first use.":
+    "文件、可编辑差异和预览共用同一编辑引擎，支持 TypeScript 与 JavaScript 智能提示、跳转、重命名和调试；调试器在首次使用时下载。",
+  "Resume after usage limits": "用量上限后继续任务",
+  "An optional provider setting lets supported Codex and Claude tasks continue after a verified usage-limit reset. It is off by default.":
+    "可选的供应商设置：受支持的 Codex 与 Claude 任务在确认用量额度重置后继续执行，默认关闭。",
+  "Steadier recovery and handoffs": "恢复与切换更稳定",
+  "Running chats, queued messages and subagents recover more reliably, provider switches follow one handoff path, and Stop stays tied to its original turn.":
+    "运行中的会话、排队消息和子 Agent 恢复更可靠；切换供应商统一走交接流程，停止操作只作用于原回合。",
+  "Live turn changes and compressed backups": "回合实时改动与压缩备份",
+  "Turn diffs show the latest captured changes while a turn runs. Pre-migration database backups are now compressed, and existing backups stay readable.":
+    "回合进行中即可查看最新捕获的改动；升级前的数据库备份改为压缩保存，原有备份仍可读取。",
   "Faster long conversations and parallel work": "长对话与并行工作更流畅",
   "Long chats do less repeated history work, while parallel requests share bounded queues and workspace refreshes.":
     "减少长聊天中重复的历史读取；并行请求通过有界队列处理，工作区刷新更加平稳。",

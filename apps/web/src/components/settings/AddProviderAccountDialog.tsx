@@ -1,4 +1,3 @@
-import { useAhaTranslation } from "../../aha/AppearanceProvider";
 // FILE: AddProviderAccountDialog.tsx
 // Purpose: Collects what a new provider account needs — which provider it runs, its
 //   label, the routing id derived from that label, an accent, and its own paths.
@@ -29,6 +28,7 @@ import { Input } from "../ui/input";
 import { SelectItem } from "../ui/select";
 import { ProviderAccentColorControl } from "./ProviderAccentColorControl";
 import { SettingsSelectControl } from "./SettingControls";
+import { useTranslation } from "~/i18n";
 
 export type AddProviderAccountConfigField = {
   /** Key written into the account's launch config. */
@@ -57,7 +57,8 @@ export function AddProviderAccountDialog(props: {
   configFieldsFor: (provider: ProviderKind) => ReadonlyArray<AddProviderAccountConfigField>;
   onAdd: (input: AddProviderAccountInput) => void;
 }) {
-  const tr = useAhaTranslation();
+  const { t } = useTranslation();
+
   const formId = useId();
   const [provider, setProvider] = useState(props.initialProvider);
   const [label, setLabel] = useState("");
@@ -110,19 +111,19 @@ export function AddProviderAccountDialog(props: {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{tr("Add account")}</DialogTitle>
-          <DialogDescription>
-            Each account signs in on its own and gets its own tab in the model picker.
-          </DialogDescription>
+          <DialogTitle>{t("settings:addAccount")}</DialogTitle>
+          <DialogDescription>{t("settings:eachAccountSignsInOnItsOwnAndGets")}</DialogDescription>
         </DialogHeader>
         <DialogPanel>
           <form id={formId} className="space-y-3" onSubmit={submit} noValidate>
             <div className="space-y-1">
-              <span className={dialogFieldLabelClassName}>{tr("Provider")}</span>
+              <span className={dialogFieldLabelClassName}>
+                {t("workspace:models_customModelProvider")}
+              </span>
               <SettingsSelectControl
                 value={provider}
                 onValueChange={(next) => setProvider(next as ProviderKind)}
-                ariaLabel={tr("Provider")}
+                ariaLabel={t("workspace:models_customModelProvider")}
                 triggerClassName="w-full"
                 valueContent={
                   <span className="flex items-center gap-2">
@@ -135,28 +136,30 @@ export function AddProviderAccountDialog(props: {
                   <SelectItem hideIndicator key={option.provider} value={option.provider}>
                     <span className="flex items-center gap-2">
                       <ProviderIcon provider={option.provider} className="size-4 shrink-0" />
-                      <span className="truncate">{tr(option.label)}</span>
+                      <span className="truncate">{t(option.label)}</span>
                     </span>
                   </SelectItem>
                 ))}
               </SettingsSelectControl>
             </div>
             <label className="block space-y-1">
-              <span className={dialogFieldLabelClassName}>{tr("Label")}</span>
+              <span className={dialogFieldLabelClassName}>
+                {t("chat:pinned_renamePlaceholder")}
+              </span>
               <Input
                 size="sm"
                 value={label}
                 onChange={(event) => setLabel(event.target.value)}
-                placeholder="e.g. Work"
+                placeholder={t("settings:eGWork")}
                 spellCheck={false}
                 autoFocus
               />
               <span className="block text-ui-sm text-muted-foreground">
-                {tr("Shown in the account list and the model picker. Optional.")}
+                {t("settings:shownInTheAccountListAndTheModelPicker")}
               </span>
             </label>
             <label className="block space-y-1">
-              <span className={dialogFieldLabelClassName}>{tr("Account ID")}</span>
+              <span className={dialogFieldLabelClassName}>{t("settings:accountID")}</span>
               <Input
                 size="sm"
                 className="font-mono"
@@ -175,18 +178,18 @@ export function AddProviderAccountDialog(props: {
               >
                 {submitAttempted && idError !== null
                   ? idError
-                  : tr("Routing key used by threads and sessions. Letters, digits, '-', or '_'.")}
+                  : t("settings:routingKeyUsedByThreadsAndSessionsLettersDigits")}
               </span>
             </label>
             <div className="space-y-1">
-              <span className={dialogFieldLabelClassName}>{tr("Accent color")}</span>
+              <span className={dialogFieldLabelClassName}>{t("settings:accentColor")}</span>
               <ProviderAccentColorControl
                 value={accentColor}
                 onChange={setAccentColor}
                 accountLabel={label.trim() || "the new account"}
               />
               <span className="block text-ui-sm text-muted-foreground">
-                Optional. Shows as a dot on the account&apos;s icon in the picker.
+                {t("settings:optionalShowsAsADotOnTheAccountS")}
               </span>
             </div>
             {configFields.map((field) => (
@@ -212,10 +215,10 @@ export function AddProviderAccountDialog(props: {
         </DialogPanel>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
-            {tr("Cancel")}
+            {t("common:form_cancel")}
           </Button>
           <Button type="submit" form={formId}>
-            {tr("Add account")}
+            {t("settings:addAccount")}
           </Button>
         </DialogFooter>
       </DialogPopup>

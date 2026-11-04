@@ -15,6 +15,8 @@ import {
 } from "@synara/contracts/ahaAppearance";
 import { BackgroundsSchema, REGIONS } from "@synara/contracts/ahaLegacyAppearance";
 import { copy } from "./translations";
+import { ahaCopyFor, useTranslation } from "~/i18n";
+import { APP_SETTINGS_STORAGE_KEY } from "../appSettingsStorage";
 import type { SkinSnapshot, SkinPreview } from "@synara/contracts/ahaSkins";
 import { useTheme, applyAhaThemeState } from "../hooks/useTheme";
 import { skinPaletteFromTheme, themeWithSkinPalette } from "./skin-colors";
@@ -25,10 +27,10 @@ const initial: AhaAppearanceSnapshot = {
   revision: 0,
   warning: null,
 };
-let currentLanguage: AhaAppearance["language"] = "zh-CN";
 export const originalCopy = (text: string) =>
   Object.keys(copy).find((key) => copy[key] === text) ?? text;
-export const tr = (text: string) => (currentLanguage === "en" ? text : (copy[text] ?? text));
+/** Aha copy follows the shared interface language owned by the i18n runtime. */
+export const tr = (text: string) => ahaCopyFor(text);
 const Context = createContext({
   skins: null as SkinSnapshot | null,
   skinDraft: null as SkinPreview | null,
@@ -46,17 +48,38 @@ export function useAhaAppearance() {
   return useContext(Context);
 }
 export function useAhaTranslation() {
-  const { snapshot } = useContext(Context);
-  const language = snapshot.preferences.language;
-  return useCallback(
-    (text: string) => (language === "en" ? text : (copy[text] ?? text)),
-    [language],
-  );
+  const { locale } = useTranslation();
+  return useCallback((text: string) => ahaCopyFor(text, locale), [locale]);
+}
+
+const LANGUAGE_MIGRATION_KEY = "aha:language-migrated:v1";
+
+/**
+ * Before 1.1.0 the language lived in Aha appearance preferences. Carry an explicit
+ * English choice into the shared app setting once; later edits belong to Settings.
+ */
+function migrateAppearanceLanguage(language: AhaAppearance["language"]): boolean {
+  try {
+    if (localStorage.getItem(LANGUAGE_MIGRATION_KEY)) return false;
+    localStorage.setItem(LANGUAGE_MIGRATION_KEY, "1");
+    const raw = localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
+    const stored: unknown = raw ? JSON.parse(raw) : null;
+    const hasExplicitLanguage =
+      typeof stored === "object" && stored !== null && "language" in stored;
+    if (language !== "en" || hasExplicitLanguage) return false;
+    const next = typeof stored === "object" && stored !== null ? { ...stored } : {};
+    localStorage.setItem(APP_SETTINGS_STORAGE_KEY, JSON.stringify({ ...next, language: "en" }));
+    window.dispatchEvent(
+      new CustomEvent("synara:local_storage_change", { detail: { key: APP_SETTINGS_STORAGE_KEY } }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function projectAppearance(preferences: AhaAppearance, urls: Record<string, string>) {
   const root = document.documentElement;
-  root.lang = preferences.language;
   root.dataset.ahaClear = String(preferences.clearMode);
   root.style.setProperty("--aha-ui-weight", preferences.uiWeight);
   root.style.setProperty("--aha-content-weight", preferences.contentWeight);
@@ -102,7 +125,10 @@ export function AhaAppearanceProvider({ children }: { children: ReactNode }) {
   const [draft, setDraft] = useState<AhaAppearance | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const preferences = draft ?? stored.preferences;
-  currentLanguage = preferences.language;
+  useEffect(() => {
+    // Revision 0 is the built-in default, not a saved choice.
+    if (stored.revision > 0) migrateAppearanceLanguage(stored.preferences.language);
+  }, [stored.revision, stored.preferences.language]);
   const acceptSkins = useCallback((value: SkinSnapshot) => {
     setSkins(value);
     setStored(value.appearance);

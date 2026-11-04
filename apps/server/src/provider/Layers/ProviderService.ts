@@ -69,6 +69,7 @@ import { computerApprovalGate } from "../../computer/ComputerApprovalGate.ts";
 
 import {
   type ProviderAdapterError,
+  type ProviderServiceError,
   ProviderAdapterProcessError,
   ProviderUnsupportedError,
   ProviderValidationError,
@@ -78,7 +79,12 @@ import type {
   ProviderTurnDispatchOptions,
 } from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
-import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
+import {
+  ProviderService,
+  type ProviderServiceShape,
+  type ProviderRuntimeStopControlReceipt,
+  type ProviderRuntimeSessionStopTarget,
+} from "../Services/ProviderService.ts";
 import {
   ProviderSessionDirectory,
   type ProviderRuntimeBinding,
@@ -219,6 +225,7 @@ const ClearSessionResumeCursorInput = Schema.Struct({
 
 const CompletePriorTranscriptBootstrapInput = Schema.Struct({
   threadId: ThreadId,
+  expectedLifecycleGeneration: Schema.optional(TrimmedNonEmptyString),
 });
 
 const ImportExternalThreadInput = Schema.Struct({
@@ -789,6 +796,52 @@ function runtimeEventRetiredGatewayTurnAuthority(event: ProviderRuntimeEvent): b
   return runtimePayloadRecord(event.raw?.payload)[AGENT_GATEWAY_TURN_AUTHORITY_RETIRED] === true;
 }
 
+/**
+ * The adapter that retired a gateway bearer is the authoritative source for
+ * its own retired state. The persisted `AGENT_GATEWAY_CREDENTIAL_ROTATION_REQUIRED`
+ * marker is only a hint: it rides a terminal runtime event that can be dropped
+ * by binding/generation/turn-applicability gates after the bearer is already
+ * fenced, so routing must also consult the adapter directly.
+ */
+function adapterReportsRetiredGatewayCredential<TError>(
+  adapter: ProviderAdapterShape<TError>,
+  threadId: ThreadId,
+): Effect.Effect<boolean> {
+  return adapter.agentGatewayCredentialRetired === undefined
+    ? Effect.succeed(false)
+    : adapter
+        .agentGatewayCredentialRetired(threadId)
+        .pipe(Effect.catch(() => Effect.succeed(false)));
+}
+
+function runtimeStopControlReceipt(value: unknown): ProviderRuntimeStopControlReceipt | undefined {
+  const raw = runtimePayloadRecord(runtimePayloadRecord(value).providerStopControlReceipt);
+  if (
+    typeof raw.controlRequestId !== "string" ||
+    raw.controlRequestId.length === 0 ||
+    !(
+      raw.observedLifecycleGeneration === null ||
+      typeof raw.observedLifecycleGeneration === "string"
+    ) ||
+    !(raw.turnId === null || typeof raw.turnId === "string") ||
+    !(raw.providerThreadId === undefined || typeof raw.providerThreadId === "string") ||
+    !(
+      raw.retiredLifecycleGeneration === undefined ||
+      typeof raw.retiredLifecycleGeneration === "string"
+    )
+  )
+    return undefined;
+  return {
+    controlRequestId: raw.controlRequestId,
+    observedLifecycleGeneration: raw.observedLifecycleGeneration,
+    turnId: raw.turnId === null ? null : TurnId.makeUnsafe(raw.turnId),
+    ...(raw.providerThreadId !== undefined ? { providerThreadId: raw.providerThreadId } : {}),
+    ...(raw.retiredLifecycleGeneration !== undefined
+      ? { retiredLifecycleGeneration: raw.retiredLifecycleGeneration }
+      : {}),
+  };
+}
+
 function runtimeActiveTurnId(value: unknown): string | undefined {
   const activeTurnId = runtimePayloadRecord(value).activeTurnId;
   return typeof activeTurnId === "string" ? activeTurnId : undefined;
@@ -1026,21 +1079,30 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           discard: true,
         }),
       );
+    // Adopt once at startup. An inherited binding carries no query/control
+    // promise in this server; any local ownership attempt revokes that lineage,
+    // including attempts whose lifecycle generation later rewinds on failure.
+    const inheritedRuntimeGenerations = new Map<ThreadId, string>();
     const lifecycleCoordinator = makeProviderLifecycleCoordinator();
     const lifecycle: typeof lifecycleCoordinator = {
       ...lifecycleCoordinator,
       // The existing prepare hook runs under the lifecycle lock while the old
       // generation is still current. Accepted text must not become stale here.
-      run: (threadId, operation, prepare) =>
+      run: (threadId, operation, prepare, onLockTimeout) =>
         lifecycleCoordinator.run(
           threadId,
           operation,
-          (prepare ?? Effect.void).pipe(Effect.andThen(flushRuntimeText(threadId))),
+          Effect.sync(() => inheritedRuntimeGenerations.delete(threadId)).pipe(
+            Effect.andThen(prepare ?? Effect.void),
+            Effect.andThen(flushRuntimeText(threadId)),
+          ),
+          onLockTimeout,
         ),
     };
     for (const binding of yield* directory.listBindings()) {
       if (binding.lifecycleGeneration !== undefined) {
         lifecycle.adoptCurrent(binding.threadId, binding.lifecycleGeneration);
+        inheritedRuntimeGenerations.set(binding.threadId, binding.lifecycleGeneration);
       }
     }
     const runtimeEventBufferCapacity = Math.max(
@@ -1347,6 +1409,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       options?: { readonly scheduleIdleStopOnSuccess?: boolean },
     ): Effect.Effect<A, E | ProviderValidationError, R> =>
       Effect.suspend(() => {
+        inheritedRuntimeGenerations.delete(threadId);
         const waitForInterruptionFence = waitForCurrentInterruptionFence(threadId).pipe(
           Effect.flatMap((interruptionFence) =>
             interruptionFence?.failure
@@ -2304,15 +2367,19 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         const renewedAdapter = yield* lifecycle.runCurrent(threadId, () =>
           Effect.gen(function* () {
             let binding = yield* getCurrentBinding();
+            // The persisted marker rides a terminal event that can be dropped
+            // after the bearer is already fenced; the adapter is authoritative
+            // for its own retired state, so consult it before skipping
+            // rotation.
+            let adapter = yield* getAdapterForBinding(binding);
             const requiresCredentialRotation =
               runtimePayloadRecord(binding.runtimePayload)[
                 AGENT_GATEWAY_CREDENTIAL_ROTATION_REQUIRED
-              ] === true;
+              ] === true || (yield* adapterReportsRetiredGatewayCredential(adapter, threadId));
             if (!requiresCredentialRotation) {
               return;
             }
 
-            let adapter = yield* getAdapterForBinding(binding);
             if (!(yield* adapter.hasSession(threadId))) {
               return;
             }
@@ -2322,14 +2389,15 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             // The drain may have waited for a while. Re-read all durable
             // routing state before stopping anything.
             binding = yield* getCurrentBinding();
+            adapter = yield* getAdapterForBinding(binding);
             if (
               runtimePayloadRecord(binding.runtimePayload)[
                 AGENT_GATEWAY_CREDENTIAL_ROTATION_REQUIRED
-              ] !== true
+              ] !== true &&
+              !(yield* adapterReportsRetiredGatewayCredential(adapter, threadId))
             ) {
               return;
             }
-            adapter = yield* getAdapterForBinding(binding);
             if (!(yield* adapter.hasSession(threadId))) {
               return;
             }
@@ -2348,6 +2416,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 }),
               );
             }
+            inheritedRuntimeGenerations.delete(threadId);
             if (
               adapter.renewAgentGatewayCredential &&
               (yield* adapter.renewAgentGatewayCredential(threadId))
@@ -2537,6 +2606,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             };
             // Prompt construction has already happened here. Only explicit startup
             // may replace lost native history and request a transcript recap.
+            inheritedRuntimeGenerations.delete(threadId);
             const resumed = yield* adapter.startSession(resumeStartInput);
             if (resumed.provider !== adapter.provider) {
               return yield* toValidationError(
@@ -2685,6 +2755,23 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         return matches.find((match) => match !== null) ?? null;
       });
 
+    // Only adapters with a separate retained probe keep a context that
+    // hasSession reports inactive; the others are found by findLiveSession.
+    const findRetainedAdapter = (threadId: ThreadId) =>
+      Effect.gen(function* () {
+        const matches = yield* Effect.forEach(
+          adapters,
+          (adapter) =>
+            adapter.hasRetainedSession
+              ? adapter
+                  .hasRetainedSession(threadId)
+                  .pipe(Effect.map((retained) => (retained ? adapter : null)))
+              : Effect.succeed(null),
+          { concurrency: "unbounded" },
+        );
+        return matches.find((match) => match !== null) ?? null;
+      });
+
     const stopStaleSessionsForThread = (input: {
       readonly threadId: ThreadId;
       readonly provider: ProviderKind;
@@ -2720,6 +2807,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             if (!staleSession) {
               return;
             }
+            inheritedRuntimeGenerations.delete(input.threadId);
             yield* adapter.stopSession(input.threadId).pipe(
               Effect.catchCause((cause) =>
                 Effect.logWarning("provider.session.stop-stale-failed", {
@@ -2871,7 +2959,8 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         const requiresCredentialRotation =
           runtimePayloadRecord(binding.runtimePayload)[
             AGENT_GATEWAY_CREDENTIAL_ROTATION_REQUIRED
-          ] === true;
+          ] === true ||
+          (yield* adapterReportsRetiredGatewayCredential(providerAdapter, input.threadId));
         // A live adapter session whose persisted generation no longer matches
         // the thread's current generation is a zombie: its runtime events are
         // rejected by the stale-generation gate, so a turn routed into it can
@@ -3087,6 +3176,13 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               const continuationResetRequested =
                 persistedBinding !== undefined &&
                 readPersistedContinuationResetRequested(persistedBinding.runtimePayload);
+              // Only a switch to another driver may abandon the persisted
+              // continuation implicitly; a same-driver home or account change
+              // still has to be resolved by the user.
+              const abandonsOtherProviderContinuation =
+                outcomeOptions?.abandonOtherProviderContinuation === true &&
+                persistedBinding !== undefined &&
+                persistedBinding.provider !== resolved.instance.driver;
               const canReusePersistedResumeCursor =
                 persistedBinding !== undefined &&
                 hasResumeCursor(persistedBinding.resumeCursor) &&
@@ -3094,6 +3190,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               if (
                 persistedBinding !== undefined &&
                 !continuationResetRequested &&
+                !abandonsOtherProviderContinuation &&
                 ((!hasAvailableResumeCursor && !exactPersistedLaunchMatch) ||
                   (hasAvailableResumeCursor && !continuationCompatible)) &&
                 (providerUsesProtectedNativeContinuation(persistedBinding.provider) ||
@@ -3253,7 +3350,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 const priorTranscriptBootstrapPending =
                   persistedPriorTranscriptBootstrapPending ||
                   staleSessionFallbackOccurred ||
-                  (outcomeOptions?.registerPriorTranscriptBootstrapOnFreshStart === true &&
+                  abandonsOtherProviderContinuation ||
+                  ((nativeResumeAttempted ||
+                    outcomeOptions?.registerPriorTranscriptBootstrapOnFreshStart === true) &&
                     !nativeResumeSucceeded);
 
                 if (session.provider !== adapter.provider) {
@@ -3314,7 +3413,13 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               }
 
               const previousAdapter = yield* getAdapterForBinding(persistedBinding);
-              if (!(yield* previousAdapter.hasSession(threadId))) {
+              // A retained but inactive context still needs cleanup, but only a
+              // live source is restored when the replacement fails.
+              const previousSessionLive = yield* previousAdapter.hasSession(threadId);
+              const previousSessionRetained = previousAdapter.hasRetainedSession
+                ? yield* previousAdapter.hasRetainedSession(threadId)
+                : previousSessionLive;
+              if (!previousSessionRetained) {
                 return yield* startAndPersistReplacement;
               }
 
@@ -3361,6 +3466,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                         if (replacementStarted) {
                           yield* adapter.stopSession(threadId);
                         }
+                        if (!previousSessionLive) return;
                         const restored = yield* previousAdapter.startSession({
                           threadId,
                           provider: persistedBinding.provider,
@@ -3464,6 +3570,17 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
             if (!binding) {
               return;
+            }
+            // Check under the binding lock so a delayed accepted turn cannot
+            // retire a marker written by a newer session while it was waiting.
+            if (
+              input.expectedLifecycleGeneration !== undefined &&
+              binding.lifecycleGeneration !== input.expectedLifecycleGeneration
+            ) {
+              return yield* toValidationError(
+                "ProviderService.completePriorTranscriptBootstrap",
+                "Cannot complete transcript recovery from a replaced provider session.",
+              );
             }
             yield* directory.upsert({
               threadId: input.threadId,
@@ -4192,6 +4309,86 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         );
       });
 
+    // Called only under the lifecycle lock. A retried event keeps the original
+    // epoch and exact target even when newer work reused the same provider process.
+    const stopControlForBinding = (input: {
+      readonly binding: ProviderRuntimeBinding;
+      readonly generation: string | null;
+      readonly expectedLifecycleGeneration?: string | null | undefined;
+      readonly controlRequestId?: string | undefined;
+      readonly providerThreadId?: string | undefined;
+      readonly turnId?: string | undefined;
+      readonly operation: "ProviderService.interruptTurn" | "ProviderService.stopRuntimeSession";
+    }) =>
+      Effect.gen(function* () {
+        const previous = runtimeStopControlReceipt(input.binding.runtimePayload);
+        const pinned =
+          input.controlRequestId !== undefined &&
+          previous?.controlRequestId === input.controlRequestId
+            ? previous
+            : undefined;
+        const expected = pinned
+          ? (pinned.retiredLifecycleGeneration ?? pinned.observedLifecycleGeneration)
+          : input.expectedLifecycleGeneration;
+        const active = runtimeActiveTurnId(input.binding.runtimePayload);
+        if (
+          (expected !== undefined && expected !== input.generation) ||
+          (pinned &&
+            (pinned.providerThreadId !== input.providerThreadId ||
+              (input.providerThreadId === undefined &&
+                active !== undefined &&
+                active !== pinned.turnId) ||
+              (input.providerThreadId !== undefined &&
+                input.turnId !== undefined &&
+                input.turnId !== pinned.turnId)))
+        ) {
+          return yield* new ProviderValidationError({
+            operation: input.operation,
+            issue: "The provider runtime or turn changed after Stop was requested.",
+            reason: "stale-interaction",
+          });
+        }
+        if (input.controlRequestId === undefined) return undefined;
+        return (
+          pinned ?? {
+            controlRequestId: input.controlRequestId,
+            observedLifecycleGeneration: input.generation,
+            turnId: input.turnId === undefined ? null : TurnId.makeUnsafe(input.turnId),
+            ...(input.providerThreadId !== undefined
+              ? { providerThreadId: input.providerThreadId }
+              : {}),
+          }
+        );
+      });
+
+    // Without the first receipt there is no durable target for an automatic retry.
+    // Once pinned, persistence failures can safely resume that same control.
+    const persistStopControlTarget = (
+      binding: ProviderRuntimeBinding,
+      receipt: ProviderRuntimeStopControlReceipt,
+    ) =>
+      withBindingWriteLock(
+        binding.threadId,
+        directory.upsert({
+          threadId: binding.threadId,
+          provider: binding.provider,
+          providerInstanceId: binding.providerInstanceId,
+          runtimePayload: { providerStopControlReceipt: receipt },
+        }),
+      ).pipe(
+        Effect.mapError((cause) =>
+          runtimeStopControlReceipt(binding.runtimePayload)?.controlRequestId ===
+          receipt.controlRequestId
+            ? cause
+            : new ProviderValidationError({
+                operation: "ProviderService.recordStopTarget",
+                issue: "Stop was not sent because its target could not be saved. Try Stop again.",
+                reason: "runtime-unavailable",
+                cause,
+              }),
+        ),
+      );
+
     const interruptTurn: ProviderServiceShape["interruptTurn"] = (rawInput) =>
       Effect.gen(function* () {
         const input = yield* decodeInputOrValidationError({
@@ -4200,134 +4397,198 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           payload: rawInput,
         });
         let rotationStarted = false;
-        // Urgent: an interrupt is the user's only escape hatch from a wedged
-        // turn, so it must not queue behind a lifecycle mutation that hangs.
-        const runInterrupt =
-          input.providerThreadId === undefined ? lifecycle.runCurrentUrgent : lifecycle.runCurrent;
-        const interruptActiveTurn = runInterrupt(input.threadId, (currentGeneration) =>
-          Effect.gen(function* () {
-            const routed = yield* resolveRoutableSession({
-              threadId: input.threadId,
-              operation: "ProviderService.interruptTurn",
-              allowRecovery: false,
-            });
-            if (!routed.isActive) {
-              return yield* toValidationError(
-                "ProviderService.interruptTurn",
-                `Cannot interrupt thread '${input.threadId}' because its provider runtime is not active.`,
+        // Conditional controls use the same deadline, but fail on contention
+        // instead of bypassing the lock protecting their observed generation.
+        const runInterrupt: typeof lifecycle.runCurrentUrgent =
+          input.providerThreadId === undefined ||
+          rawInput.expectedLifecycleGeneration !== undefined ||
+          rawInput.controlRequestId !== undefined
+            ? lifecycle.runCurrentUrgent
+            : lifecycle.runCurrent;
+        const interruptActiveTurn = runInterrupt(
+          input.threadId,
+          (currentGeneration) =>
+            Effect.gen(function* () {
+              const stopBinding = Option.getOrUndefined(
+                yield* directory.getBinding(input.threadId),
               );
-            }
-
-            const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
-            if (!binding) {
-              return yield* toValidationError(
-                "ProviderService.interruptTurn",
-                `Cannot interrupt thread '${input.threadId}' without a persisted provider binding.`,
-              );
-            }
-            const bindingGeneration = binding.lifecycleGeneration ?? currentGeneration;
-            if (
-              currentGeneration !== undefined &&
-              bindingGeneration !== undefined &&
-              bindingGeneration !== currentGeneration
-            ) {
-              return yield* toValidationError(
-                "ProviderService.interruptTurn",
-                `Cannot interrupt stale provider generation '${bindingGeneration}' for thread '${input.threadId}'.`,
-              );
-            }
-
-            const boundActiveTurnId = runtimeActiveTurnId(binding.runtimePayload);
-            const providerTurnId =
-              input.providerThreadId !== undefined ? input.turnId : boundActiveTurnId;
-            if (providerTurnId === undefined) {
-              return yield* toValidationError(
-                "ProviderService.interruptTurn",
-                `Cannot interrupt thread '${input.threadId}' because no exact active provider turn is bound.`,
-              );
-            }
-            if (
-              input.providerThreadId === undefined &&
-              input.turnId !== undefined &&
-              input.turnId !== providerTurnId
-            ) {
-              yield* Effect.logWarning(
-                "provider interrupt received stale projection turn; using authoritative active turn",
-                {
-                  threadId: input.threadId,
-                  requestedTurnId: input.turnId,
-                  activeTurnId: providerTurnId,
-                  provider: routed.adapter.provider,
-                },
-              );
-            }
-
-            const targetedInterruptKey =
-              input.providerThreadId === undefined
-                ? undefined
-                : targetedChildInterruptKey(
-                    input.threadId,
-                    TurnId.makeUnsafe(providerTurnId),
-                    input.providerThreadId,
-                  );
-            if (targetedInterruptKey !== undefined) {
-              const previousTargetedInterrupt =
-                targetedChildInterruptTombstones.get(targetedInterruptKey);
               if (
-                previousTargetedInterrupt?.state === "confirmed" ||
-                (previousTargetedInterrupt?.state === "uncertain" &&
-                  previousTargetedInterrupt.lifecycleGeneration !== bindingGeneration)
+                !stopBinding &&
+                rawInput.expectedLifecycleGeneration !== undefined &&
+                rawInput.expectedLifecycleGeneration !== (currentGeneration ?? null)
               ) {
-                return;
-              }
-            }
-
-            if (input.providerThreadId !== undefined) {
-              // Child and parent share one provider MCP transport. The adapter
-              // revokes that lease while stopping the child; persist the need
-              // to replace the still-running parent runtime before its next
-              // turn receives browser authority.
-              yield* withBindingWriteLock(
-                input.threadId,
-                directory.upsert({
-                  threadId: input.threadId,
-                  provider: binding.provider,
-                  providerInstanceId: binding.providerInstanceId,
-                  runtimePayload: {
-                    [AGENT_GATEWAY_CREDENTIAL_ROTATION_REQUIRED]: true,
-                    lastRuntimeEvent: "provider.subagentInterruptedCredentialRotationRequired",
-                    lastRuntimeEventAt: new Date().toISOString(),
-                  },
-                }),
-              );
-              if (targetedInterruptKey !== undefined) {
-                // The adapter revokes the shared bearer before attempting its
-                // provider-native child stop. Tombstone at the same admission
-                // boundary: even an uncertain native failure must not let a
-                // duplicate stale Stop revoke the replacement runtime's lease.
-                rememberTargetedChildInterrupt(targetedInterruptKey, {
-                  lifecycleGeneration: bindingGeneration,
-                  state: "uncertain",
+                return yield* new ProviderValidationError({
+                  operation: "ProviderService.interruptTurn",
+                  issue: "The provider runtime changed after Stop was requested.",
+                  reason: "stale-interaction",
                 });
               }
-            }
-
-            rotationStarted = input.providerThreadId === undefined;
-            yield* routed.adapter.interruptTurn(
-              input.threadId,
-              TurnId.makeUnsafe(providerTurnId),
-              input.providerThreadId,
-            );
-            // Begin the physical Stop before SQLite retries, then drain text
-            // while this generation still owns it, ahead of runtime retirement.
-            yield* flushRuntimeText(input.threadId);
-            if (targetedInterruptKey !== undefined) {
-              rememberTargetedChildInterrupt(targetedInterruptKey, {
-                lifecycleGeneration: bindingGeneration,
-                state: "confirmed",
+              let controlReceipt = stopBinding
+                ? yield* stopControlForBinding({
+                    binding: stopBinding,
+                    generation: currentGeneration ?? null,
+                    expectedLifecycleGeneration: rawInput.expectedLifecycleGeneration,
+                    controlRequestId: rawInput.controlRequestId,
+                    providerThreadId: input.providerThreadId,
+                    turnId:
+                      input.providerThreadId !== undefined
+                        ? input.turnId
+                        : runtimeActiveTurnId(stopBinding.runtimePayload),
+                    operation: "ProviderService.interruptTurn",
+                  })
+                : undefined;
+              if (controlReceipt?.retiredLifecycleGeneration !== undefined) return;
+              const routed = yield* resolveRoutableSession({
+                threadId: input.threadId,
+                operation: "ProviderService.interruptTurn",
+                allowRecovery: false,
               });
-            }
-          }),
+              if (!routed.isActive) {
+                return yield* toValidationError(
+                  "ProviderService.interruptTurn",
+                  `Cannot interrupt thread '${input.threadId}' because its provider runtime is not active.`,
+                );
+              }
+
+              const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+              if (!binding) {
+                return yield* toValidationError(
+                  "ProviderService.interruptTurn",
+                  `Cannot interrupt thread '${input.threadId}' without a persisted provider binding.`,
+                );
+              }
+              const bindingGeneration = binding.lifecycleGeneration ?? currentGeneration;
+              if (
+                currentGeneration !== undefined &&
+                bindingGeneration !== undefined &&
+                bindingGeneration !== currentGeneration
+              ) {
+                return yield* toValidationError(
+                  "ProviderService.interruptTurn",
+                  `Cannot interrupt stale provider generation '${bindingGeneration}' for thread '${input.threadId}'.`,
+                );
+              }
+
+              controlReceipt = yield* stopControlForBinding({
+                binding,
+                generation: currentGeneration ?? null,
+                expectedLifecycleGeneration: rawInput.expectedLifecycleGeneration,
+                controlRequestId: rawInput.controlRequestId,
+                providerThreadId: input.providerThreadId,
+                turnId:
+                  input.providerThreadId !== undefined
+                    ? input.turnId
+                    : runtimeActiveTurnId(binding.runtimePayload),
+                operation: "ProviderService.interruptTurn",
+              });
+              inheritedRuntimeGenerations.delete(input.threadId);
+              const boundActiveTurnId = runtimeActiveTurnId(binding.runtimePayload);
+              const providerTurnId =
+                input.providerThreadId !== undefined ? input.turnId : boundActiveTurnId;
+              if (controlReceipt !== undefined) {
+                // Write the original target before the irreversible adapter call.
+                yield* persistStopControlTarget(binding, controlReceipt);
+              }
+              if (providerTurnId === undefined) {
+                return yield* new ProviderValidationError({
+                  operation: "ProviderService.interruptTurn",
+                  issue: `Cannot interrupt thread '${input.threadId}' because no exact active provider turn is bound.`,
+                  reason: "active-turn-unavailable",
+                });
+              }
+              if (
+                input.providerThreadId === undefined &&
+                input.turnId !== undefined &&
+                input.turnId !== providerTurnId
+              ) {
+                yield* Effect.logWarning(
+                  "provider interrupt received stale projection turn; using authoritative active turn",
+                  {
+                    threadId: input.threadId,
+                    requestedTurnId: input.turnId,
+                    activeTurnId: providerTurnId,
+                    provider: routed.adapter.provider,
+                  },
+                );
+              }
+
+              const targetedInterruptKey =
+                input.providerThreadId === undefined
+                  ? undefined
+                  : targetedChildInterruptKey(
+                      input.threadId,
+                      TurnId.makeUnsafe(providerTurnId),
+                      input.providerThreadId,
+                    );
+              if (targetedInterruptKey !== undefined) {
+                const previousTargetedInterrupt =
+                  targetedChildInterruptTombstones.get(targetedInterruptKey);
+                if (
+                  previousTargetedInterrupt?.state === "confirmed" ||
+                  (previousTargetedInterrupt?.state === "uncertain" &&
+                    previousTargetedInterrupt.lifecycleGeneration !== bindingGeneration)
+                ) {
+                  return;
+                }
+              }
+
+              if (input.providerThreadId !== undefined && routed.adapter.provider !== "devin") {
+                // Child and parent share one provider MCP transport. The adapter
+                // revokes that lease while stopping the child; persist the need
+                // to replace the still-running parent runtime before its next
+                // turn receives browser authority.
+                yield* withBindingWriteLock(
+                  input.threadId,
+                  directory.upsert({
+                    threadId: input.threadId,
+                    provider: binding.provider,
+                    providerInstanceId: binding.providerInstanceId,
+                    runtimePayload: {
+                      [AGENT_GATEWAY_CREDENTIAL_ROTATION_REQUIRED]: true,
+                      lastRuntimeEvent: "provider.subagentInterruptedCredentialRotationRequired",
+                      lastRuntimeEventAt: new Date().toISOString(),
+                    },
+                  }),
+                );
+                if (targetedInterruptKey !== undefined) {
+                  // The adapter revokes the shared bearer before attempting its
+                  // provider-native child stop. Tombstone at the same admission
+                  // boundary: even an uncertain native failure must not let a
+                  // duplicate stale Stop revoke the replacement runtime's lease.
+                  rememberTargetedChildInterrupt(targetedInterruptKey, {
+                    lifecycleGeneration: bindingGeneration,
+                    state: "uncertain",
+                  });
+                }
+              }
+
+              rotationStarted = input.providerThreadId === undefined;
+              yield* routed.adapter.interruptTurn(
+                input.threadId,
+                TurnId.makeUnsafe(providerTurnId),
+                input.providerThreadId,
+              );
+              // Begin the physical Stop before SQLite retries, then drain text
+              // while this generation still owns it, ahead of runtime retirement.
+              yield* flushRuntimeText(input.threadId);
+              if (targetedInterruptKey !== undefined) {
+                rememberTargetedChildInterrupt(targetedInterruptKey, {
+                  lifecycleGeneration: bindingGeneration,
+                  state: "confirmed",
+                });
+              }
+            }),
+          rawInput.expectedLifecycleGeneration !== undefined ||
+            rawInput.controlRequestId !== undefined
+            ? Effect.fail(
+                new ProviderValidationError({
+                  operation: "ProviderService.interruptTurn",
+                  issue:
+                    "The provider lifecycle is busy; Stop could not acquire its observed runtime.",
+                  reason: "stale-interaction",
+                }),
+              )
+            : undefined,
         );
         return yield* Effect.uninterruptible(
           Effect.gen(function* () {
@@ -4339,9 +4600,19 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               input.providerThreadId === undefined
                 ? interruptActiveTurn.pipe(
                     Effect.andThen(
-                      stopRuntimeSessionInternal({ threadId: input.threadId }, undefined, {
-                        requireAgentGatewayCredentialRotation: true,
-                      }),
+                      stopRuntimeSessionInternal(
+                        {
+                          threadId: input.threadId,
+                          ...(rawInput.expectedLifecycleGeneration !== undefined
+                            ? { expectedLifecycleGeneration: rawInput.expectedLifecycleGeneration }
+                            : {}),
+                          ...(rawInput.controlRequestId !== undefined
+                            ? { controlRequestId: rawInput.controlRequestId }
+                            : {}),
+                        },
+                        undefined,
+                        { requireAgentGatewayCredentialRotation: true },
+                      ),
                     ),
                   )
                 : interruptActiveTurn,
@@ -4389,6 +4660,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   `Provider '${routed.adapter.provider}' does not support stopping a provider task.`,
                 );
               }
+              inheritedRuntimeGenerations.delete(input.threadId);
               yield* routed.adapter.stopTask(input.threadId, input.taskId);
             }),
           ),
@@ -4421,6 +4693,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   `Provider '${routed.adapter.provider}' does not support backgrounding a provider task.`,
                 );
               }
+              inheritedRuntimeGenerations.delete(input.threadId);
               yield* routed.adapter.backgroundTask(input.threadId, input.toolUseId);
             }),
           ),
@@ -4454,6 +4727,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 );
               }
               const attachments = carryProviderAttachmentPaths(rawInput, input.attachments ?? []);
+              inheritedRuntimeGenerations.delete(input.threadId);
               yield* routed.adapter.steerSubagent(input.threadId, input.providerThreadId, {
                 input: input.input ?? "",
                 ...(attachments.length > 0 ? { attachments } : {}),
@@ -4518,6 +4792,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               reason: "stale-interaction",
             });
           }
+          inheritedRuntimeGenerations.delete(input.threadId);
           if (response.kind === "approval") {
             yield* routed.adapter.respondToRequest(
               input.threadId,
@@ -4586,18 +4861,74 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   : Effect.fail(error),
               ),
             );
-            if (routed === null) return;
-            hasRoutableBinding = true;
+            // A Pi startup that fails after registering its context can retain
+            // that context with no binding while hasSession reports it inactive.
+            // Routing stays on hasSession; this cleanup falls back to the
+            // retained probe so a second teardown failure still fails the stop.
+            const adapter = routed?.adapter ?? (yield* findRetainedAdapter(input.threadId));
+            if (adapter === null) return;
+            hasRoutableBinding = routed !== null;
             // Start the physical cleanup under the old generation, alongside
             // its durable drain. Neither may wait for the other to begin, and
             // one failure must not cancel the remaining cleanup/drain work.
             yield* settleConcurrentTeardowns(
-              [routed.adapter.stopSession(input.threadId), flushRuntimeText(input.threadId)],
+              [adapter.stopSession(input.threadId), flushRuntimeText(input.threadId)],
               (teardown) => teardown,
             );
           }),
         );
       });
+
+    const readRuntimeSessionStopTarget = (
+      input: { readonly threadId: ThreadId },
+      generation: string | undefined,
+    ) =>
+      Effect.gen(function* () {
+        const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+        const adapter = binding ? yield* getAdapterForBinding(binding) : null;
+        const activeSession =
+          adapter && (yield* adapter.hasSession(input.threadId))
+            ? (yield* adapter.listSessions()).find((session) => session.threadId === input.threadId)
+            : undefined;
+        const target: ProviderRuntimeSessionStopTarget = {
+          session: activeSession
+            ? yield* sessionWithPersistedProviderInstance(activeSession)
+            : null,
+          lifecycleGeneration: generation ?? null,
+          ...(generation !== undefined &&
+          inheritedRuntimeGenerations.get(input.threadId) === generation
+            ? { inheritedLifecycleGeneration: generation }
+            : {}),
+          ...(binding && runtimeStopControlReceipt(binding.runtimePayload)
+            ? { stopControlReceipt: runtimeStopControlReceipt(binding.runtimePayload)! }
+            : {}),
+        };
+        return target;
+      });
+
+    const getRuntimeSessionStopTarget: NonNullable<
+      ProviderServiceShape["getRuntimeSessionStopTarget"]
+    > = (input) =>
+      lifecycle.runCurrent(input.threadId, (generation) =>
+        readRuntimeSessionStopTarget(input, generation),
+      );
+
+    const withRuntimeSessionStopTarget: NonNullable<
+      ProviderServiceShape["withRuntimeSessionStopTarget"]
+    > = <A, E, R>(
+      input: { readonly threadId: ThreadId },
+      use: (target: ProviderRuntimeSessionStopTarget) => Effect.Effect<A, E, R>,
+    ) =>
+      lifecycle.runCurrentUrgent<A, E | ProviderServiceError, R>(
+        input.threadId,
+        (generation) => readRuntimeSessionStopTarget(input, generation).pipe(Effect.flatMap(use)),
+        Effect.fail(
+          toValidationError(
+            "ProviderService.withRuntimeSessionStopTarget",
+            "Runtime ownership is busy; delivery reconciliation was not attempted.",
+          ),
+        ),
+      );
 
     const stopRuntimeSessionInternal = (
       rawInput: StopRuntimeSessionInput,
@@ -4610,18 +4941,39 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           schema: ProviderStopSessionInput,
           payload: rawInput,
         });
+        const changedIdleTurn = () =>
+          new ProviderValidationError({
+            operation: "ProviderService.stopRuntimeSession",
+            issue: "The provider turn changed after the idle recovery Stop was requested.",
+            reason: "stale-interaction",
+          });
+        const requireNoActiveTurn = (binding: ProviderRuntimeBinding | undefined) =>
+          !binding ||
+          runtimeActiveTurnId(binding.runtimePayload) !== undefined ||
+          (dispatchStateByThread.get(input.threadId)?.inFlightGenerations.size ?? 0) > 0
+            ? Effect.fail(changedIdleTurn())
+            : Effect.void;
         const isExpectedIdleStopCurrent = () =>
           expectedIdleGeneration === undefined ||
           isRuntimeIdleGenerationCurrent(input.threadId, expectedIdleGeneration);
         if (expectedIdleGeneration === undefined) {
           yield* waitForRuntimeIdleStop(input.threadId);
-          clearRuntimeIdleTimer(input.threadId);
+          // A stale targeted Stop must not disarm the replacement runtime's timer.
+          if (
+            rawInput.expectedLifecycleGeneration === undefined &&
+            rawInput.controlRequestId === undefined
+          )
+            clearRuntimeIdleTimer(input.threadId);
         } else if (!isExpectedIdleStopCurrent()) {
           return;
         }
         let runtimeCursorWriteBaseline = runtimeCursorWriteVersion;
         let stoppedState:
-          | { readonly binding: ProviderRuntimeBinding; readonly resumeCursor: unknown }
+          | {
+              readonly binding: ProviderRuntimeBinding;
+              readonly resumeCursor: unknown;
+              readonly controlReceipt?: ProviderRuntimeStopControlReceipt;
+            }
           | undefined;
         let releaseIdleStopFence: (() => void) | undefined;
         return yield* lifecycle
@@ -4673,6 +5025,14 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                         ...(options?.requireAgentGatewayCredentialRotation === true
                           ? { [AGENT_GATEWAY_CREDENTIAL_ROTATION_REQUIRED]: true }
                           : {}),
+                        ...(stoppedState?.controlReceipt
+                          ? {
+                              providerStopControlReceipt: {
+                                ...stoppedState.controlReceipt,
+                                retiredLifecycleGeneration: lease.generation,
+                              },
+                            }
+                          : {}),
                       },
                     });
                   }),
@@ -4682,23 +5042,76 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               }),
             Effect.gen(function* () {
               if (!isExpectedIdleStopCurrent()) return;
-              if (rawInput.onlyIfIdleSince !== undefined) {
+              if (rawInput.onlyIfIdleSince !== undefined || rawInput.onlyIfNoActiveTurn === true) {
                 // Acquire only after the lifecycle lock. An explicit Stop holding
                 // that lock may itself be waiting for an earlier idle cleanup.
                 releaseIdleStopFence = acquireRuntimeIdleStopFence(input.threadId);
               }
               const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+              if (
+                !binding &&
+                rawInput.expectedLifecycleGeneration !== undefined &&
+                rawInput.expectedLifecycleGeneration !==
+                  (lifecycle.currentGeneration(input.threadId) ?? null)
+              ) {
+                return yield* new ProviderValidationError({
+                  operation: "ProviderService.stopRuntimeSession",
+                  issue: "The provider runtime changed after Stop was requested.",
+                  reason: "stale-interaction",
+                });
+              }
+              if (rawInput.onlyIfNoActiveTurn === true) yield* requireNoActiveTurn(binding);
               if (!binding || !isExpectedIdleStopCurrent()) return;
+              const controlReceipt = yield* stopControlForBinding({
+                binding,
+                generation: lifecycle.currentGeneration(input.threadId) ?? null,
+                expectedLifecycleGeneration: rawInput.expectedLifecycleGeneration,
+                controlRequestId: rawInput.controlRequestId,
+                turnId: runtimeActiveTurnId(binding.runtimePayload),
+                operation: "ProviderService.stopRuntimeSession",
+              });
+              if (
+                rawInput.expectedLifecycleGeneration !== undefined ||
+                rawInput.controlRequestId !== undefined
+              )
+                clearRuntimeIdleTimer(input.threadId);
               const adapter = yield* getAdapterForBinding(binding);
               const hasActiveSession = yield* adapter.hasSession(input.threadId);
+              // A context retained by a failed stop is not live, but its cursor
+              // can be newer than a binding write that has not landed yet.
+              const hasRetainedSession = adapter.hasRetainedSession
+                ? yield* adapter.hasRetainedSession(input.threadId)
+                : hasActiveSession;
               let resumeCursor = binding.resumeCursor;
               if (!isExpectedIdleStopCurrent()) return;
-              if (hasActiveSession) {
+              if (hasRetainedSession) {
                 const activeSessions = yield* adapter.listSessions();
                 const activeSession = activeSessions.find(
                   (session) => session.threadId === input.threadId,
                 );
                 if (
+                  controlReceipt &&
+                  activeSession?.activeTurnId !== undefined &&
+                  activeSession.activeTurnId !== controlReceipt.turnId
+                ) {
+                  return yield* new ProviderValidationError({
+                    operation: "ProviderService.stopRuntimeSession",
+                    issue: "The provider turn changed after Stop was requested.",
+                    reason: "stale-interaction",
+                  });
+                }
+                if (
+                  rawInput.onlyIfNoActiveTurn === true &&
+                  hasActiveSession &&
+                  (!activeSession ||
+                    activeSession.status === "running" ||
+                    activeSession.status === "connecting" ||
+                    activeSession.activeTurnId !== undefined)
+                ) {
+                  return yield* changedIdleTurn();
+                }
+                if (
+                  hasActiveSession &&
                   rawInput.onlyIfIdleSince !== undefined &&
                   (!activeSession ||
                     activeSession.status === "connecting" ||
@@ -4714,6 +5127,28 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   resumeCursor = activeSession.resumeCursor;
                   runtimeCursorWriteBaseline = runtimeCursorWriteVersion;
                 }
+              }
+              if (
+                controlReceipt?.retiredLifecycleGeneration !== undefined &&
+                !hasActiveSession &&
+                !hasRetainedSession
+              )
+                return;
+              if (rawInput.onlyIfNoActiveTurn === true) {
+                // New dispatch waits on the existing idle-stop fence. Recheck
+                // prior dispatch and binding state after the async adapter probes.
+                yield* withBindingWriteLock(
+                  input.threadId,
+                  Effect.gen(function* () {
+                    const current = Option.getOrUndefined(
+                      yield* directory.getBinding(input.threadId),
+                    );
+                    yield* requireNoActiveTurn(current);
+                  }),
+                );
+              }
+              if (controlReceipt !== undefined) {
+                yield* persistStopControlTarget(binding, controlReceipt);
               }
               if (rawInput.onlyIfIdleSince !== undefined) {
                 // Runs before generation rotation, with new dispatch fenced.
@@ -4740,8 +5175,23 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 [adapter.stopSession(input.threadId), flushRuntimeText(input.threadId)],
                 (teardown) => teardown,
               );
-              stoppedState = { binding, resumeCursor };
+              stoppedState = {
+                binding,
+                resumeCursor,
+                ...(controlReceipt ? { controlReceipt } : {}),
+              };
             }),
+            rawInput.expectedLifecycleGeneration !== undefined ||
+              rawInput.controlRequestId !== undefined
+              ? Effect.fail(
+                  new ProviderValidationError({
+                    operation: "ProviderService.stopRuntimeSession",
+                    issue:
+                      "The provider lifecycle is busy; Stop could not acquire its observed runtime.",
+                    reason: "stale-interaction",
+                  }),
+                )
+              : undefined,
           )
           .pipe(Effect.ensuring(Effect.sync(() => releaseIdleStopFence?.())));
       });
@@ -4885,7 +5335,10 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               const adapter = yield* getAdapterForBinding(binding);
               const hasActiveSession = yield* adapter.hasSession(input.threadId);
               const preserveActive = hasActiveSession && input.preserveActiveRuntime === true;
-              if (hasActiveSession && !preserveActive) {
+              const hasRetainedSession = adapter.hasRetainedSession
+                ? yield* adapter.hasRetainedSession(input.threadId)
+                : hasActiveSession;
+              if (hasRetainedSession && !preserveActive) {
                 yield* adapter.stopSession(input.threadId);
               }
               if (!preserveActive) {
@@ -4926,7 +5379,16 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     const listSessions: ProviderServiceShape["listSessions"] = () =>
       Effect.gen(function* () {
         const activeSessions = (yield* Effect.forEach(adapters, (adapter) =>
-          adapter.listSessions(),
+          adapter.listSessions().pipe(
+            Effect.flatMap((sessions) =>
+              // An adapter with a retained probe keeps a context after a failed
+              // stop for cleanup retries. That context is not live, so it stays
+              // out of the listing that decides liveness and holds queued turns.
+              adapter.hasRetainedSession
+                ? Effect.filter(sessions, (session) => adapter.hasSession(session.threadId))
+                : Effect.succeed(sessions),
+            ),
+          ),
         )).flatMap((sessions) => sessions);
         // One `list()` query: `listBindings` already returns every persisted
         // binding (skipping rows with unknown providers, exactly as the per-thread
@@ -4971,6 +5433,20 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           return Object.assign({}, session, overrides);
         });
       });
+
+    const listRetainedSessions: NonNullable<ProviderServiceShape["listRetainedSessions"]> = () =>
+      Effect.forEach(adapters, (adapter) =>
+        // The contexts the listing above leaves out. Their process may still
+        // be running, so safety checks such as the checkpoint revert guard
+        // read them here.
+        adapter.hasRetainedSession
+          ? Effect.flatMap(adapter.listSessions(), (sessions) =>
+              Effect.filter(sessions, (session) =>
+                adapter.hasSession(session.threadId).pipe(Effect.map((live) => !live)),
+              ),
+            )
+          : Effect.succeed<ReadonlyArray<ProviderSession>>([]),
+      ).pipe(Effect.map((sessions) => sessions.flatMap((entries) => entries)));
 
     const startClaudeCompaction: NonNullable<ProviderServiceShape["startClaudeCompaction"]> = (
       input,
@@ -5029,9 +5505,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           operation: "ProviderService.getClaudeCacheObservation",
           allowRecovery: false,
         });
-        return routed.adapter.getClaudeCacheObservation
-          ? yield* routed.adapter.getClaudeCacheObservation(threadId)
-          : undefined;
+        if (!routed.adapter.getClaudeCacheObservation) return undefined;
+        if (routed.isActive) inheritedRuntimeGenerations.delete(threadId);
+        return yield* routed.adapter.getClaudeCacheObservation(threadId);
       });
 
     const getCapabilities: ProviderServiceShape["getCapabilities"] = (provider) =>
@@ -5262,9 +5738,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       respondToUserInput,
       stopSession,
       stopRuntimeSession,
+      getRuntimeSessionStopTarget,
+      withRuntimeSessionStopTarget,
       hasLiveRuntimeTasks,
       clearSessionResumeCursor,
       listSessions,
+      listRetainedSessions,
       getCapabilities,
       getClaudeCacheObservation,
       startClaudeCompaction,

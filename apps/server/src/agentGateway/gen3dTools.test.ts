@@ -65,7 +65,7 @@ it("submits for the live caller turn and never exposes adopt or export", async (
   mocks.command.mockResolvedValue({ project: project() });
   const get = await Effect.runPromise(tool.handler({ operation: "get" }, context));
   expect(text(get)).toContain("baseRevision");
-  const payload = JSON.parse((get as { content: { text: string }[] }).content[0]!.text);
+  const payload = JSON.parse((get as unknown as { content: { text: string }[] }).content[0]!.text);
   expect(payload.routes.blender).toMatchObject({ ready: true, version: "Blender 5.0.0" });
   expect(mocks.forThread).toHaveBeenCalledWith("thread");
   await Effect.runPromise(
@@ -143,7 +143,9 @@ it("returns blueprint, diff and render images from views", async () => {
       ],
     }),
   );
-  const result = (await Effect.runPromise(tool.handler({ operation: "views" }, context))) as {
+  const result = (await Effect.runPromise(
+    tool.handler({ operation: "views" }, context),
+  )) as unknown as {
     content: { type: string }[];
   };
   expect(result.content.filter((c) => c.type === "image")).toHaveLength(7);

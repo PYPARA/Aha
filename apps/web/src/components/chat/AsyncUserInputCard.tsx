@@ -1,4 +1,3 @@
-import { useAhaTranslation } from "../../aha/AppearanceProvider";
 import type { AsyncUserInput, MessageId, UserInputQuestion } from "@synara/contracts";
 import { useMemo, useRef, useState } from "react";
 import { CircleQuestionIcon, CheckIcon } from "~/lib/icons";
@@ -13,6 +12,7 @@ import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Textarea } from "../ui/textarea";
 import { UserInputQuestionForm } from "./UserInputQuestionForm";
+import { useTranslation } from "~/i18n";
 
 export function AsyncUserInputCard({
   messageId,
@@ -23,7 +23,8 @@ export function AsyncUserInputCard({
   input: AsyncUserInput;
   onRespond?: ((messageId: MessageId, answers: readonly string[]) => Promise<void>) | undefined;
 }) {
-  const tr = useAhaTranslation();
+  const { t } = useTranslation();
+
   // Native questions have no IDs. Their positions are stable within this message.
   const questions = useMemo<ReadonlyArray<UserInputQuestion>>(
     () =>
@@ -83,7 +84,7 @@ export function AsyncUserInputCard({
       setSubmission({ answers: response, responseSequence: input.responseSequence ?? 0 });
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "The answer could not be submitted. Try again.",
+        cause instanceof Error ? cause.message : t("chat:theAnswerCouldNotBeSubmittedTryAgain"),
       );
     } finally {
       inFlight.current = false;
@@ -95,11 +96,11 @@ export function AsyncUserInputCard({
     <Collapsible open={open} onOpenChange={setOpen} className="my-2">
       <CollapsibleTrigger className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-ui leading-snug text-muted-foreground hover:bg-muted/50 hover:text-foreground">
         <CircleQuestionIcon className="size-3.5" aria-hidden="true" />
-        {questions.length} {questions.length === 1 ? "question" : "questions"}
+        {questions.length} {questions.length === 1 ? t("chat:question") : t("chat:questions")}
         {answered && (
           <>
             <CheckIcon className="size-3" aria-hidden="true" />
-            <span>{tr("Answered")}</span>
+            <span>{t("chat:answered")}</span>
           </>
         )}
       </CollapsibleTrigger>
@@ -118,7 +119,7 @@ export function AsyncUserInputCard({
             </dl>
           ) : activeQuestion ? (
             <form
-              aria-label={tr("Questions from Codex")}
+              aria-label={t("chat:questionsFromCodex")}
               onSubmit={(event) => {
                 event.preventDefault();
                 void advance();
@@ -146,14 +147,14 @@ export function AsyncUserInputCard({
               >
                 <div className="mt-3 space-y-2">
                   <Textarea
-                    aria-label={`Answer: ${activeQuestion.question}`}
+                    aria-label={t("chat:answer2", { value0: activeQuestion.question })}
                     value={progress.customAnswer}
                     disabled={disabled}
                     rows={2}
                     placeholder={
                       activeQuestion.options.length > 0
-                        ? tr("Or type your own answer…")
-                        : "Type your answer…"
+                        ? t("chat:orTypeYourOwnAnswer")
+                        : t("chat:typeYourAnswer")
                     }
                     onChange={(event) => {
                       const draft = setPendingUserInputCustomAnswer(
@@ -177,7 +178,7 @@ export function AsyncUserInputCard({
                   )}
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-ui leading-snug text-muted-foreground">
-                      Codex can keep working
+                      {t("chat:codexCanKeepWorking")}
                     </span>
                     <Button
                       type="submit"
@@ -189,10 +190,10 @@ export function AsyncUserInputCard({
                       }
                     >
                       {submitting
-                        ? "Submitting…"
+                        ? t("chat:submitting")
                         : progress.isLastQuestion
-                          ? tr("Send answer")
-                          : tr("Next")}
+                          ? t("chat:sendAnswer")
+                          : t("onboarding:common_next")}
                     </Button>
                   </div>
                 </div>

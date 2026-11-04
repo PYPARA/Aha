@@ -6,6 +6,7 @@ import { collectResources } from "~/components/resources/resourceLibrary";
 // Layer: Web UI helpers
 // Exports: showFileReferenceContextMenu, getRevealInFolderLabel
 
+import { t } from "~/i18n";
 import { formatSelectionLabel, type ChatFileReference } from "~/lib/chatReferences";
 import { copyTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { getNavigatorPlatform, isMacPlatform, isWindowsPlatform } from "~/lib/utils";
@@ -14,12 +15,12 @@ import { toastManager } from "~/components/ui/toast";
 
 export function getRevealInFolderLabel(platform: string): string {
   if (isWindowsPlatform(platform)) {
-    return "Open in Explorer";
+    return t("workspace:revealExplorer");
   }
   if (isMacPlatform(platform)) {
-    return "Reveal in Finder";
+    return t("workspace:revealFinder");
   }
-  return "Show in folder";
+  return t("workspace:revealFolder");
 }
 
 // Right-click menu shared by explorer rows, changed-file rows, and the file
@@ -49,7 +50,7 @@ export async function showFileReferenceContextMenu(input: {
     path: input.path,
     ...input.selection,
   };
-  const rangeLabel = formatSelectionLabel(reference);
+  const rangeLabel = formatSelectionLabel(reference, t);
   const hasSnippet = typeof reference.snippet === "string" && reference.snippet.trim().length > 0;
   const clicked = await api.contextMenu.show(
     [
@@ -58,10 +59,10 @@ export async function showFileReferenceContextMenu(input: {
             {
               id: "reference-in-chat" as const,
               label: rangeLabel
-                ? `Reference ${rangeLabel} in chat`
+                ? t("workspace:referenceRange", { range: rangeLabel })
                 : hasSnippet
-                  ? "Reference selection in chat"
-                  : "Reference in chat",
+                  ? t("workspace:referenceSelection")
+                  : t("workspace:referenceFile"),
             },
           ]
         : []),
@@ -69,7 +70,9 @@ export async function showFileReferenceContextMenu(input: {
         ? [
             {
               id: "ask-why-in-chat" as const,
-              label: rangeLabel ? `Ask why ${rangeLabel} changed` : "Ask why this changed",
+              label: rangeLabel
+                ? t("workspace:askWhyRangeChanged", { range: rangeLabel })
+                : t("workspace:askWhyChanged"),
             },
           ]
         : []),
@@ -81,7 +84,7 @@ export async function showFileReferenceContextMenu(input: {
             },
           ]
         : []),
-      { id: "copy-path" as const, label: "Copy path" },
+      { id: "copy-path" as const, label: t("common:diff_copyPath") },
       ...(resourceAction || (window.desktopBridge?.resourceLibrary && input.revealPath)
         ? [
             {
@@ -108,9 +111,8 @@ export async function showFileReferenceContextMenu(input: {
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Unable to reveal file",
-        description:
-          error instanceof Error ? error.message : "An unknown error occurred opening the file.",
+        title: t("workspace:revealFileFailed"),
+        description: error instanceof Error ? error.message : t("workspace:revealFileUnknownError"),
       });
     }
     return;

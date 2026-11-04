@@ -1,7 +1,12 @@
+import { useTranslation } from "~/i18n";
 import { OrchestrationThreadActivity, type TurnId } from "@synara/contracts";
 import { useMemo } from "react";
 import { setsEqual, useStableValue } from "../../hooks/useStableValue";
-import { deriveWorkLogEntries, deriveSubagentTaskEnds } from "../../session-logic";
+import {
+  deriveSubagentTaskEnds,
+  deriveWorkLogEntries,
+  isSessionRuntimeRetired,
+} from "../../session-logic";
 import { useStore } from "../../store";
 import type { Thread } from "../../types";
 import { useWorkflowRunUiThreadState } from "../../workflowRunUiStore";
@@ -23,6 +28,8 @@ export function useChatWorkLog({
   latestTurnSettled,
   latestTurnLive,
 }: ChatWorkLogInput) {
+  const { t } = useTranslation();
+
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const activeLatestTurnId = activeLatestTurn?.turnId ?? null;
@@ -61,6 +68,7 @@ export function useChatWorkLog({
         activeTurnStartedAt: activeLatestTurnStartedAt,
         latestTurnState: activeLatestTurnState,
         latestTurnCompletedAt: activeLatestTurnCompletedAt,
+        translate: t,
       }),
     [
       activeLatestTurnCompletedAt,
@@ -70,6 +78,7 @@ export function useChatWorkLog({
       latestTurnLive,
       threadActivities,
       workLogVisibleTurnIds,
+      t,
     ],
   );
   const hasWorkLogSubagents = useMemo(
@@ -94,9 +103,16 @@ export function useChatWorkLog({
             rawWorkLogEntries,
             relevantWorkLogThreads,
             activeThread?.id ?? null,
+            threadActivities,
           )
         : rawWorkLogEntries,
-    [activeThread?.id, hasWorkLogSubagents, rawWorkLogEntries, relevantWorkLogThreads],
+    [
+      activeThread?.id,
+      hasWorkLogSubagents,
+      rawWorkLogEntries,
+      relevantWorkLogThreads,
+      threadActivities,
+    ],
   );
   // Preserve each launch position for timeline grouping; state-only updates and
   // progress attach to their owning invocation. The shared roster remains the
@@ -136,10 +152,25 @@ export function useChatWorkLog({
     ],
   );
   const subagentRoster = useSubagentRoster(subagentSource);
-  const subagentTaskEnds = useMemo(
+  // Liveness follows the root thread's runtime: a subagent view's own session says
+  // nothing about its siblings, and its nested agents retire with the root.
+  const subagentRootSessionStatus =
+    (subagentSource.stripParentThread ?? activeThread)?.session?.orchestrationStatus ?? null;
+  const subagentRuntimeRetired = isSessionRuntimeRetired(subagentRootSessionStatus);
+  const stripTaskEnds = useMemo(
     () => deriveSubagentTaskEnds(subagentSource.stripSourceActivities),
     [subagentSource.stripSourceActivities],
   );
+  // A subagent view's cards list its nested agents, whose own ends land on its
+  // thread (a session stop still reports them on the root).
+  const isSubagentThreadView = Boolean(activeThread?.parentThreadId);
+  const subagentTaskEnds = useMemo(() => {
+    if (!isSubagentThreadView || threadActivities === subagentSource.stripSourceActivities) {
+      return stripTaskEnds;
+    }
+    const ownTaskEnds = deriveSubagentTaskEnds(threadActivities);
+    return ownTaskEnds.size === 0 ? stripTaskEnds : new Map([...stripTaskEnds, ...ownTaskEnds]);
+  }, [isSubagentThreadView, stripTaskEnds, subagentSource.stripSourceActivities, threadActivities]);
   const subagentThreadRunRow = useMemo(
     () =>
       activeThread?.parentThreadId && activeThreadId
@@ -149,8 +180,9 @@ export function useChatWorkLog({
             parentThreadId: stripSourceThreadId,
             liveTurnId: stripLiveTurnId,
             childThreadId: activeThreadId,
-            taskEndByToolUseId: subagentTaskEnds,
+            taskEndByToolUseId: stripTaskEnds,
             backgroundedProviderThreadIds: backgroundedSubagentToolUseIds,
+            runtimeRetired: subagentRuntimeRetired,
           })
         : null,
     [
@@ -160,8 +192,9 @@ export function useChatWorkLog({
       subagentSource.stripRelevantWorkLogThreads,
       stripSourceThreadId,
       stripLiveTurnId,
-      subagentTaskEnds,
+      stripTaskEnds,
       backgroundedSubagentToolUseIds,
+      subagentRuntimeRetired,
     ],
   );
   // Links workflow agent rows to their subagent child threads (and models) when the
@@ -215,6 +248,8 @@ export function useChatWorkLog({
     subagentRunThreads: relevantWorkLogThreads,
     backgroundedSubagentToolUseIds,
     subagentTaskEnds,
+    subagentRuntimeRetired,
+    subagentRootSessionStatus,
     subagentThreadRunRow,
     composerSubagentStripItems,
     subagentRoster,

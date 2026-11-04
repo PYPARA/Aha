@@ -30,7 +30,17 @@ interface ResourceHarness {
   prepareCollection(
     input: Extract<ResourceCommand, { op: "prepareCollection" }>,
   ): Promise<ResourceCollectionOperation>;
-  commitCollection(id: string, result: string, bytes: Uint8Array): Promise<ResourceCollectionItem>;
+  commitCollection(
+    id: string,
+    result: string,
+    bytes: Uint8Array,
+    trash?: (file: string) => Promise<void>,
+  ): Promise<ResourceCollectionItem>;
+  collectionConflicts(input: {
+    libraryId: string;
+    directoryId: string | null;
+    items: Pick<ResourceCollectionItem, "assetId" | "name" | "folder">[];
+  }): unknown;
   linkCollection(id: string, result: string): Promise<void>;
   failCollection(id: string, result: string, error: string): Promise<void>;
   retryCollection(id: string): Promise<unknown>;

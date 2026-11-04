@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   desktopFlavorFromBundleId,
   desktopFlavorFromProtocol,
+  CHINESE_UI_BETA_FEATURE,
   GROUPS_BETA_FEATURE,
   INLINE_VISUALS_BETA_FEATURE,
   isBetaFeatureEnabled,
   MCP_CONNECTORS_BETA_FEATURE,
+  NATIVE_EDITOR_BETA_FEATURE,
 } from "./betaFeatures";
 import {
   SYNARA_BETA_BUNDLE_ID,
@@ -62,12 +64,28 @@ describe("isBetaFeatureEnabled", () => {
     }
   });
 
-  it("keeps connectors out of Stable only", () => {
+  it("keeps Connectors out of Aha Stable while every other flavor offers them", () => {
     expect(isBetaFeatureEnabled(MCP_CONNECTORS_BETA_FEATURE, "production")).toBe(false);
     for (const flavor of ["beta", "development", "canary", "cua", "unknown"] as const) {
       expect(isBetaFeatureEnabled(MCP_CONNECTORS_BETA_FEATURE, flavor)).toBe(true);
     }
   });
+
+  it.each([NATIVE_EDITOR_BETA_FEATURE, CHINESE_UI_BETA_FEATURE])(
+    "offers %s in Stable and all other flavors",
+    (feature) => {
+      for (const flavor of [
+        "production",
+        "beta",
+        "development",
+        "canary",
+        "cua",
+        "unknown",
+      ] as const) {
+        expect(isBetaFeatureEnabled(feature, flavor)).toBe(true);
+      }
+    },
+  );
 
   it("enables the rail sidebar layout in both Beta and Stable", () => {
     expect(isBetaFeatureEnabled("sidebarV2", "beta")).toBe(true);

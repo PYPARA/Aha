@@ -1,4 +1,5 @@
 import "../index.css";
+import { setLanguagePreference } from "~/i18n";
 import { beforeEach, it, expect, vi } from "vitest";
 import { render } from "vitest-browser-react";
 import type { SkinSnapshot, SkinPreview, SkinDefinition } from "@synara/contracts/ahaSkins";
@@ -46,6 +47,8 @@ const view = () => (
 );
 beforeEach(async () => {
   vi.clearAllMocks();
+  // These suites assert Aha's default Chinese copy.
+  setLanguagePreference("zh-CN");
   mocks.theme.state = structuredClone(DEFAULT_THEME_STATE);
   png = new Uint8Array(await (await fetch("/aha-logo.png")).arrayBuffer());
   const current: SkinDefinition = {

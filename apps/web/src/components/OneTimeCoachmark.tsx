@@ -1,3 +1,4 @@
+import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import {
   cloneElement,
   useEffect,
@@ -9,7 +10,7 @@ import {
 import { useAnnouncementSheetSlot, useAnnouncementSheetSlotStore } from "./announcementSheetSlot";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { cn } from "~/lib/utils";
-import { useAhaTranslation } from "~/aha/AppearanceProvider";
+import { useTranslation } from "~/i18n";
 
 /** A remembered hint sharing the startup announcement slot with Activity and the tour. */
 export function OneTimeCoachmark({
@@ -106,7 +107,9 @@ export function OneTimeCoachmark({
 export const TASKS_COACHMARK = {
   storageKey: "synara:tasks-onboarding:v1",
   title: "Tasks",
+  titleKey: "chat:tasks",
   description: "Keep your to-dos in one place and hand them to an agent when you’re ready.",
+  descriptionKey: "common:keepYourToDosInOnePlaceAndHand",
 };
 
 export function TasksCoachmark({
@@ -116,8 +119,14 @@ export function TasksCoachmark({
   children: ReactElement<ButtonHTMLAttributes<HTMLButtonElement>>;
   tooltip: string;
 }) {
+  const { t } = useTranslation();
   return (
-    <OneTimeCoachmark {...TASKS_COACHMARK} tooltip={tooltip}>
+    <OneTimeCoachmark
+      {...TASKS_COACHMARK}
+      title={t(TASKS_COACHMARK.titleKey)}
+      description={t(TASKS_COACHMARK.descriptionKey)}
+      tooltip={tooltip}
+    >
       {children}
     </OneTimeCoachmark>
   );

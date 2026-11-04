@@ -1,4 +1,5 @@
 import "../index.css";
+import { setLanguagePreference } from "~/i18n";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 import { useState } from "react";
@@ -52,6 +53,8 @@ function ResettableEditor() {
 }
 beforeEach(async () => {
   vi.clearAllMocks();
+  // These suites assert Aha's default Chinese copy.
+  setLanguagePreference("zh-CN");
   cancelAhaThemePreview();
   applyAhaThemeState(serializeThemeState(DEFAULT_THEME_STATE));
   const png = new Uint8Array(await (await fetch("/aha-logo.png")).arrayBuffer());

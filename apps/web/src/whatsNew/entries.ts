@@ -22,6 +22,42 @@ import type { WhatsNewEntry } from "./logic";
 
 export const WHATS_NEW_ENTRIES: readonly WhatsNewEntry[] = [
   {
+    version: "1.1.0",
+    date: "Nov 4",
+    features: [
+      {
+        id: "interface-language",
+        title: "One interface language everywhere",
+        description:
+          "Simplified Chinese now covers the whole interface, native menus and permission prompts. Choose Chinese, English or System in Settings → General.",
+      },
+      {
+        id: "native-editor",
+        title: "Built-in code editor",
+        description:
+          "Files, editable diffs and previews share one editing engine with TypeScript and JavaScript intelligence, navigation, rename and debugging. The debugger downloads on first use.",
+      },
+      {
+        id: "usage-limits",
+        title: "Resume after usage limits",
+        description:
+          "An optional provider setting lets supported Codex and Claude tasks continue after a verified usage-limit reset. It is off by default.",
+      },
+      {
+        id: "recovery",
+        title: "Steadier recovery and handoffs",
+        description:
+          "Running chats, queued messages and subagents recover more reliably, provider switches follow one handoff path, and Stop stays tied to its original turn.",
+      },
+      {
+        id: "live-diffs",
+        title: "Live turn changes and compressed backups",
+        description:
+          "Turn diffs show the latest captured changes while a turn runs. Pre-migration database backups are now compressed, and existing backups stay readable.",
+      },
+    ],
+  },
+  {
     version: "1.0.7",
     date: "Oct 20",
     features: [

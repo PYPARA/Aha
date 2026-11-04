@@ -18,6 +18,7 @@ import { createPortal } from "react-dom";
 
 import { TasksCoachmark } from "./OneTimeCoachmark";
 import type { RailItemId } from "~/appRail.logic";
+import { useEditorRailStore, type EditorRailItem } from "~/editorRailStore";
 import { createCentralIconComponent } from "~/lib/central-icons";
 import {
   ClockIcon,
@@ -38,6 +39,7 @@ import {
 import { ProjectSidebarIcon } from "./ProjectSidebarIcon";
 import type { SidebarActionBadge } from "./Sidebar.logic";
 import { SidebarIconButton } from "./SidebarIconButton";
+import { useTranslation } from "~/i18n";
 
 type RailGlyph = ComponentType<{ className?: string }>;
 /** A rail button's glyph pair: outline at rest, filled while active (like Codex). */
@@ -168,10 +170,33 @@ export function appRailButtonClassName(active: boolean): string {
   );
 }
 
+export const APP_RAIL_LABEL_KEYS = {
+  home: "common:home",
+  spaces: "common:spaces",
+  inbox: "workspace:inbox",
+  kanban: "workspace:view_kanban",
+  tasks: "chat:tasks",
+  pullRequests: "workspace:codeReview",
+  automations: "automation:detail_breadcrumb",
+  studio: "common:hubs",
+  settings: "workspace:toast_settings",
+  "editor:file": "workspace:toolCallDetails_filesSection",
+  "editor:diff": "workspace:toolCallDetails_diffSection",
+  "editor:search": "workspace:primaryActions_search",
+} as const satisfies Partial<Record<RailItemId | `editor:${EditorRailItem["id"]}`, string>>;
+
 function AppRailButton({ item }: { item: AppRailItem }) {
+  const { t } = useTranslation();
   const tr = useAhaTranslation();
-  const baseLabel = tr(item.label);
-  const label = item.badge ? `${baseLabel} · ${item.badge.accessibleLabel}` : baseLabel;
+
+  const labelKey = Object.hasOwn(APP_RAIL_LABEL_KEYS, item.id)
+    ? APP_RAIL_LABEL_KEYS[item.id as keyof typeof APP_RAIL_LABEL_KEYS]
+    : undefined;
+  // Aha-only rail items (drawing, sprites, resources…) keep their Aha dictionary copy.
+  const itemLabel = labelKey ? t(labelKey) : tr(item.label);
+  const label = item.badge
+    ? t("common:symbol9", { value0: itemLabel, value1: item.badge.accessibleLabel })
+    : itemLabel;
   const glyphs = item.glyphs;
   const button = (
     <SidebarIconButton
@@ -202,6 +227,18 @@ function AppRailButton({ item }: { item: AppRailItem }) {
   );
 }
 
+/** The editor view's Files / Diff / Search as rail items (see editorRailStore). */
+function editorRailItem(item: EditorRailItem): AppRailItem {
+  return {
+    id: `editor:${item.id}`,
+    glyphs: sameGlyphs(item.glyph),
+    label: item.label,
+    badge: null,
+    active: item.active,
+    onSelect: item.onSelect,
+  };
+}
+
 export function AppRail({
   items,
   shortcuts,
@@ -210,17 +247,37 @@ export function AppRail({
   bottomSlot,
   onContextMenu,
 }: AppRailProps) {
-  const tr = useAhaTranslation();
+  const { t } = useTranslation();
+
+  // While an editor view is open its panes take the rail's active slot: the
+  // fixed items stay reachable but none reads as the current section.
+  const editorItems = useEditorRailStore((store) => store.items);
+  const fixedItems = editorItems ? items.map((item) => ({ ...item, active: false })) : items;
   return (
     <nav
-      aria-label={tr("Primary")}
+      aria-label={t("common:primary")}
       onContextMenu={onContextMenu}
       className="flex w-(--app-rail-width) shrink-0 flex-col items-center gap-1.5 pt-2.5 pb-2.5 font-system-ui"
     >
       <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1.5 overflow-y-auto [scrollbar-width:none]">
-        {items.map((item) => (
+        {fixedItems.map((item) => (
           <AppRailButton key={item.id} item={item} />
         ))}
+        {editorItems && editorItems.length > 0 ? (
+          <div
+            role="group"
+            aria-label={t("workspace:editorPanes")}
+            className="flex w-full flex-col items-center gap-1.5"
+          >
+            <div
+              aria-hidden
+              className="my-0.5 h-px w-5 shrink-0 bg-[var(--app-rail-inset-border)]"
+            />
+            {editorItems.map((item) => (
+              <AppRailButton key={item.id} item={editorRailItem(item)} />
+            ))}
+          </div>
+        ) : null}
         {shortcuts.length > 0 ? (
           <>
             <div

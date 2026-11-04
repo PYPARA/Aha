@@ -154,6 +154,9 @@ import Migration0134 from "./Migrations/134_ProjectionThreadsForkSourceMessage.t
 import Migration0135 from "./Migrations/135_ImageGeneration.ts";
 import Migration0136 from "./Migrations/136_ImageEditDocuments.ts";
 import Migration0137 from "./Migrations/137_ProjectionMessageTurnActivityIndex.ts";
+// Upstream 141 keeps its ID: native Synara 1.1.0 trackers then match without renumbering.
+// Slots 139–140 stay unused (upstream Remote lineage); Aha migrations continue at 142.
+import Migration0141 from "./Migrations/141_ProjectionThreadsUsageLimitRecovery.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -308,6 +311,7 @@ export const migrationEntries = [
   [136, "ImageEditDocuments", Migration0136],
   [137, "ProjectionMessageTurnActivityIndex", Migration0137],
   [138, "ImageBatches", Migration0138],
+  [141, "ProjectionThreadsUsageLimitRecovery", Migration0141],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
