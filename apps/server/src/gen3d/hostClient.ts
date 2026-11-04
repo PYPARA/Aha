@@ -10,6 +10,7 @@ export function gen3dHostCall<T>(
   method: string,
   params: Record<string, unknown> = {},
   signal?: AbortSignal,
+  timeoutMs = 180_000,
 ): Promise<T> {
   const socketPath = process.env.AHA_GEN3D_HOST_PIPE,
     token = process.env.AHA_GEN3D_HOST_TOKEN;
@@ -44,7 +45,7 @@ export function gen3dHostCall<T>(
       },
     );
     request.on("error", reject);
-    request.setTimeout(180_000, () => request.destroy(new Gen3DHostTimeoutError()));
+    request.setTimeout(timeoutMs, () => request.destroy(new Gen3DHostTimeoutError()));
     request.end(JSON.stringify(params));
   });
 }

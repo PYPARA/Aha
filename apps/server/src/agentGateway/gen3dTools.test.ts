@@ -5,7 +5,16 @@ import * as path from "node:path";
 import { Effect } from "effect";
 import type { Gen3DProject } from "@synara/contracts";
 import type { ToolContext } from "./toolRuntime";
-const mocks = vi.hoisted(() => ({ forThread: vi.fn(), command: vi.fn(), root: "" }));
+const mocks = vi.hoisted(() => ({
+  forThread: vi.fn(),
+  command: vi.fn(),
+  environment: vi.fn(async () => ({
+    desktop: true,
+    error: null,
+    blender: { ready: true, version: "Blender 5.0.0", error: null },
+  })),
+  root: "",
+}));
 vi.mock("../gen3d/engine", () => ({
   gen3DEngine: async () => mocks,
   GEN3D_RENDERS: ["render-34.png", "render-front.png", "render-side.png", "render-back.png"],
@@ -56,6 +65,8 @@ it("submits for the live caller turn and never exposes adopt or export", async (
   mocks.command.mockResolvedValue({ project: project() });
   const get = await Effect.runPromise(tool.handler({ operation: "get" }, context));
   expect(text(get)).toContain("baseRevision");
+  const payload = JSON.parse((get as { content: { text: string }[] }).content[0]!.text);
+  expect(payload.routes.blender).toMatchObject({ ready: true, version: "Blender 5.0.0" });
   expect(mocks.forThread).toHaveBeenCalledWith("thread");
   await Effect.runPromise(
     tool.handler(

@@ -1,7 +1,20 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import type { Gen3DCommand, Gen3DProject, Gen3DVersion, ImageJob } from "@synara/contracts";
+import {
+  GEN3D_EXPORT_PRESETS,
+  GEN3D_MATERIAL_PRESETS,
+  GEN3D_TEXTURE_SIZES,
+  GEN3D_TRIANGLE_PRESETS,
+  type Gen3DCommand,
+  type Gen3DCommandResult,
+  type Gen3DEnvironment,
+  type Gen3DExportFormat,
+  type Gen3DProcess,
+  type Gen3DProject,
+  type Gen3DVersion,
+  type ImageJob,
+} from "@synara/contracts";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { useAppSettings } from "~/appSettings";
 import { useComposerDraftStore } from "~/composerDraftStore";
@@ -11,6 +24,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
+import { OptionSelect } from "../ui/option-select";
 import { Textarea } from "../ui/textarea";
 import {
   Dialog,
@@ -28,6 +42,8 @@ import { collectResources } from "../resources/resourceLibrary";
 import { DrawingModelPicker } from "../drawing/DrawingPickers";
 import { drawingApi, useImageProviders } from "../drawing/useDrawing";
 import { ensureGen3DThread } from "./Gen3DChat";
+import { REPAINT_VIEW_LABELS, RepaintPanel } from "./RepaintPanel";
+import { TiledTextureField, validTileSize, type TileChoice } from "./TiledTextureField";
 import {
   gen3dApi,
   gen3dAssetUrl,
@@ -44,6 +60,12 @@ const ModelViewer = lazy(() => import("../model3d/ModelViewer"));
 const running = (status: string) => ["queued", "running", "validating"].includes(status);
 const VIEWS = ["front", "side", "back"] as const;
 const VIEW_LABELS = { front: "Front", side: "Side", back: "Back" } as const;
+const TOOL_LABELS = {
+  generate: "Generate",
+  optimize: "Optimize",
+  texture: "Texture",
+  export: "Export",
+} as const;
 const STOP_REASONS: Record<string, string> = {
   "deviation-below-threshold": "Generation finished: the largest deviation is below the threshold.",
   "no-improvement": "Generation finished: the score stopped improving.",
@@ -146,6 +168,7 @@ export default function Gen3DWorkbench({ projectId }: { projectId?: string }) {
             project={detail.data}
             narrow={narrow}
             desktop={environment.data?.desktop === true}
+            blender={environment.data?.blender}
             onBack={() => select()}
             onError={showError}
           />
@@ -262,12 +285,14 @@ function ProjectWorkspace({
   project,
   narrow,
   desktop,
+  blender,
   onBack,
   onError,
 }: {
   project: Gen3DProject;
   narrow: boolean;
   desktop: boolean;
+  blender: Gen3DEnvironment["blender"];
   onBack: () => void;
   onError: (e: unknown) => void;
 }) {
@@ -275,7 +300,7 @@ function ProjectWorkspace({
     command = useGen3DCommand(),
     { settings } = useAppSettings();
   const [selected, setSelected] = useState<string | null>(project.previewVersionId),
-    [tool, setTool] = useState<"generate" | "export">("generate"),
+    [tool, setTool] = useState<"generate" | "optimize" | "texture" | "export">("generate"),
     [panel, setPanel] = useState<"properties" | "assistant">("properties"),
     [view, setView] = useState<"model" | "compare">("model"),
     [drawer, setDrawer] = useState(false),
@@ -374,19 +399,53 @@ function ProjectWorkspace({
           key={project.id}
           project={project}
           disabled={locked || !desktop}
+          desktop={desktop}
+          blender={blender}
           busy={busy}
           onUpdate={(input) => void act({ operation: "update", ...input })}
           onStart={(rounds) => void startRun(rounds)}
           onStop={() => activeRun && void act({ operation: "stop-run", runId: activeRun.id })}
         />
       )}
+      {panel === "properties" && tool === "optimize" && (
+        <OptimizePanel
+          project={project}
+          act={act}
+          version={version}
+          canProject={
+            !!project.blueprint?.confirmed &&
+            !!version?.score &&
+            project.blueprint.createdAt <= version.createdAt
+          }
+          disabled={locked || !desktop || !blender?.headless}
+          blenderMissing={desktop && !blender?.headless}
+          onOptimize={(process) =>
+            version && void act({ operation: "optimize", versionId: version.id, process })
+          }
+        />
+      )}
+      {panel === "properties" && tool === "texture" && (
+        <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4 text-ui-sm">
+          <h2 className="font-medium">{tr("Texture")}</h2>
+          <RepaintPanel
+            version={version}
+            disabled={locked || !desktop || !blender?.headless}
+            blenderMissing={desktop && !blender?.headless}
+            act={act}
+            onError={onError}
+          />
+        </div>
+      )}
       {panel === "properties" && tool === "export" && (
         <ExportPanel
           project={project}
           version={version}
           disabled={busy || !desktop}
+          headless={blender?.headless === true}
           path={exportPath}
-          onExport={(versionId) => void act({ operation: "export", versionId })}
+          onExport={(versionId, exportPreset, exportFormat) =>
+            void act({ operation: "export", versionId, exportPreset, exportFormat })
+          }
           onAdopt={() => version && void act({ operation: "adopt", versionId: version.id })}
         />
       )}
@@ -432,7 +491,7 @@ function ProjectWorkspace({
           role="tablist"
           aria-label={tr("3D generation tools")}
         >
-          {(["generate", "export"] as const).map((value) => (
+          {(["generate", "optimize", "texture", "export"] as const).map((value) => (
             <Button
               key={value}
               size="sm"
@@ -444,7 +503,7 @@ function ProjectWorkspace({
                 setPanel("properties");
               }}
             >
-              {tr(value === "generate" ? "Generate" : "Export")}
+              {tr(TOOL_LABELS[value])}
             </Button>
           ))}
         </div>
@@ -937,6 +996,8 @@ function CompareView({ project, version }: { project: Gen3DProject; version: Gen
 function GeneratePanel({
   project,
   disabled,
+  desktop,
+  blender,
   busy,
   onUpdate,
   onStart,
@@ -944,6 +1005,8 @@ function GeneratePanel({
 }: {
   project: Gen3DProject;
   disabled: boolean;
+  desktop: boolean;
+  blender: Gen3DEnvironment["blender"];
   busy: boolean;
   onUpdate: (input: { description?: string; triangleBudget?: number }) => void;
   onStart: (rounds: number) => void;
@@ -980,6 +1043,24 @@ function GeneratePanel({
           }}
         />
       </label>
+      <section className="space-y-2" aria-label={tr("Modeling routes")}>
+        <h3 className="font-medium">{tr("Modeling routes")}</h3>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-ui-xs">
+          <dt className="text-muted-foreground">Three.js + SDF</dt>
+          <dd>{tr(desktop ? "Available" : "Requires the desktop app")}</dd>
+          <dt className="text-muted-foreground">Blender</dt>
+          <dd className="break-words">
+            {blender?.ready
+              ? `${tr("Ready")}${blender.version ? ` · ${blender.version}` : ""}`
+              : tr("Not ready: set up the Blender runtime in the 3D workshop.")}
+          </dd>
+        </dl>
+        <p className="text-ui-xs leading-relaxed text-muted-foreground">
+          {tr(
+            "The assistant picks a route for each build. Characters and creatures are grown from a skeleton, which is kept with the version for later rigging.",
+          )}
+        </p>
+      </section>
       <section className="space-y-3" aria-label={tr("Automatic iteration")}>
         <h3 className="font-medium">{tr("Automatic iteration")}</h3>
         {activeRun ? (
@@ -1029,10 +1110,289 @@ function GeneratePanel({
   );
 }
 
+const TRIANGLE_PRESET_LABELS: Record<(typeof GEN3D_TRIANGLE_PRESETS)[number], string> = {
+  20000: "Hero asset · 20k",
+  5000: "Prop · 5k",
+  1500: "Background · 1.5k",
+  800: "Mobile · 800",
+};
+
+const MATERIAL_PRESET_LABELS: Record<(typeof GEN3D_MATERIAL_PRESETS)[number], string> = {
+  wood: "Wood",
+  metal: "Brushed metal",
+  "painted-metal": "Painted metal, worn edges",
+  gold: "Gold",
+  stone: "Stone",
+  fabric: "Fabric",
+  leather: "Leather",
+  plastic: "Plastic",
+};
+
+type MaterialChoice = (typeof GEN3D_MATERIAL_PRESETS)[number] | "tiled";
+function OptimizePanel({
+  project,
+  act,
+  version,
+  canProject,
+  disabled,
+  blenderMissing,
+  onOptimize,
+}: {
+  project: Gen3DProject;
+  act: (input: Omit<Gen3DCommand, "projectId" | "revision">) => Promise<Gen3DCommandResult | null>;
+  version: Gen3DVersion | undefined;
+  canProject: boolean;
+  disabled: boolean;
+  blenderMissing: boolean;
+  onOptimize: (process: Gen3DProcess) => void;
+}) {
+  const tr = useAhaTranslation();
+  const [target, setTarget] = useState("5000"),
+    [textureSize, setTextureSize] = useState<(typeof GEN3D_TEXTURE_SIZES)[number]>(1024),
+    [repair, setRepair] = useState(true),
+    [bake, setBake] = useState(true),
+    [lods, setLods] = useState(true),
+    [collision, setCollision] = useState<Gen3DProcess["collision"]>("convex"),
+    [texture, setTexture] = useState<"bake" | "projection">(canProject ? "projection" : "bake"),
+    [presets, setPresets] = useState<Record<string, MaterialChoice>>({}),
+    [tiles, setTiles] = useState<Record<string, TileChoice>>({});
+  const materials = version?.report.materials ?? [];
+  const source = canProject ? texture : "bake";
+  const targetValue = Number(target),
+    preset = GEN3D_TRIANGLE_PRESETS.find((n) => n === targetValue),
+    validTarget = Number.isSafeInteger(targetValue) && targetValue >= 100 && targetValue <= 200_000;
+  const tiled = Object.entries(presets).filter(([, preset]) => preset === "tiled");
+  const tile = (id: string): TileChoice =>
+    tiles[id] ?? { textureId: project.textures?.at(-1)?.id ?? null, metres: "0.3", roughness: 0.7 };
+  const tilesReady = tiled.every(([id]) => !!tile(id).textureId && validTileSize(tile(id).metres));
+  const option = (checked: boolean, set: (v: boolean) => void, label: string) => (
+    <label className="flex items-start gap-2 text-ui-xs">
+      <Checkbox checked={checked} onCheckedChange={(value) => set(value === true)} />
+      {label}
+    </label>
+  );
+  return (
+    <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4 text-ui-sm">
+      <h2 className="font-medium">{tr("Optimize and bake")}</h2>
+      {version ? (
+        <p>
+          {tr("Source version")}: <strong>{version.name}</strong> ·{" "}
+          {version.report.triangles.toLocaleString()} {tr("triangles")}
+        </p>
+      ) : (
+        <p className="text-muted-foreground">{tr("Build a version first.")}</p>
+      )}
+      <label className="block space-y-1.5">
+        <span className="text-ui-xs text-muted-foreground">{tr("Target triangles")}</span>
+        <OptionSelect
+          label={tr("Target triangles")}
+          value={preset ? String(preset) : "custom"}
+          onValueChange={(value) => value !== "custom" && setTarget(value)}
+        >
+          {GEN3D_TRIANGLE_PRESETS.map((n) => (
+            <option key={n} value={String(n)}>
+              {tr(TRIANGLE_PRESET_LABELS[n])}
+            </option>
+          ))}
+          <option value="custom">{tr("Custom")}</option>
+        </OptionSelect>
+        <Input
+          inputMode="numeric"
+          aria-label={tr("Target triangles")}
+          value={target}
+          onChange={(event) => setTarget(event.target.value)}
+        />
+      </label>
+      <label className="block space-y-1.5">
+        <span className="text-ui-xs text-muted-foreground">{tr("Texture size")}</span>
+        <OptionSelect
+          label={tr("Texture size")}
+          value={String(textureSize)}
+          disabled={!bake}
+          onValueChange={(value) =>
+            setTextureSize(Number(value) as (typeof GEN3D_TEXTURE_SIZES)[number])
+          }
+        >
+          {GEN3D_TEXTURE_SIZES.map((n) => (
+            <option key={n} value={String(n)}>
+              {n} × {n}
+            </option>
+          ))}
+        </OptionSelect>
+      </label>
+      <div className="space-y-2">
+        {option(
+          repair,
+          setRepair,
+          tr("Repair mesh (weld vertices, remove loose edges, fix normals)"),
+        )}
+        {option(
+          bake,
+          setBake,
+          tr("New UVs and baked textures (color, roughness, metalness, normal, AO)"),
+        )}
+        {option(lods, setLods, tr("Levels of detail at 50% and 25%"))}
+      </div>
+      {bake && (
+        <>
+          <label className="block space-y-1.5">
+            <span className="text-ui-xs text-muted-foreground">{tr("Color source")}</span>
+            <OptionSelect
+              label={tr("Color source")}
+              value={source}
+              onValueChange={(value) => setTexture(value as "bake" | "projection")}
+            >
+              <option value="bake">{tr("Model materials")}</option>
+              <option value="projection" disabled={!canProject}>
+                {tr("Project the three-view reference")}
+              </option>
+            </OptionSelect>
+            <span className="block text-ui-xs leading-relaxed text-muted-foreground">
+              {tr(
+                canProject
+                  ? "Paints the reference onto visible surfaces using the blueprint alignment; hidden and top or bottom surfaces keep the material colour."
+                  : "Projection needs a confirmed blueprint and a version scored against it.",
+              )}
+            </span>
+          </label>
+          {materials.length > 0 && (
+            <section className="space-y-2" aria-label={tr("Material presets")}>
+              <h3 className="text-ui-xs text-muted-foreground">{tr("Material presets")}</h3>
+              {materials.slice(0, 24).map((material) => (
+                <div key={material.id} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      aria-hidden
+                      className="size-3 shrink-0 rounded-sm border border-border"
+                      style={{ backgroundColor: material.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-ui-xs" title={material.name}>
+                      {material.name}
+                    </span>
+                    <div className="w-36 shrink-0">
+                      <OptionSelect
+                        label={`${tr("Material presets")}: ${material.name}`}
+                        value={presets[material.id] ?? "keep"}
+                        onValueChange={(value) =>
+                          setPresets((current) => {
+                            const next = { ...current };
+                            if (value === "keep") delete next[material.id];
+                            else next[material.id] = value as MaterialChoice;
+                            return next;
+                          })
+                        }
+                      >
+                        <option value="keep">{tr("Keep as is")}</option>
+                        {GEN3D_MATERIAL_PRESETS.map((key) => (
+                          <option key={key} value={key}>
+                            {tr(MATERIAL_PRESET_LABELS[key])}
+                          </option>
+                        ))}
+                        <option value="tiled">{tr("Tiled texture")}</option>
+                      </OptionSelect>
+                    </div>
+                  </div>
+                  {presets[material.id] === "tiled" && (
+                    <TiledTextureField
+                      project={project}
+                      label={material.name}
+                      value={tile(material.id)}
+                      disabled={disabled}
+                      act={act}
+                      onChange={(next) =>
+                        setTiles((current) => ({ ...current, [material.id]: next }))
+                      }
+                    />
+                  )}
+                </div>
+              ))}
+            </section>
+          )}
+        </>
+      )}
+      <label className="block space-y-1.5">
+        <span className="text-ui-xs text-muted-foreground">{tr("Collision")}</span>
+        <OptionSelect
+          label={tr("Collision")}
+          value={collision}
+          onValueChange={(value) => setCollision(value as Gen3DProcess["collision"])}
+        >
+          <option value="none">{tr("None")}</option>
+          <option value="box">{tr("Bounding box")}</option>
+          <option value="convex">{tr("Convex hull")}</option>
+        </OptionSelect>
+      </label>
+      <Button
+        className="w-full"
+        disabled={disabled || !version || !validTarget || !tilesReady}
+        onClick={() =>
+          onOptimize({
+            targetTriangles: targetValue,
+            textureSize,
+            repair,
+            bake,
+            lods: lods ? [0.5, 0.25] : [],
+            collision,
+            ...(bake ? { texture: source } : {}),
+            ...(bake && Object.keys(presets).length
+              ? {
+                  materials: Object.entries(presets).map(([materialId, preset]) =>
+                    preset === "tiled"
+                      ? {
+                          materialId,
+                          preset,
+                          tile: {
+                            textureId: tile(materialId).textureId!,
+                            metres: Number(tile(materialId).metres),
+                            roughness: tile(materialId).roughness,
+                          },
+                        }
+                      : { materialId, preset },
+                  ),
+                }
+              : {}),
+          })
+        }
+      >
+        {tr("Create optimized version")}
+      </Button>
+      {!validTarget && (
+        <p className="text-ui-xs text-destructive">{tr("Use 100 to 200,000 triangles.")}</p>
+      )}
+      {blenderMissing && (
+        <p className="text-ui-xs text-destructive">
+          {tr("Optimization needs Blender. Set it up in the 3D workshop.")}
+        </p>
+      )}
+      <p className="rounded-md bg-muted/40 p-3 text-ui-xs leading-relaxed text-muted-foreground">
+        {tr(
+          "Runs Aha's fixed script in background Blender; no AI code runs and no model turns are used. The result is a new candidate version, scored against the blueprint like any other.",
+        )}
+      </p>
+    </div>
+  );
+}
+
+type ExportPreset = keyof typeof GEN3D_EXPORT_PRESETS;
+const EXPORT_PRESET_LABELS: Record<ExportPreset, string> = {
+  generic: "Generic",
+  godot: "Godot",
+  unity: "Unity",
+  unreal: "Unreal",
+};
+const EXPORT_FORMAT_LABELS: Record<Gen3DExportFormat, string> = {
+  glb: "GLB",
+  fbx: "FBX",
+  obj: "OBJ + MTL",
+  usdz: "USDZ",
+  stl: "STL",
+};
+
 function ExportPanel({
   project,
   version,
   disabled,
+  headless,
   path,
   onExport,
   onAdopt,
@@ -1040,12 +1400,17 @@ function ExportPanel({
   project: Gen3DProject;
   version: Gen3DVersion | undefined;
   disabled: boolean;
+  headless: boolean;
   path: string | null;
-  onExport: (versionId: string) => void;
+  onExport: (versionId: string, preset: ExportPreset, format: Gen3DExportFormat) => void;
   onAdopt: () => void;
 }) {
   const tr = useAhaTranslation(),
-    [acceptBudget, setAcceptBudget] = useState(false);
+    [acceptBudget, setAcceptBudget] = useState(false),
+    [preset, setPreset] = useState<ExportPreset>("generic"),
+    [format, setFormat] = useState<Gen3DExportFormat>("glb");
+  // Everything except plain GLB is converted by Aha's fixed Blender script.
+  const needsBlender = format !== "glb" || preset === "godot";
   const adopted = project.versions.find((v) => v.id === project.adoptedVersionId),
     overBudget = !!adopted && adopted.report.triangles > project.triangleBudget;
   return (
@@ -1062,6 +1427,59 @@ function ExportPanel({
             </p>
           )}
           <VersionReport version={adopted} />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block space-y-1.5">
+              <span className="text-ui-xs text-muted-foreground">{tr("Engine preset")}</span>
+              <OptionSelect
+                label={tr("Engine preset")}
+                value={preset}
+                onValueChange={(value) => {
+                  const next = value as ExportPreset;
+                  setPreset(next);
+                  setFormat(GEN3D_EXPORT_PRESETS[next]);
+                }}
+              >
+                {(Object.keys(EXPORT_PRESET_LABELS) as ExportPreset[]).map((key) => (
+                  <option key={key} value={key}>
+                    {tr(EXPORT_PRESET_LABELS[key])}
+                  </option>
+                ))}
+              </OptionSelect>
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-ui-xs text-muted-foreground">{tr("File format")}</span>
+              <OptionSelect
+                label={tr("File format")}
+                value={format}
+                disabled={preset !== "generic"}
+                onValueChange={(value) => setFormat(value as Gen3DExportFormat)}
+              >
+                {(Object.keys(EXPORT_FORMAT_LABELS) as Gen3DExportFormat[]).map((key) => (
+                  <option key={key} value={key}>
+                    {EXPORT_FORMAT_LABELS[key]}
+                  </option>
+                ))}
+              </OptionSelect>
+            </label>
+          </div>
+          <p className="text-ui-xs leading-relaxed text-muted-foreground">
+            {tr(
+              preset === "godot"
+                ? "GLB with the collision shape named for Godot's importer. Godot builds its own LODs."
+                : preset === "unity"
+                  ? "FBX with Y up and metre units; LODs are named _LOD0, _LOD1… and the hull _Collider."
+                  : preset === "unreal"
+                    ? "FBX that Unreal's importer turns into Z up and centimetres. LODs are named _LOD0, _LOD1… and the hull UCX_."
+                    : format === "stl"
+                      ? "STL for 3D printing. The export reports whether the mesh is closed."
+                      : "Model, LOD and collision files with embedded or adjacent textures.",
+            )}
+          </p>
+          {needsBlender && !headless && (
+            <p className="text-ui-xs text-destructive">
+              {tr("This format needs Blender. Set it up in the 3D workshop.")}
+            </p>
+          )}
           {overBudget && (
             <label className="flex items-start gap-2 text-ui-xs">
               <Checkbox
@@ -1072,8 +1490,8 @@ function ExportPanel({
             </label>
           )}
           <Button
-            disabled={disabled || (overBudget && !acceptBudget)}
-            onClick={() => onExport(adopted.id)}
+            disabled={disabled || (overBudget && !acceptBudget) || (needsBlender && !headless)}
+            onClick={() => onExport(adopted.id, preset, format)}
           >
             {tr("Export asset package")}
           </Button>
@@ -1100,7 +1518,7 @@ function ExportPanel({
           )}
           <p className="text-ui-xs text-muted-foreground">
             {tr(
-              "Includes model.glb, thumbnail, 3/4 render, source, asset manifest and validation report with the blueprint score. UV, LOD and collision are not provided yet.",
+              "Includes the model in the chosen format, thumbnail, 3/4 render, source, asset manifest and validation report with the blueprint score. UVs, baked textures, LODs and collision come from an optimized version.",
             )}
           </p>
         </>
@@ -1130,6 +1548,80 @@ function VersionReport({ version }: { version: Gen3DVersion }) {
   const tr = useAhaTranslation();
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-ui-xs">
+      <dt className="text-muted-foreground">{tr("Build route")}</dt>
+      <dd className="break-words">
+        {version.build.mode === "process"
+          ? `${tr(version.build.repaint ? "Repainted" : "Optimized")}${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
+          : version.build.mode === "blender"
+            ? `Blender${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
+            : "Three.js + SDF"}
+      </dd>
+      {version.process && (
+        <>
+          <dt className="text-muted-foreground">{tr("Optimization")}</dt>
+          <dd className="break-words">
+            {version.process.highTriangles.toLocaleString()} →{" "}
+            {version.process.lowTriangles.toLocaleString()}
+            {version.process.baked.length > 0 &&
+              ` · ${tr("Textures")} ${version.process.textureSize}`}
+          </dd>
+          {version.process.projectedPct !== undefined && (
+            <>
+              <dt className="text-muted-foreground">{tr("Reference projection")}</dt>
+              <dd>
+                {tr("{n}% of the surface painted").replace(
+                  "{n}",
+                  String(version.process.projectedPct),
+                )}
+              </dd>
+            </>
+          )}
+          {version.build.repaint && version.process.repaint && (
+            <>
+              <dt className="text-muted-foreground">{tr("Local repaint")}</dt>
+              <dd className="break-words">
+                {tr(REPAINT_VIEW_LABELS[version.build.repaint.view])} ·{" "}
+                {tr("{n} texels changed").replace(
+                  "{n}",
+                  version.process.repaint.changedTexels.toLocaleString(),
+                )}
+                {version.build.repaint.instruction && (
+                  <span className="block text-muted-foreground">
+                    {version.build.repaint.instruction}
+                  </span>
+                )}
+              </dd>
+            </>
+          )}
+          {version.process.materials && version.process.materials.length > 0 && (
+            <>
+              <dt className="text-muted-foreground">{tr("Material presets")}</dt>
+              <dd>{version.process.materials.length}</dd>
+            </>
+          )}
+          {version.process.lods.length > 0 && (
+            <>
+              <dt className="text-muted-foreground">LOD</dt>
+              <dd>{version.process.lods.map((l) => l.triangles.toLocaleString()).join(" / ")}</dd>
+            </>
+          )}
+          {version.process.collision && (
+            <>
+              <dt className="text-muted-foreground">{tr("Collision")}</dt>
+              <dd>
+                {tr(version.build.process?.collision === "box" ? "Bounding box" : "Convex hull")} ·{" "}
+                {version.process.collision.triangles}
+              </dd>
+            </>
+          )}
+        </>
+      )}
+      {version.build.skeleton && (
+        <>
+          <dt className="text-muted-foreground">{tr("Skeleton")}</dt>
+          <dd>{tr("{n} joints").replace("{n}", String(version.build.skeleton.length))}</dd>
+        </>
+      )}
       <dt className="text-muted-foreground">{tr("Triangles")}</dt>
       <dd>{version.report.triangles.toLocaleString()}</dd>
       <dt className="text-muted-foreground">{tr("Size")}</dt>

@@ -53,7 +53,8 @@ export class Model3DHost {
   private compilers = new Map<string, () => void>();
   private cancelled = new Set<string>();
   private phases = new Map<string, { phase: string; started: number }>();
-  private blender: BlenderRuntime;
+  /** Shared with 3D generation so both workbenches hold the same Blender lock. */
+  readonly blender: BlenderRuntime;
   constructor(
     readonly root: string,
     private runtimeRoot: string,
