@@ -27,7 +27,7 @@ const SDF = {
   },
 };
 
-globalThis.onmessage = (event: MessageEvent<{ source: string }>) => {
+globalThis.onmessage = (event: MessageEvent<{ source: string; skeleton: unknown[] | null }>) => {
   try {
     const build = new Function(
       '"use strict";\n' +
@@ -42,7 +42,11 @@ globalThis.onmessage = (event: MessageEvent<{ source: string }>) => {
       | null;
     if (!build)
       throw new Error("Define buildModel({ THREE, SDF, params }) and return a THREE.Group.");
-    const root = build({ THREE, SDF, params: {} });
+    const root = build({
+      THREE,
+      SDF,
+      params: event.data.skeleton ? { skeleton: event.data.skeleton } : {},
+    });
     if (!(root instanceof THREE.Group)) throw new Error("buildModel must return a THREE.Group.");
     root.traverse((object) => {
       if (object instanceof THREE.Mesh)

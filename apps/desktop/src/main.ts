@@ -746,6 +746,8 @@ async function ensureGen3DHost(): Promise<void> {
       ).href,
     Path.join(__dirname, "gen3dPreload.js"),
     (message) => writeDesktopLogHeader(`[gen3d] ${message}`),
+    // The workshop owns the Blender runtime; sharing it keeps one Blender lock for both.
+    () => model3dHost?.blender ?? null,
   );
   await host.start();
   gen3dHost = host;

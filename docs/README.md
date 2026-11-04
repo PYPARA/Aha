@@ -14,7 +14,7 @@
 | [3D 工坊实施规格](design/3d-workshop/PRODUCT_SPEC.md) | 已批准范围、实际落地与验收边界                   |
 | [3D 生成](guides/GEN3D.md)                            | 三视图蓝图、AI 迭代建模、比对、导出与恢复        |
 | [3D 生成维护](development/GEN3D.md)                   | 数据与接口、执行边界和回归入口                   |
-| [3D 生成方案](design/3d-generation/PRODUCT_SPEC.md)   | 里程碑与后续范围（M1a 已实现）                   |
+| [3D 生成方案](design/3d-generation/PRODUCT_SPEC.md)   | 里程碑与后续范围（M3a 已实现）                   |
 
 ## 放置与维护
 

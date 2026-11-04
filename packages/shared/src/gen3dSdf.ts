@@ -108,6 +108,94 @@ export const cappedCone = (a: Vec3, b: Vec3, ra: number, rb: number) => {
 };
 export const cylinder = (a: Vec3, b: Vec3, r: number) => cappedCone(a, b, r, r);
 
+/** Cone with spherical ends of radius ra at a and rb at b, tangent to its side (exact distance). */
+export const roundCone = (a: Vec3, b: Vec3, ra: number, rb: number) => {
+  finite([...a, ...b], "endpoints");
+  positive(ra, "radius");
+  positive(rb, "radius");
+  const bax = b[0] - a[0],
+    bay = b[1] - a[1],
+    baz = b[2] - a[2];
+  const l2 = bax * bax + bay * bay + baz * baz,
+    rr = ra - rb;
+  // One end sphere swallows the other: the shape is just the larger sphere.
+  if (rr * rr >= l2) return ra >= rb ? sphere(a, ra) : sphere(b, rb);
+  const a2 = l2 - rr * rr,
+    il2 = 1 / l2;
+  return leaf(
+    (x, y, z) => {
+      const px = x - a[0],
+        py = y - a[1],
+        pz = z - a[2];
+      const t = px * bax + py * bay + pz * baz,
+        u = t - l2;
+      const qx = px * l2 - bax * t,
+        qy = py * l2 - bay * t,
+        qz = pz * l2 - baz * t;
+      const x2 = qx * qx + qy * qy + qz * qz,
+        y2 = t * t * l2,
+        z2 = u * u * l2,
+        k = Math.sign(rr) * rr * rr * x2;
+      if (Math.sign(u) * a2 * z2 > k) return sqrt(x2 + z2) * il2 - rb;
+      if (Math.sign(t) * a2 * y2 < k) return sqrt(x2 + y2) * il2 - ra;
+      return (sqrt(x2 * a2 * il2) + t * rr) * il2 - ra;
+    },
+    [
+      min(a[0] - ra, b[0] - rb),
+      min(a[1] - ra, b[1] - rb),
+      min(a[2] - ra, b[2] - rb),
+      max(a[0] + ra, b[0] + rb),
+      max(a[1] + ra, b[1] + rb),
+      max(a[2] + ra, b[2] + rb),
+    ],
+  );
+};
+
+export interface SkeletonNode {
+  readonly id: string;
+  readonly parent: string | null;
+  readonly position: Vec3;
+  readonly radius: number;
+}
+export const SKELETON_MAX_NODES = 256;
+/** Rejects graphs that cannot be grown or rigged: duplicate ids, missing parents, cycles. */
+export function validateSkeleton(nodes: readonly SkeletonNode[]) {
+  if (!nodes.length) throw new Error("Skeleton needs at least one node.");
+  if (nodes.length > SKELETON_MAX_NODES)
+    throw new Error(`Skeleton has more than ${SKELETON_MAX_NODES} nodes.`);
+  const byId = new Map<string, SkeletonNode>();
+  for (const node of nodes) {
+    if (byId.has(node.id)) throw new Error(`Skeleton node "${node.id}" is duplicated.`);
+    finite(node.position, "skeleton position");
+    positive(node.radius, "skeleton radius");
+    byId.set(node.id, node);
+  }
+  for (const node of nodes) {
+    if (node.parent === null) continue;
+    if (!byId.has(node.parent))
+      throw new Error(`Skeleton node "${node.id}" has a missing parent "${node.parent}".`);
+    const seen = new Set<string>([node.id]);
+    for (let p: string | null = node.parent; p !== null; p = byId.get(p)!.parent) {
+      if (seen.has(p)) throw new Error(`Skeleton node "${node.id}" is part of a cycle.`);
+      seen.add(p);
+    }
+  }
+}
+/** Grows a body along a skeleton graph: a round cone per bone, smoothly merged. */
+export function skeleton(nodes: readonly SkeletonNode[], options: { blend?: number } = {}) {
+  validateSkeleton(nodes);
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const parts: SdfShape[] = [];
+  const hasChild = new Set(nodes.map((n) => n.parent).filter((p): p is string => p !== null));
+  for (const node of nodes) {
+    const parent = node.parent === null ? null : byId.get(node.parent)!;
+    if (parent) parts.push(roundCone(parent.position, node.position, parent.radius, node.radius));
+    else if (!hasChild.has(node.id)) parts.push(sphere(node.position, node.radius));
+  }
+  const blend = options.blend ?? 0.3 * min(...nodes.map((n) => n.radius));
+  return smoothUnion(blend, ...parts);
+}
+
 /** Axis-aligned box with rounded edges; `half` is the half size, `r` the edge radius. */
 export const roundBox = (c: Vec3, half: Vec3, r = 0) => {
   finite([...c, ...half, r], "box");
@@ -436,9 +524,11 @@ export const SDF_LIBRARY = {
   capsule,
   cylinder,
   cappedCone,
+  roundCone,
   roundBox,
   ellipsoid,
   torus,
+  skeleton,
   smoothUnion,
   union,
   subtract,

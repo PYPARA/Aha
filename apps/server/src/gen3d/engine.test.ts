@@ -83,8 +83,16 @@ async function sheet() {
     .toBuffer();
 }
 /** The mock host copies the blueprint as the model silhouette unless told to offset it. */
-function makeHost(options: { offset?: number } = {}): typeof gen3dHostCall {
+function makeHost(options: { offset?: number; blenderReady?: boolean } = {}): typeof gen3dHostCall {
   const host = vi.fn(async (method: string, input: Record<string, unknown>) => {
+    if (method === "environment")
+      return {
+        desktop: true,
+        error: null,
+        blender: options.blenderReady
+          ? { ready: true, headless: true, version: "Blender 5.0.0", error: null }
+          : { ready: false, headless: false, version: null, error: "Blender was not found." },
+      };
     if (method !== "build") return {};
     const dir = path.join(root, String(input.projectId), "jobs", String(input.jobId));
     await fs.writeFile(path.join(dir, "model.glb"), triangleGlb());
@@ -106,7 +114,31 @@ function makeHost(options: { offset?: number } = {}): typeof gen3dHostCall {
         });
       await fs.writeFile(path.join(dir, `sil-${view}.png`), await image.png().toBuffer());
     }
-    return { report, topology: { boundaryEdges: 0, nonManifoldEdges: 0 } };
+    const frozen = JSON.parse(await fs.readFile(path.join(dir, "input.json"), "utf8"));
+    const processed = frozen.build.mode === "process";
+    if (processed)
+      for (const name of ["lod1.glb", "collision.glb"])
+        await fs.writeFile(path.join(dir, name), triangleGlb());
+    return {
+      report,
+      topology: { boundaryEdges: 0, nonManifoldEdges: 0 },
+      ...(frozen.build.mode !== undefined && frozen.build.mode !== "threejs"
+        ? { blender: "Blender 5.0.0" }
+        : {}),
+      ...(processed
+        ? {
+            process: {
+              highTriangles: 80000,
+              lowTriangles: 5000,
+              lods: [{ file: "lod1.glb", triangles: 2500 }],
+              collision: { file: "collision.glb", triangles: 250 },
+              baked: ["baseColor", "normal"],
+              textureSize: 1024,
+              seconds: 5,
+            },
+          }
+        : {}),
+    };
   });
   return host as unknown as typeof gen3dHostCall;
 }
@@ -184,6 +216,204 @@ describe("Gen3DEngine", () => {
       (await engine.read(p.id, "versions", version.id, "diff-side.png")).length,
     ).toBeGreaterThan(100);
     await expect(engine.read(p.id, "versions", version.id, "../project.json")).rejects.toThrow();
+  });
+
+  it("builds on the Blender route and keeps the skeleton with the version", async () => {
+    const host = makeHost({ blenderReady: true });
+    const engine = new Gen3DEngine(root, host);
+    let p = await project(engine);
+    const skeleton = [
+      { id: "hips", parent: null, position: [0, 0.3, 0] as const, radius: 0.1 },
+      { id: "head", parent: "hips", position: [0, 0.55, 0] as const, radius: 0.08 },
+    ];
+    await engine.command({
+      operation: "submit",
+      projectId: p.id,
+      revision: p.revision,
+      build: { ...build("aha_skin()"), mode: "blender", skeleton },
+      requestId: "b1",
+    });
+    p = await settled(engine, p.id);
+    const version = p.versions[0]!;
+    expect(version.runtime).toMatchObject({ blender: "Blender 5.0.0" });
+    expect(version.files.map((f) => f.name)).toContain("skeleton.json");
+    const saved = JSON.parse(
+      (await engine.read(p.id, "versions", version.id, "skeleton.json")).toString(),
+    );
+    expect(saved).toMatchObject({ units: "meters", upAxis: "Y", nodes: skeleton });
+    // Blender waits for the shared lock and starts a GUI instance, so it gets a longer request.
+    const call = vi.mocked(host).mock.calls.find(([method]) => method === "build")!;
+    expect(call[3]).toBeGreaterThan(180_000);
+  });
+
+  it("rejects Blender builds and broken skeletons before spending a round", async () => {
+    const engine = new Gen3DEngine(root, makeHost());
+    let p = await project(engine);
+    p = (
+      await engine.command({
+        operation: "start-run",
+        projectId: p.id,
+        revision: p.revision,
+        maxRounds: 2,
+      })
+    ).project!;
+    await expect(
+      engine.command({
+        operation: "submit",
+        projectId: p.id,
+        revision: p.revision,
+        build: { ...build(), mode: "blender" },
+        requestId: "b1",
+      }),
+    ).rejects.toThrow(/Blender is not ready \(Blender was not found\.\)/);
+    await expect(
+      engine.command({
+        operation: "submit",
+        projectId: p.id,
+        revision: p.revision,
+        build: {
+          ...build(),
+          skeleton: [{ id: "a", parent: "missing", position: [0, 0, 0], radius: 0.1 }],
+        },
+        requestId: "b2",
+      }),
+    ).rejects.toThrow(/missing parent/);
+    p = await engine.get(p.id);
+    expect(p.runs[0]).toMatchObject({ usedRounds: 0, status: "active" });
+    expect(p.jobs).toHaveLength(0);
+  });
+
+  it("optimizes a version into a scored candidate with validated LOD and collision files", async () => {
+    const host = makeHost({ blenderReady: true });
+    const engine = new Gen3DEngine(root, host);
+    let p = await project(engine);
+    await engine.command({
+      operation: "submit",
+      projectId: p.id,
+      revision: p.revision,
+      build: build(),
+      requestId: "m",
+    });
+    p = await settled(engine, p.id);
+    const source = p.versions[0]!;
+    const process = {
+      targetTriangles: 5000,
+      textureSize: 1024 as const,
+      repair: true,
+      bake: true,
+      lods: [0.5],
+      collision: "convex" as const,
+    };
+    await engine.command({
+      operation: "optimize",
+      projectId: p.id,
+      revision: p.revision,
+      versionId: source.id,
+      process,
+    });
+    p = await settled(engine, p.id);
+    const optimized = p.versions[1]!;
+    expect(optimized.build).toMatchObject({ mode: "process", parentVersionId: source.id, process });
+    expect(optimized.process).toMatchObject({ lowTriangles: 5000, collision: { triangles: 250 } });
+    expect(optimized.runtime.blender).toBe("Blender 5.0.0");
+    expect(optimized.score).not.toBeNull();
+    expect(optimized.files.map((f) => f.name)).toEqual(
+      expect.arrayContaining(["lod1.glb", "collision.glb"]),
+    );
+    const call = vi
+      .mocked(host)
+      .mock.calls.filter(([method]) => method === "build")
+      .at(-1)!;
+    expect(call[3]).toBeGreaterThan(600_000);
+    // The agent cannot submit optimization builds itself.
+    await expect(
+      engine.command({
+        operation: "submit",
+        projectId: p.id,
+        revision: p.revision,
+        build: { ...build(), mode: "process", process },
+        requestId: "x",
+      }),
+    ).rejects.toThrow(/workbench operation/);
+  });
+
+  it("guards reference projection: baked textures, a score and the same blueprint", async () => {
+    const engine = new Gen3DEngine(root, makeHost({ blenderReady: true }));
+    let p = await project(engine);
+    await engine.command({
+      operation: "submit",
+      projectId: p.id,
+      revision: p.revision,
+      build: build(),
+      requestId: "m",
+    });
+    p = await settled(engine, p.id);
+    const process = {
+      targetTriangles: 5000,
+      textureSize: 1024 as const,
+      repair: true,
+      bake: false,
+      lods: [],
+      collision: "none" as const,
+      texture: "projection" as const,
+    };
+    const optimize = (patch: Partial<typeof process>) =>
+      engine.command({
+        operation: "optimize",
+        projectId: p.id,
+        revision: p.revision,
+        versionId: p.versions[0]!.id,
+        process: { ...process, ...patch },
+      });
+    await expect(optimize({})).rejects.toThrow(/need baked textures/);
+    // Re-extracting the blueprint invalidates the registration the version was scored with.
+    p = (
+      await engine.command({
+        operation: "extract-blueprint",
+        projectId: p.id,
+        revision: p.revision,
+        referenceId: p.references[0]!.id,
+        targetHeight: 0.6,
+      })
+    ).project!;
+    p = (
+      await engine.command({
+        operation: "confirm-blueprint",
+        projectId: p.id,
+        revision: p.revision,
+      })
+    ).project!;
+    await expect(optimize({ bake: true })).rejects.toThrow(/blueprint changed/);
+    expect(p.jobs).toHaveLength(1);
+  });
+
+  it("refuses to optimize without Blender", async () => {
+    const engine = new Gen3DEngine(root, makeHost());
+    let p = await project(engine);
+    await engine.command({
+      operation: "submit",
+      projectId: p.id,
+      revision: p.revision,
+      build: build(),
+      requestId: "m",
+    });
+    p = await settled(engine, p.id);
+    await expect(
+      engine.command({
+        operation: "optimize",
+        projectId: p.id,
+        revision: p.revision,
+        versionId: p.versions[0]!.id,
+        process: {
+          targetTriangles: 800,
+          textureSize: 512,
+          repair: false,
+          bake: false,
+          lods: [],
+          collision: "none",
+        },
+      }),
+    ).rejects.toThrow(/needs Blender/);
   });
 
   it("limits builds to one per turn without an authorization", async () => {

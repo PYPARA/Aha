@@ -3,6 +3,7 @@ import ScriptWorker from "./gen3dWorker?worker&inline";
 import {
   disposeModel,
   exportModel,
+  loadModel,
   normalizeModel,
   validateSceneJSON,
 } from "./components/model3d/model3dScene";
@@ -18,6 +19,9 @@ import {
 interface Task {
   id: string;
   source: string;
+  /** GLB from the Blender route; inspected, scored and rendered instead of running source. */
+  input: Uint8Array | null;
+  skeleton: unknown[] | null;
   /** Blueprint scale; null when the project has no blueprint, so no silhouettes are made. */
   pxPerMetre: number | null;
   timeoutMs: number;
@@ -60,7 +64,7 @@ function buildScript(task: Task): Promise<THREE.Group> {
         reject(error);
       }
     };
-    worker.postMessage({ source: task.source });
+    worker.postMessage({ source: task.source, skeleton: task.skeleton });
   });
 }
 
@@ -171,7 +175,10 @@ function renders(root: THREE.Group) {
 bridge.onTask(async (task) => {
   let root: THREE.Group | undefined;
   try {
-    root = await buildScript(task);
+    if (task.input) {
+      root = await loadModel(task.input);
+      normalizeModel(root);
+    } else root = await buildScript(task);
     const { positions, indices, topology } = worldTriangles(root);
     const silhouettes: Partial<Record<BlueprintView, string>> = {};
     if (task.pxPerMetre)
