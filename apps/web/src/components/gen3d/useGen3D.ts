@@ -8,7 +8,7 @@ export const gen3dApi = () => ensureNativeApi().gen3d;
 export const gen3dKey = ["gen3d"] as const;
 export const gen3dAssetUrl = (
   projectId: string,
-  kind: "versions" | "blueprint" | "references",
+  kind: "versions" | "blueprint" | "references" | "textures",
   id: string,
   file?: string,
   /** Blueprints are rewritten in place; pass their creation time to refresh cached images. */

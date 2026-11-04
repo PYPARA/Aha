@@ -13,14 +13,18 @@ import {
   Gen3DProject,
   GEN3D_EXPORT_PRESETS,
   GEN3D_LIMITS,
+  GEN3D_REPAINT_SIZE,
+  GEN3D_REPAINT_VIEWS,
   GEN3D_VIEWS,
   Model3DValidationReport,
   type Gen3DExportFormat,
+  type Gen3DVersion,
 } from "@synara/contracts";
 import { atomicModelFile, modelErrorText, modelPath } from "@synara/shared/model3dFiles";
 import type { BlenderRuntime } from "../model3d/blender";
 import { GEN3D_BLENDER_PRELUDE, mapBlenderError } from "./blenderPrelude";
-import { GEN3D_CONVERT_SCRIPT, GEN3D_PROCESS_SCRIPT } from "./blenderScripts";
+import { GEN3D_CONVERT_SCRIPT, GEN3D_PROCESS_SCRIPT, GEN3D_TEXTURE_SCRIPT } from "./blenderScripts";
+import { replaceBaseColor } from "./glbTexture";
 
 const id = (value: unknown) => {
   if (typeof value !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(value))
@@ -40,6 +44,14 @@ const PROCESS_FILES = ["lod1.glb", "lod2.glb", "lod3.glb", "collision.glb"] as c
 const EXPORT_PRESETS = ["generic", "godot", "unity", "unreal"] as const;
 const EXPORT_FORMATS = ["glb", "fbx", "obj", "usdz", "stl"] as const;
 const BLENDER_BUSY = /^Another Blender modeling task is running/;
+const FIXED_SCRIPTS = {
+  process: { source: GEN3D_PROCESS_SCRIPT, label: "optimization" },
+  convert: { source: GEN3D_CONVERT_SCRIPT, label: "export" },
+  texture: { source: GEN3D_TEXTURE_SCRIPT, label: "texture" },
+} as const;
+/** Repaint works on the baked base colour texture an optimized version carries. */
+const baked = (version: Gen3DVersion | undefined) =>
+  version?.process?.baked.includes("baseColor") === true;
 const DISPOSE_DEADLINE_MS = 5_000;
 const RENDERS = {
   thumbnail: "thumbnail.png",
@@ -157,6 +169,11 @@ export class Gen3DHost {
       if (!preset || !format) throw new Error("Unsupported export preset or format.");
       return this.export(project, id(input.versionId), preset, format);
     }
+    if (method === "view") {
+      const view = GEN3D_REPAINT_VIEWS.find((v) => v === input.view);
+      if (!view) throw new Error("Unsupported repaint view.");
+      return this.renderView(project, id(input.versionId), view);
+    }
     if (method !== "build") throw new Error("Unsupported 3D generation host operation.");
     const pxPerMetre = input.pxPerMetre === null ? null : Number(input.pxPerMetre);
     if (pxPerMetre !== null && !(Number.isFinite(pxPerMetre) && pxPerMetre > 0))
@@ -243,7 +260,7 @@ export class Gen3DHost {
    * reach this process; it never executes AI source.
    */
   private async runFixedScript(
-    kind: "process" | "convert",
+    kind: keyof typeof FIXED_SCRIPTS,
     directory: string,
     config: Record<string, unknown>,
     taskId: string,
@@ -254,10 +271,7 @@ export class Gen3DHost {
       if (this.cancelled.has(taskId)) throw new Error("3D task cancelled.");
       const script = path.join(directory, `aha-${kind}.py`),
         configFile = path.join(directory, `aha-${kind}.json`);
-      await atomicModelFile(
-        script,
-        kind === "process" ? GEN3D_PROCESS_SCRIPT : GEN3D_CONVERT_SCRIPT,
-      );
+      await atomicModelFile(script, FIXED_SCRIPTS[kind].source);
       await atomicModelFile(configFile, JSON.stringify(config));
       await fs.mkdir(path.join(directory, "tmp"), { recursive: true });
       const log = await fs.open(path.join(directory, `blender-${kind}.log`), "w");
@@ -313,7 +327,7 @@ export class Gen3DHost {
             ?.slice(-2)
             .join("\n");
           throw new Error(
-            `Blender ${kind === "process" ? "optimization" : "export"} failed${detail ? ": " + detail : "."} See ${path.basename(directory)}/blender-${kind}.log.`,
+            `Blender ${FIXED_SCRIPTS[kind].label} failed${detail ? ": " + detail : "."} See ${path.basename(directory)}/blender-${kind}.log.`,
           );
         }
         return JSON.parse(marker) as unknown;
@@ -373,10 +387,31 @@ export class Gen3DHost {
           ),
         };
       }
+      // Tiled materials reference project textures by id; the script gets their files.
+      const materials = await Promise.all(
+        (build.process.materials ?? []).map(async (material) => {
+          if (!material.tile) return material;
+          if (!project.textures?.some((t) => t.id === material.tile!.textureId))
+            throw new Error("Tiled texture not found.");
+          const image = await modelPath(
+            this.root,
+            project.id,
+            "textures",
+            material.tile.textureId + ".png",
+          );
+          await fs.access(image);
+          return { ...material, tile: { ...material.tile, image } };
+        }),
+      );
       const raw = await this.runFixedScript(
         "process",
         directory,
-        { input, output: directory, process: build.process, ...(projection ? { projection } : {}) },
+        {
+          input,
+          output: directory,
+          process: { ...build.process, materials },
+          ...(projection ? { projection } : {}),
+        },
         jobId,
       );
       const report = Schema.decodeUnknownSync(Gen3DProcessReport)(raw);
@@ -390,6 +425,102 @@ export class Gen3DHost {
       if ((await fs.stat(model)).size > GEN3D_LIMITS.fileBytes)
         throw new Error("Model exceeds 200 MiB.");
       return { bytes: new Uint8Array(await fs.readFile(model)), report };
+    } finally {
+      await fs.rm(input, { force: true });
+    }
+  }
+  /** Reads a published version file after checking it against the version's record. */
+  private async versionFile(project: Gen3DProject, version: Gen3DVersion, name: string) {
+    const bytes = await fs.readFile(
+      await modelPath(this.root, project.id, "versions", version.id, name),
+    );
+    const expected =
+      name === "model.glb" ? version.hash : version.files.find((f) => f.name === name)?.hash;
+    if (!expected || sha(bytes) !== expected) throw new Error(`${name} checksum mismatch.`);
+    return bytes;
+  }
+  /** Renders one orthographic view of a baked version for mask painting (shaded base colour). */
+  private async renderView(
+    project: Gen3DProject,
+    versionId: string,
+    view: (typeof GEN3D_REPAINT_VIEWS)[number],
+  ) {
+    const version = project.versions.find((v) => v.id === versionId);
+    if (!version || !baked(version))
+      throw new Error("Repaint needs an optimized version with baked textures.");
+    const directory = await modelPath(this.root, project.id, "views", version.id);
+    await fs.mkdir(directory, { recursive: true });
+    const input = path.join(directory, "input.glb");
+    await atomicModelFile(input, await this.versionFile(project, version, "model.glb"));
+    try {
+      const file = path.join(directory, `${view}.png`);
+      await this.runFixedScript(
+        "texture",
+        directory,
+        { mode: "view", input, output: directory, file, view, resolution: GEN3D_REPAINT_SIZE },
+        `view-${version.id}`,
+      );
+      return { file: path.relative(this.root, file) };
+    } finally {
+      await fs.rm(input, { force: true });
+    }
+  }
+  /**
+   * Projects a masked drawing edit of one view onto the parent's base colour texture, then swaps
+   * that image into the parent's GLB and LODs. Geometry and the other maps stay byte-identical.
+   */
+  private async repaintBuild(
+    project: Gen3DProject,
+    jobId: string,
+    directory: string,
+    build: Gen3DBuild,
+  ) {
+    const parent = project.versions.find((v) => v.id === build.parentVersionId);
+    if (!parent || !build.repaint || !baked(parent) || !parent.process)
+      throw new Error("Repaint needs an optimized version with baked textures.");
+    const model = await this.versionFile(project, parent, "model.glb");
+    const input = await modelPath(directory, "input.glb");
+    await atomicModelFile(input, model);
+    try {
+      const raw = (await this.runFixedScript(
+        "texture",
+        directory,
+        {
+          mode: "repaint",
+          input,
+          output: directory,
+          view: build.repaint.view,
+          resolution: GEN3D_REPAINT_SIZE,
+          image: await modelPath(directory, "repaint-image.png"),
+          mask: await modelPath(directory, "repaint-mask.png"),
+          feather: build.repaint.feather,
+        },
+        jobId,
+      )) as { maskPixels?: unknown; changedTexels?: unknown; seconds?: unknown };
+      const color = await fs.readFile(await modelPath(directory, "baseColor.png"));
+      const bytes = replaceBaseColor(model, color);
+      for (const file of parent.process.lods.map((l) => l.file))
+        await atomicModelFile(
+          await modelPath(directory, file),
+          replaceBaseColor(await this.versionFile(project, parent, file), color),
+        );
+      if (parent.process.collision)
+        await atomicModelFile(
+          await modelPath(directory, parent.process.collision.file),
+          await this.versionFile(project, parent, parent.process.collision.file),
+        );
+      await fs.rm(await modelPath(directory, "baseColor.png"), { force: true });
+      const report = Schema.decodeUnknownSync(Gen3DProcessReport)({
+        ...parent.process,
+        seconds: Number(raw.seconds) || 0,
+        repaint: {
+          view: build.repaint.view,
+          maskPixels: Number(raw.maskPixels) || 0,
+          changedTexels: Number(raw.changedTexels) || 0,
+        },
+      });
+      await atomicModelFile(await modelPath(directory, "process.json"), JSON.stringify(report));
+      return { bytes, report };
     } finally {
       await fs.rm(input, { force: true });
     }
@@ -452,7 +583,9 @@ export class Gen3DHost {
         (async () => {
           let input: Uint8Array | null = null;
           if (mode === "process") {
-            processed = await this.processBuild(project, jobId, directory, build);
+            processed = build.repaint
+              ? await this.repaintBuild(project, jobId, directory, build)
+              : await this.processBuild(project, jobId, directory, build);
             this.log(`job ${jobId} optimization done +${Date.now() - started}ms`);
             input = processed.bytes;
             blender.version = (await this.blender()?.environment())?.blenderVersion ?? null;
@@ -747,10 +880,14 @@ export class Gen3DHost {
           2,
         ),
       );
-      const source =
-        version.build.mode === "process"
-          ? project.versions.find((v) => v.id === version.build.parentVersionId)
-          : version;
+      // Optimized and repainted versions carry no source; walk up to the modeled version.
+      const chain: Gen3DVersion[] = [];
+      let source: Gen3DVersion | undefined = version;
+      while (source?.build.mode === "process" && chain.length < project.versions.length) {
+        chain.push(source);
+        const parentId: string | null = source.build.parentVersionId;
+        source = project.versions.find((v) => v.id === parentId);
+      }
       const sourceName = source?.build.mode === "blender" ? "source.py" : "source.js";
       if (source?.build.source)
         await atomicModelFile(path.join(temporary, sourceName), source.build.source);
@@ -795,6 +932,16 @@ export class Gen3DHost {
                   : "gen3d-threejs-sdf",
             parentVersionId: version.build.parentVersionId,
             sourceVersionId: source?.id ?? null,
+            // Local repaints applied on the way from the modeled version, oldest first.
+            repaints: chain
+              .filter((v) => v.build.repaint)
+              .reverse()
+              .map((v) => ({
+                versionId: v.id,
+                view: v.build.repaint!.view,
+                instruction: v.build.repaint!.instruction,
+                imageJobId: v.build.repaint!.imageJobId,
+              })),
             blueprint: project.blueprint && {
               targetHeight: project.blueprint.targetHeight,
               referenceId: project.blueprint.referenceId,

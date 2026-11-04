@@ -7,6 +7,7 @@ import {
   GEN3D_TEXTURE_SIZES,
   GEN3D_TRIANGLE_PRESETS,
   type Gen3DCommand,
+  type Gen3DCommandResult,
   type Gen3DEnvironment,
   type Gen3DExportFormat,
   type Gen3DProcess,
@@ -41,6 +42,8 @@ import { collectResources } from "../resources/resourceLibrary";
 import { DrawingModelPicker } from "../drawing/DrawingPickers";
 import { drawingApi, useImageProviders } from "../drawing/useDrawing";
 import { ensureGen3DThread } from "./Gen3DChat";
+import { REPAINT_VIEW_LABELS, RepaintPanel } from "./RepaintPanel";
+import { TiledTextureField, validTileSize, type TileChoice } from "./TiledTextureField";
 import {
   gen3dApi,
   gen3dAssetUrl,
@@ -57,6 +60,12 @@ const ModelViewer = lazy(() => import("../model3d/ModelViewer"));
 const running = (status: string) => ["queued", "running", "validating"].includes(status);
 const VIEWS = ["front", "side", "back"] as const;
 const VIEW_LABELS = { front: "Front", side: "Side", back: "Back" } as const;
+const TOOL_LABELS = {
+  generate: "Generate",
+  optimize: "Optimize",
+  texture: "Texture",
+  export: "Export",
+} as const;
 const STOP_REASONS: Record<string, string> = {
   "deviation-below-threshold": "Generation finished: the largest deviation is below the threshold.",
   "no-improvement": "Generation finished: the score stopped improving.",
@@ -291,7 +300,7 @@ function ProjectWorkspace({
     command = useGen3DCommand(),
     { settings } = useAppSettings();
   const [selected, setSelected] = useState<string | null>(project.previewVersionId),
-    [tool, setTool] = useState<"generate" | "optimize" | "export">("generate"),
+    [tool, setTool] = useState<"generate" | "optimize" | "texture" | "export">("generate"),
     [panel, setPanel] = useState<"properties" | "assistant">("properties"),
     [view, setView] = useState<"model" | "compare">("model"),
     [drawer, setDrawer] = useState(false),
@@ -400,6 +409,8 @@ function ProjectWorkspace({
       )}
       {panel === "properties" && tool === "optimize" && (
         <OptimizePanel
+          project={project}
+          act={act}
           version={version}
           canProject={
             !!project.blueprint?.confirmed &&
@@ -412,6 +423,18 @@ function ProjectWorkspace({
             version && void act({ operation: "optimize", versionId: version.id, process })
           }
         />
+      )}
+      {panel === "properties" && tool === "texture" && (
+        <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4 text-ui-sm">
+          <h2 className="font-medium">{tr("Texture")}</h2>
+          <RepaintPanel
+            version={version}
+            disabled={locked || !desktop || !blender?.headless}
+            blenderMissing={desktop && !blender?.headless}
+            act={act}
+            onError={onError}
+          />
+        </div>
       )}
       {panel === "properties" && tool === "export" && (
         <ExportPanel
@@ -468,7 +491,7 @@ function ProjectWorkspace({
           role="tablist"
           aria-label={tr("3D generation tools")}
         >
-          {(["generate", "optimize", "export"] as const).map((value) => (
+          {(["generate", "optimize", "texture", "export"] as const).map((value) => (
             <Button
               key={value}
               size="sm"
@@ -480,7 +503,7 @@ function ProjectWorkspace({
                 setPanel("properties");
               }}
             >
-              {tr(value === "generate" ? "Generate" : value === "optimize" ? "Optimize" : "Export")}
+              {tr(TOOL_LABELS[value])}
             </Button>
           ))}
         </div>
@@ -1105,13 +1128,18 @@ const MATERIAL_PRESET_LABELS: Record<(typeof GEN3D_MATERIAL_PRESETS)[number], st
   plastic: "Plastic",
 };
 
+type MaterialChoice = (typeof GEN3D_MATERIAL_PRESETS)[number] | "tiled";
 function OptimizePanel({
+  project,
+  act,
   version,
   canProject,
   disabled,
   blenderMissing,
   onOptimize,
 }: {
+  project: Gen3DProject;
+  act: (input: Omit<Gen3DCommand, "projectId" | "revision">) => Promise<Gen3DCommandResult | null>;
   version: Gen3DVersion | undefined;
   canProject: boolean;
   disabled: boolean;
@@ -1126,12 +1154,17 @@ function OptimizePanel({
     [lods, setLods] = useState(true),
     [collision, setCollision] = useState<Gen3DProcess["collision"]>("convex"),
     [texture, setTexture] = useState<"bake" | "projection">(canProject ? "projection" : "bake"),
-    [presets, setPresets] = useState<Record<string, (typeof GEN3D_MATERIAL_PRESETS)[number]>>({});
+    [presets, setPresets] = useState<Record<string, MaterialChoice>>({}),
+    [tiles, setTiles] = useState<Record<string, TileChoice>>({});
   const materials = version?.report.materials ?? [];
   const source = canProject ? texture : "bake";
   const targetValue = Number(target),
     preset = GEN3D_TRIANGLE_PRESETS.find((n) => n === targetValue),
     validTarget = Number.isSafeInteger(targetValue) && targetValue >= 100 && targetValue <= 200_000;
+  const tiled = Object.entries(presets).filter(([, preset]) => preset === "tiled");
+  const tile = (id: string): TileChoice =>
+    tiles[id] ?? { textureId: project.textures?.at(-1)?.id ?? null, metres: "0.3", roughness: 0.7 };
+  const tilesReady = tiled.every(([id]) => !!tile(id).textureId && validTileSize(tile(id).metres));
   const option = (checked: boolean, set: (v: boolean) => void, label: string) => (
     <label className="flex items-start gap-2 text-ui-xs">
       <Checkbox checked={checked} onCheckedChange={(value) => set(value === true)} />
@@ -1226,36 +1259,51 @@ function OptimizePanel({
             <section className="space-y-2" aria-label={tr("Material presets")}>
               <h3 className="text-ui-xs text-muted-foreground">{tr("Material presets")}</h3>
               {materials.slice(0, 24).map((material) => (
-                <div key={material.id} className="flex items-center gap-2">
-                  <span
-                    aria-hidden
-                    className="size-3 shrink-0 rounded-sm border border-border"
-                    style={{ backgroundColor: material.color }}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-ui-xs" title={material.name}>
-                    {material.name}
-                  </span>
-                  <div className="w-36 shrink-0">
-                    <OptionSelect
-                      label={`${tr("Material presets")}: ${material.name}`}
-                      value={presets[material.id] ?? "keep"}
-                      onValueChange={(value) =>
-                        setPresets((current) => {
-                          const next = { ...current };
-                          if (value === "keep") delete next[material.id];
-                          else next[material.id] = value as (typeof GEN3D_MATERIAL_PRESETS)[number];
-                          return next;
-                        })
-                      }
-                    >
-                      <option value="keep">{tr("Keep as is")}</option>
-                      {GEN3D_MATERIAL_PRESETS.map((key) => (
-                        <option key={key} value={key}>
-                          {tr(MATERIAL_PRESET_LABELS[key])}
-                        </option>
-                      ))}
-                    </OptionSelect>
+                <div key={material.id} className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      aria-hidden
+                      className="size-3 shrink-0 rounded-sm border border-border"
+                      style={{ backgroundColor: material.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-ui-xs" title={material.name}>
+                      {material.name}
+                    </span>
+                    <div className="w-36 shrink-0">
+                      <OptionSelect
+                        label={`${tr("Material presets")}: ${material.name}`}
+                        value={presets[material.id] ?? "keep"}
+                        onValueChange={(value) =>
+                          setPresets((current) => {
+                            const next = { ...current };
+                            if (value === "keep") delete next[material.id];
+                            else next[material.id] = value as MaterialChoice;
+                            return next;
+                          })
+                        }
+                      >
+                        <option value="keep">{tr("Keep as is")}</option>
+                        {GEN3D_MATERIAL_PRESETS.map((key) => (
+                          <option key={key} value={key}>
+                            {tr(MATERIAL_PRESET_LABELS[key])}
+                          </option>
+                        ))}
+                        <option value="tiled">{tr("Tiled texture")}</option>
+                      </OptionSelect>
+                    </div>
                   </div>
+                  {presets[material.id] === "tiled" && (
+                    <TiledTextureField
+                      project={project}
+                      label={material.name}
+                      value={tile(material.id)}
+                      disabled={disabled}
+                      act={act}
+                      onChange={(next) =>
+                        setTiles((current) => ({ ...current, [material.id]: next }))
+                      }
+                    />
+                  )}
                 </div>
               ))}
             </section>
@@ -1276,7 +1324,7 @@ function OptimizePanel({
       </label>
       <Button
         className="w-full"
-        disabled={disabled || !version || !validTarget}
+        disabled={disabled || !version || !validTarget || !tilesReady}
         onClick={() =>
           onOptimize({
             targetTriangles: targetValue,
@@ -1288,10 +1336,19 @@ function OptimizePanel({
             ...(bake ? { texture: source } : {}),
             ...(bake && Object.keys(presets).length
               ? {
-                  materials: Object.entries(presets).map(([materialId, preset]) => ({
-                    materialId,
-                    preset,
-                  })),
+                  materials: Object.entries(presets).map(([materialId, preset]) =>
+                    preset === "tiled"
+                      ? {
+                          materialId,
+                          preset,
+                          tile: {
+                            textureId: tile(materialId).textureId!,
+                            metres: Number(tile(materialId).metres),
+                            roughness: tile(materialId).roughness,
+                          },
+                        }
+                      : { materialId, preset },
+                  ),
                 }
               : {}),
           })
@@ -1494,7 +1551,7 @@ function VersionReport({ version }: { version: Gen3DVersion }) {
       <dt className="text-muted-foreground">{tr("Build route")}</dt>
       <dd className="break-words">
         {version.build.mode === "process"
-          ? `${tr("Optimized")}${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
+          ? `${tr(version.build.repaint ? "Repainted" : "Optimized")}${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
           : version.build.mode === "blender"
             ? `Blender${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
             : "Three.js + SDF"}
@@ -1515,6 +1572,23 @@ function VersionReport({ version }: { version: Gen3DVersion }) {
                 {tr("{n}% of the surface painted").replace(
                   "{n}",
                   String(version.process.projectedPct),
+                )}
+              </dd>
+            </>
+          )}
+          {version.build.repaint && version.process.repaint && (
+            <>
+              <dt className="text-muted-foreground">{tr("Local repaint")}</dt>
+              <dd className="break-words">
+                {tr(REPAINT_VIEW_LABELS[version.build.repaint.view])} ·{" "}
+                {tr("{n} texels changed").replace(
+                  "{n}",
+                  version.process.repaint.changedTexels.toLocaleString(),
+                )}
+                {version.build.repaint.instruction && (
+                  <span className="block text-muted-foreground">
+                    {version.build.repaint.instruction}
+                  </span>
                 )}
               </dd>
             </>

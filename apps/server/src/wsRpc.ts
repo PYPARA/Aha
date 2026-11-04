@@ -3331,6 +3331,82 @@ const makeWsRpcHandlersLayer = () =>
                       ),
                     );
                   }
+                  if (command.operation === "import-texture-asset") {
+                    if (
+                      !command.projectId ||
+                      command.revision === undefined ||
+                      !command.imageAssetId
+                    )
+                      return yield* Effect.fail(new Error("Choose a drawing result to import."));
+                    const asset = yield* imageGenerationService.getAsset(command.imageAssetId);
+                    const bytes = yield* imageGenerationService.readAsset(asset, "original");
+                    return yield* model3dEffect(async () =>
+                      (await gen3DEngine()).addTextureBytes(
+                        command.projectId!,
+                        command.revision!,
+                        bytes,
+                        {
+                          name: "texture-" + asset.id.slice(0, 8) + ".png",
+                          prompt: command.instruction ?? "",
+                          imageJobId: command.imageJobId ?? null,
+                        },
+                      ),
+                    );
+                  }
+                  if (command.operation === "render-view") {
+                    if (!command.projectId || !command.versionId || !command.repaintView)
+                      return yield* Effect.fail(new Error("Choose a version and a view."));
+                    const view = command.repaintView;
+                    const bytes = yield* model3dEffect(async () =>
+                      (await gen3DEngine()).renderView(
+                        command.projectId!,
+                        command.versionId!,
+                        view,
+                      ),
+                    );
+                    // Saved as a drawing asset so the mask editor and the edit job can use it.
+                    const viewAsset = yield* imageGenerationService.upload(
+                      bytes,
+                      `gen3d-${command.versionId.slice(0, 8)}-${view}.png`,
+                    );
+                    return { project: null, viewAsset };
+                  }
+                  if (command.operation === "repaint") {
+                    if (
+                      !command.projectId ||
+                      command.revision === undefined ||
+                      !command.versionId ||
+                      !command.repaintView ||
+                      !command.imageJobId
+                    )
+                      return yield* Effect.fail(new Error("Choose a finished repaint edit."));
+                    const job = yield* imageGenerationService.getJob(command.imageJobId);
+                    const output =
+                      job.outputs.find((o) => o.id === command.imageAssetId) ?? job.outputs[0];
+                    if (!["succeeded", "partial"].includes(job.status) || !output)
+                      return yield* Effect.fail(new Error("The drawing edit has no result yet."));
+                    if (!job.mask || !job.inputs[0])
+                      return yield* Effect.fail(
+                        new Error("The drawing edit must use the view render and a mask."),
+                      );
+                    const view = yield* imageGenerationService.readAsset(job.inputs[0], "original");
+                    const image = yield* imageGenerationService.readAsset(output, "original");
+                    const mask = yield* imageGenerationService.readAsset(job.mask, "original");
+                    const repaintView = command.repaintView;
+                    return yield* model3dEffect(async () =>
+                      (await gen3DEngine()).repaintBytes(command.projectId!, command.revision!, {
+                        versionId: command.versionId!,
+                        view: repaintView,
+                        viewImage: view,
+                        image,
+                        mask,
+                        imageJobId: job.id,
+                        imageAssetId: output.id,
+                        instruction: command.instruction ?? "",
+                        feather: command.feather ?? 12,
+                      }),
+                    );
+                  }
                   if (command.operation === "bind-thread" && command.threadId) {
                     const threadId = command.threadId;
                     const batch = yield* Effect.promise(() =>

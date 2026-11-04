@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ImageAsset } from "./imageGeneration";
 import { Model3DValidationReport } from "./model3d";
 
 export const GEN3D_LIMITS = {
@@ -38,6 +39,18 @@ export const GEN3D_EXPORT_PRESETS = {
   unreal: "fbx",
 } as const;
 export const GEN3D_VIEWS = ["front", "side", "back"] as const;
+/** Orthographic views a baked version can be repainted from (Blender numpad naming, glTF +Z front). */
+export const GEN3D_REPAINT_VIEWS = [
+  "front",
+  "front-right",
+  "right",
+  "back",
+  "left",
+  "front-left",
+  "top",
+] as const;
+/** Square size of repaint view renders and of the edited image projected back. */
+export const GEN3D_REPAINT_SIZE = 1024;
 export const Gen3DId = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,128}$/));
 export const Gen3DView = Schema.Literals(GEN3D_VIEWS);
 export type Gen3DView = typeof Gen3DView.Type;
@@ -58,6 +71,18 @@ const Gen3DBox = Schema.Struct({
   y0: Schema.Finite,
   y1: Schema.Finite,
 });
+/** A seamless texture the project keeps for tiled materials (generated or uploaded). */
+export const Gen3DTexture = Schema.Struct({
+  id: Gen3DId,
+  name: Schema.String,
+  /** The user's description, without Aha's prompt template. */
+  prompt: Schema.String,
+  width: Schema.Finite,
+  height: Schema.Finite,
+  imageJobId: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+});
+export type Gen3DTexture = typeof Gen3DTexture.Type;
 export const Gen3DBlueprint = Schema.Struct({
   referenceId: Gen3DId,
   /** Real height of the asset, metres. */
@@ -107,8 +132,17 @@ export const Gen3DProcess = Schema.Struct({
     Schema.Array(
       Schema.Struct({
         materialId: Schema.String.check(Schema.isMaxLength(128)),
-        preset: Schema.Literals(GEN3D_MATERIAL_PRESETS),
+        /** A procedural preset, or "tiled" for one of the project's seamless textures. */
+        preset: Schema.Literals([...GEN3D_MATERIAL_PRESETS, "tiled"]),
         color: Schema.optional(Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/))),
+        tile: Schema.optional(
+          Schema.Struct({
+            textureId: Gen3DId,
+            /** Real-world size of one repeat. */
+            metres: Schema.Finite.check(Schema.isBetween({ minimum: 0.02, maximum: 20 })),
+            roughness: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+          }),
+        ),
       }),
     ).check(Schema.isMaxLength(64)),
   ),
@@ -126,8 +160,29 @@ export const Gen3DProcessReport = Schema.Struct({
   projectedPct: Schema.optional(Schema.Finite),
   /** Parent materials that received a procedural preset. */
   materials: Schema.optional(Schema.Array(Schema.String)),
+  /** Set on repainted versions: what the local repaint changed in the base colour texture. */
+  repaint: Schema.optional(
+    Schema.Struct({
+      view: Schema.Literals(GEN3D_REPAINT_VIEWS),
+      maskPixels: Schema.Finite,
+      changedTexels: Schema.Finite,
+    }),
+  ),
 });
 export type Gen3DProcessReport = typeof Gen3DProcessReport.Type;
+export const Gen3DRepaintView = Schema.Literals(GEN3D_REPAINT_VIEWS);
+export type Gen3DRepaintView = typeof Gen3DRepaintView.Type;
+export const Gen3DRepaint = Schema.Struct({
+  view: Gen3DRepaintView,
+  /** Drawing job whose first output is the edit; its input is the view render and its mask the area. */
+  imageJobId: Schema.String.check(Schema.isMaxLength(128)),
+  imageAssetId: Schema.String.check(Schema.isMaxLength(128)),
+  /** The user's instruction, without Aha's prompt template. */
+  instruction: Schema.String.check(Schema.isMaxLength(2000)),
+  /** Inward soft edge of the mask, in view pixels. */
+  feather: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 48 })),
+});
+export type Gen3DRepaint = typeof Gen3DRepaint.Type;
 export const Gen3DBuild = Schema.Struct({
   source: Schema.String.check(Schema.isMaxLength(GEN3D_LIMITS.sourceBytes)),
   prompt: Schema.String,
@@ -136,6 +191,8 @@ export const Gen3DBuild = Schema.Struct({
   /** Skeleton graph the body is grown from; kept with the version for later rigging. */
   skeleton: Schema.optional(Gen3DSkeleton),
   process: Schema.optional(Gen3DProcess),
+  /** Local repaint of a baked parent: a masked drawing edit of one view, projected back. */
+  repaint: Schema.optional(Gen3DRepaint),
 });
 export type Gen3DBuild = typeof Gen3DBuild.Type;
 export const Gen3DViewScore = Schema.Struct({
@@ -228,6 +285,8 @@ export const Gen3DProject = Schema.Struct({
   adoptedVersionId: Schema.NullOr(Gen3DId),
   previewVersionId: Schema.NullOr(Gen3DId),
   references: Schema.Array(Gen3DReference),
+  /** Added with tiled materials; older projects have none. */
+  textures: Schema.optional(Schema.Array(Gen3DTexture).check(Schema.isMaxLength(64))),
   blueprint: Schema.NullOr(Gen3DBlueprint),
   versions: Schema.Array(Gen3DVersion),
   jobs: Schema.Array(Gen3DJob),
@@ -257,12 +316,15 @@ export const Gen3DCommand = Schema.Struct({
     "bind-thread",
     "add-reference",
     "import-reference-asset",
+    "import-texture-asset",
     "extract-blueprint",
     "confirm-blueprint",
     "start-run",
     "stop-run",
     "submit",
     "optimize",
+    "render-view",
+    "repaint",
     "cancel",
     "adopt",
     "select-version",
@@ -291,6 +353,9 @@ export const Gen3DCommand = Schema.Struct({
   process: Schema.optional(Gen3DProcess),
   exportPreset: Schema.optional(Schema.Literals(["generic", "godot", "unity", "unreal"])),
   exportFormat: Schema.optional(Schema.Literals(["glb", "fbx", "obj", "usdz", "stl"])),
+  repaintView: Schema.optional(Gen3DRepaintView),
+  instruction: Schema.optional(Schema.String),
+  feather: Schema.optional(Schema.Finite),
 });
 export type Gen3DExportFormat = NonNullable<Gen3DCommand["exportFormat"]>;
 export type Gen3DCommand = typeof Gen3DCommand.Type;
@@ -298,6 +363,8 @@ export const Gen3DCommandResult = Schema.Struct({
   project: Schema.NullOr(Gen3DProject),
   environment: Schema.optional(Gen3DEnvironment),
   exportPath: Schema.optional(Schema.String),
+  /** render-view: the view render saved as a drawing asset, ready for mask painting. */
+  viewAsset: Schema.optional(ImageAsset),
 });
 export type Gen3DCommandResult = typeof Gen3DCommandResult.Type;
 export const Gen3DList = Schema.Array(

@@ -475,6 +475,10 @@
     "./gen3dSdf": {
       "types": "./src/gen3dSdf.ts",
       "import": "./src/gen3dSdf.ts"
+    },
+    "./gen3dTexture": {
+      "types": "./src/gen3dTexture.ts",
+      "import": "./src/gen3dTexture.ts"
     }
   },
   "scripts": {
