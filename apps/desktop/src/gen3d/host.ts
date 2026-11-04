@@ -28,6 +28,7 @@ import {
   GEN3D_CONVERT_SCRIPT,
   GEN3D_PROCESS_SCRIPT,
   GEN3D_RIG_SCRIPT,
+  GEN3D_STYLIZE_SCRIPT,
   GEN3D_TEXTURE_SCRIPT,
 } from "./blenderScripts";
 import { replaceBaseColor } from "./glbTexture";
@@ -55,6 +56,7 @@ const FIXED_SCRIPTS = {
   convert: { source: GEN3D_CONVERT_SCRIPT, label: "export" },
   texture: { source: GEN3D_TEXTURE_SCRIPT, label: "texture" },
   rig: { source: GEN3D_RIG_SCRIPT, label: "rigging" },
+  stylize: { source: GEN3D_STYLIZE_SCRIPT, label: "stylization" },
 } as const;
 const PREVIEW_FRAMES = 12;
 /** Repaint works on the baked base colour texture an optimized version carries. */
@@ -630,6 +632,49 @@ export class Gen3DHost {
       await fs.rm(input, { force: true });
     }
   }
+  /** Rebuilds the parent as voxels, bricks or flat low poly coloured from its surface. */
+  private async stylizeBuild(
+    project: Gen3DProject,
+    jobId: string,
+    directory: string,
+    build: Gen3DBuild,
+  ) {
+    const parent = project.versions.find((v) => v.id === build.parentVersionId);
+    if (!parent || !build.stylize) throw new Error("Choose a version to stylize.");
+    const input = await modelPath(directory, "input.glb");
+    await atomicModelFile(input, await this.versionFile(project, parent, "model.glb"));
+    try {
+      const raw = (await this.runFixedScript(
+        "stylize",
+        directory,
+        { input, output: directory, style: build.stylize.style, detail: build.stylize.detail },
+        jobId,
+      )) as Record<string, unknown>;
+      const model = await modelPath(directory, "model.glb");
+      if ((await fs.stat(model)).size > GEN3D_LIMITS.fileBytes)
+        throw new Error("Model exceeds 200 MiB.");
+      const report = Schema.decodeUnknownSync(Gen3DProcessReport)({
+        highTriangles: Number(raw.sourceTriangles) || 0,
+        lowTriangles: Number(raw.triangles) || 0,
+        lods: [],
+        collision: null,
+        baked: [],
+        textureSize: 0,
+        seconds: Number(raw.seconds) || 0,
+        stylize: {
+          style: build.stylize.style,
+          detail: build.stylize.detail,
+          colors: Number(raw.colors) || 0,
+          ...(raw.voxels !== undefined ? { voxels: Number(raw.voxels) } : {}),
+          ...(raw.studs !== undefined ? { studs: Number(raw.studs) } : {}),
+        },
+      });
+      await atomicModelFile(await modelPath(directory, "process.json"), JSON.stringify(report));
+      return { bytes: new Uint8Array(await fs.readFile(model)), report };
+    } finally {
+      await fs.rm(input, { force: true });
+    }
+  }
   private async addReference(projectId: string) {
     const selection = await dialog.showOpenDialog({
       title: "Choose a three-view reference image",
@@ -692,7 +737,9 @@ export class Gen3DHost {
               ? await this.repaintBuild(project, jobId, directory, build)
               : build.rig
                 ? await this.rigBuild(project, jobId, directory, build)
-                : await this.processBuild(project, jobId, directory, build);
+                : build.stylize
+                  ? await this.stylizeBuild(project, jobId, directory, build)
+                  : await this.processBuild(project, jobId, directory, build);
             this.log(`job ${jobId} optimization done +${Date.now() - started}ms`);
             input = processed.bytes;
             blender.version = (await this.blender()?.environment())?.blenderVersion ?? null;
@@ -1044,6 +1091,10 @@ export class Gen3DHost {
                 : "not-provided",
             textures: version.process?.baked.length
               ? { maps: version.process.baked, size: version.process.textureSize }
+              : "not-provided",
+            // Stylized faces sample a small palette texture, one flat cell per colour.
+            stylize: version.process?.stylize
+              ? { ...version.process.stylize, colorSource: "palette-texture" }
               : "not-provided",
             source:
               version.build.mode === "process"

@@ -12,6 +12,7 @@ import {
   GEN3D_LIMITS,
   GEN3D_REPAINT_SIZE,
   GEN3D_REPAINT_VIEWS,
+  GEN3D_STYLES,
   GEN3D_VIEWS,
   type Gen3DCommandResult,
   type Gen3DEnvironment,
@@ -759,13 +760,58 @@ export class Gen3DEngine {
             void this.execute(p.id, id);
             return { project: p };
           }
+          case "stylize": {
+            if (p.archived) throw new Error("Restore this project before stylizing.");
+            if (p.jobs.some((j) => active(j.status)))
+              throw new Error("A model build is already in progress.");
+            const parent = p.versions.find((v) => v.id === (c.versionId ?? p.previewVersionId));
+            if (!parent || !c.stylize) throw new Error("Choose a version and a style.");
+            const range = GEN3D_STYLES[c.stylize.style];
+            if (c.stylize.detail < range.min || c.stylize.detail > range.max)
+              throw new Error(`Use a detail of ${range.min}–${range.max} for this style.`);
+            if (!(await this.environment()).blender?.headless)
+              throw new Error("Stylizing needs Blender. Set it up in the 3D workshop.");
+            const build = {
+              source: "",
+              prompt: "Stylize",
+              parentVersionId: parent.id,
+              mode: "process" as const,
+              stylize: c.stylize,
+            };
+            const id = randomUUID();
+            p.jobs.push({
+              id,
+              requestId: c.requestId ?? randomUUID(),
+              fingerprint: digest(JSON.stringify(build)),
+              createdAt: now(),
+              status: "queued",
+              build,
+              runId: null,
+              turnId: null,
+              error: null,
+              versionId: null,
+            });
+            await atomicModelFile(
+              await modelPath(this.root, p.id, "jobs", id, "input.json"),
+              JSON.stringify({ build, blueprint: p.blueprint }),
+            );
+            await this.save(p);
+            void this.execute(p.id, id);
+            return { project: p };
+          }
           case "submit": {
             if (p.archived) throw new Error("Restore this project before building.");
             if (p.jobs.some((j) => active(j.status)))
               throw new Error("A model build is already in progress. Read its status first.");
             const build = c.build;
             if (!build?.source.trim()) throw new Error("Provide modeling source.");
-            if (build.mode === "process" || build.process || build.repaint || build.rig)
+            if (
+              build.mode === "process" ||
+              build.process ||
+              build.repaint ||
+              build.rig ||
+              build.stylize
+            )
               throw new Error(
                 "Optimization and repaint are workbench operations, not modeling builds.",
               );

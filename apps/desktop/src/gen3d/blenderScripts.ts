@@ -1449,3 +1449,337 @@ report = {'kind': kind, 'bones': len(rig.data.bones), 'clips': made, 'unweighted
           'vertices': len(body.data.vertices), 'seconds': round(time.time() - started, 2)}
 print('AHA_RIG=' + json.dumps(report))
 `;
+
+export const GEN3D_STYLIZE_SCRIPT = String.raw`# Aha 3D generation fixed stylization script (headless Blender). Never runs AI source.
+# Usage: blender -b --factory-startup --disable-autoexec --python stylize.py -- config.json
+# style "voxel": solid voxels at the detail value cells along the longest side, merged faces, colours
+#   from the source surface. "bricks": the same with brick proportions, studs on exposed tops
+#   and a fixed colour palette. "lowpoly": decimated to the detail value triangles with flat faces.
+import bpy, bmesh, json, math, os, sys, time
+import numpy as np
+from mathutils import Matrix, Vector
+from mathutils.bvhtree import BVHTree
+from mathutils.interpolate import poly_3d_calc
+
+started = time.time()
+with open(sys.argv[sys.argv.index('--') + 1], encoding='utf-8') as handle:
+    cfg = json.load(handle)
+out, style, detail = cfg['output'], cfg['style'], int(cfg['detail'])
+bpy.ops.wm.read_factory_settings(use_empty=True)
+scene = bpy.context.scene
+
+
+def select_only(objects, active=None):
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in objects:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = active or objects[-1]
+
+
+bpy.ops.import_scene.gltf(filepath=cfg['input'])
+meshes = [o for o in scene.objects if o.type == 'MESH']
+if not meshes:
+    raise RuntimeError('The model contains no meshes.')
+select_only(meshes)
+bpy.ops.object.parent_clear(type='CLEAR_KEEP_TRANSFORM')
+bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+for o in [o for o in scene.objects if o.type != 'MESH']:
+    bpy.data.objects.remove(o)
+select_only(meshes, meshes[0])
+if len(meshes) > 1:
+    bpy.ops.object.join()
+source = bpy.context.active_object
+mesh = source.data
+source_triangles = sum(len(p.vertices) - 2 for p in mesh.polygons)
+tree = BVHTree.FromObject(source, bpy.context.evaluated_depsgraph_get())
+
+
+# --- colour of the source surface at a point -------------------------------------------------
+def srgb(c):
+    return [x * 12.92 if x <= 0.0031308 else 1.055 * x ** (1 / 2.4) - 0.055 for x in c]
+
+
+samplers = []
+for material in mesh.materials:
+    entry = {'color': [0.8, 0.8, 0.8], 'image': None}
+    bsdf = next((n for n in material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None) if material and material.use_nodes else None
+    if bsdf:
+        socket = bsdf.inputs['Base Color']
+        entry['color'] = srgb(list(socket.default_value)[:3])
+        node = socket.links[0].from_node if socket.links else None
+        # glTF imports factor * texture through a Mix node; look one step behind it as well.
+        if node and node.type != 'TEX_IMAGE':
+            node = next((l.from_node for i in node.inputs for l in i.links if l.from_node.type == 'TEX_IMAGE'), node)
+        if node and node.type == 'TEX_IMAGE' and node.image and node.image.size[0]:
+            w, h = node.image.size
+            pixels = np.empty(w * h * 4, np.float32)
+            node.image.pixels.foreach_get(pixels)
+            entry['image'] = pixels.reshape(h, w, 4)
+    samplers.append(entry)
+uv_layer = mesh.uv_layers.active.data if mesh.uv_layers.active else None
+
+
+def surface_color(point):
+    """sRGB colour of the nearest source surface point."""
+    location, _normal, index, _distance = tree.find_nearest(point)
+    if index is None:
+        return (0.8, 0.8, 0.8)
+    polygon = mesh.polygons[index]
+    entry = samplers[polygon.material_index] if polygon.material_index < len(samplers) else {'color': [0.8] * 3, 'image': None}
+    image = entry['image']
+    if image is None or uv_layer is None:
+        return tuple(entry['color'])
+    corners = [mesh.vertices[v].co for v in polygon.vertices]
+    weights = poly_3d_calc(corners, location)
+    u = sum(w * uv_layer[l].uv[0] for w, l in zip(weights, polygon.loop_indices))
+    v = sum(w * uv_layer[l].uv[1] for w, l in zip(weights, polygon.loop_indices))
+    h, w = image.shape[:2]
+    x = min(w - 1, max(0, int((u % 1.0) * w)))
+    y = min(h - 1, max(0, int((v % 1.0) * h)))
+    return tuple(float(c) for c in image[y, x, :3])
+
+
+# Bricks use a fixed palette so neighbouring bricks share colours like a real kit.
+PALETTE = [
+    (0.96, 0.96, 0.96), (0.63, 0.65, 0.66), (0.35, 0.36, 0.37), (0.11, 0.11, 0.12),
+    (0.79, 0.10, 0.10), (0.55, 0.06, 0.08), (0.98, 0.78, 0.12), (0.93, 0.55, 0.13),
+    (0.85, 0.44, 0.18), (0.98, 0.90, 0.70), (0.85, 0.72, 0.50), (0.55, 0.38, 0.22),
+    (0.36, 0.22, 0.14), (0.20, 0.55, 0.20), (0.10, 0.35, 0.18), (0.65, 0.80, 0.30),
+    (0.10, 0.40, 0.75), (0.05, 0.20, 0.45), (0.45, 0.70, 0.90), (0.55, 0.30, 0.65),
+    (0.90, 0.55, 0.70), (0.30, 0.65, 0.65),
+]
+
+
+def quantize(color):
+    if style == 'bricks':
+        return min(PALETTE, key=lambda p: sum((a - b) ** 2 for a, b in zip(p, color)))
+    # Voxels keep the source colours, rounded so equal neighbours merge into larger faces.
+    return tuple(round(c * 15) / 15 for c in color)
+
+
+CELL = 8  # palette cell size in pixels; faces sample the cell centre, so filtering stays inside
+
+
+def build(name, verts, faces, colors):
+    """A mesh whose faces sample a generated palette texture: one cell per colour, every face's
+    UVs at its cell centre. Engines that ignore vertex colours (Godot's glTF import) still show
+    the colours, and OBJ keeps them through its texture."""
+    palette = sorted(set(colors))
+    if len(palette) > 4096:
+        raise RuntimeError('Too many colours for the palette.')
+    slot = {c: i for i, c in enumerate(palette)}
+    per_row = max(1, math.ceil(math.sqrt(len(palette))))
+    size = per_row * CELL
+    pixels = np.ones((size, size, 4), np.float32)
+    for c, i in slot.items():
+        row, col = divmod(i, per_row)
+        pixels[row * CELL:(row + 1) * CELL, col * CELL:(col + 1) * CELL, :3] = c
+    image = bpy.data.images.new('palette', size, size, alpha=False)
+    image.colorspace_settings.name = 'sRGB'
+    image.pixels.foreach_set(pixels.ravel())
+    image.pack()
+    data = bpy.data.meshes.new(name)
+    data.from_pydata(verts, [], faces)
+    data.update()
+    uv = data.uv_layers.new(name='UVMap')
+    for polygon, color in zip(data.polygons, colors):
+        row, col = divmod(slot[color], per_row)
+        centre = ((col + 0.5) / per_row, (row + 0.5) / per_row)
+        for loop in polygon.loop_indices:
+            uv.data[loop].uv = centre
+    for polygon in data.polygons:
+        polygon.use_smooth = False
+    obj = bpy.data.objects.new(name, data)
+    scene.collection.objects.link(obj)
+    obj['aha_palette'] = image.name
+    return obj
+
+
+def finish(obj, roughness):
+    material = bpy.data.materials.new('Stylized')
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    bsdf = next(n for n in nodes if n.type == 'BSDF_PRINCIPLED')
+    texture = nodes.new('ShaderNodeTexImage')
+    texture.image = bpy.data.images[obj['aha_palette']]
+    texture.interpolation = 'Closest'
+    material.node_tree.links.new(texture.outputs['Color'], bsdf.inputs['Base Color'])
+    bsdf.inputs['Roughness'].default_value = roughness
+    bsdf.inputs['Metallic'].default_value = 0.0
+    obj.data.materials.clear()
+    obj.data.materials.append(material)
+    del obj['aha_palette']
+
+
+stats = {}
+if style in ('voxel', 'bricks'):
+    corners = [source.matrix_world @ Vector(c) for c in source.bound_box]
+    lo, hi = np.array(Vector(map(min, *corners))), np.array(Vector(map(max, *corners)))
+    size = hi - lo
+    cell = float(size.max()) / detail
+    # Brick proportions: plates are as wide as they are deep, bricks 1.2 times taller.
+    step = np.array([cell, cell, cell * (1.2 if style == 'bricks' else 1.0)])
+    dims = np.maximum(1, np.ceil(size / step).astype(int)) + 2  # one empty cell around
+    # Grid centred on the model with one empty cell of padding on every side.
+    origin = lo - step - ((dims - 2) * step - size) / 2
+    # Shell: cells whose centre is within reach of the surface.
+    reach = float(np.linalg.norm(step)) * 0.5
+    shell = np.zeros(dims, bool)
+    for i in range(dims[0]):
+        for j in range(dims[1]):
+            for k in range(dims[2]):
+                centre = Vector(origin + (np.array([i, j, k]) + 0.5) * step)
+                if tree.find_nearest(centre, reach)[0] is not None:
+                    shell[i, j, k] = True
+    # Outside = empty cells reachable from the border; everything else is solid, so models made
+    # of intersecting parts or with tiny gaps still come out filled.
+    outside = np.zeros(dims, bool)
+    outside[0, :, :] = outside[-1, :, :] = outside[:, 0, :] = outside[:, -1, :] = True
+    outside[:, :, 0] = outside[:, :, -1] = True
+    outside &= ~shell
+    while True:
+        grown = outside.copy()
+        for axis in range(3):
+            for shift in (1, -1):
+                grown |= np.roll(outside, shift, axis) & ~shell
+        if (grown == outside).all():
+            break
+        outside = grown
+    solid = ~outside
+    exposed = np.zeros(dims, bool)
+    for axis in range(3):
+        for shift in (1, -1):
+            exposed |= solid & np.roll(outside, shift, axis)
+    color = {}
+    for idx in zip(*np.nonzero(exposed)):
+        centre = Vector(origin + (np.array(idx) + 0.5) * step)
+        color[idx] = quantize(surface_color(centre))
+    # Hidden solid cells take the colour of an exposed neighbour (only matters for studs).
+    verts, faces, colors = [], [], []
+    # Greedy meshing: per axis direction and slice, merge equal-coloured exposed faces into
+    # rectangles.
+    for axis in range(3):
+        u_axis, v_axis = [a for a in range(3) if a != axis]
+        for direction in (1, -1):
+            neighbour_outside = np.roll(outside, -direction, axis)
+            face_mask = solid & neighbour_outside
+            for layer in range(dims[axis]):
+                index = [slice(None)] * 3
+                index[axis] = layer
+                mask = face_mask[tuple(index)]
+                if not mask.any():
+                    continue
+                labels = {}
+                nu, nv = mask.shape
+                done = np.zeros_like(mask)
+                for a in range(nu):
+                    for b in range(nv):
+                        if not mask[a, b] or done[a, b]:
+                            continue
+                        cell_index = [0, 0, 0]
+                        cell_index[axis], cell_index[u_axis], cell_index[v_axis] = layer, a, b
+                        c = color.get(tuple(cell_index), (0.8, 0.8, 0.8))
+
+                        def same(x, y):
+                            ci = [0, 0, 0]
+                            ci[axis], ci[u_axis], ci[v_axis] = layer, x, y
+                            return mask[x, y] and not done[x, y] and color.get(tuple(ci), (0.8, 0.8, 0.8)) == c
+                        width = 1
+                        while b + width < nv and same(a, b + width):
+                            width += 1
+                        height = 1
+                        while a + height < nu and all(same(a + height, b + t) for t in range(width)):
+                            height += 1
+                        done[a:a + height, b:b + width] = True
+                        plane = origin[axis] + (layer + (1 if direction > 0 else 0)) * step[axis]
+                        quad = []
+                        for du, dv in ((0, 0), (height, 0), (height, width), (0, width)):
+                            p = [0.0, 0.0, 0.0]
+                            p[axis] = plane
+                            p[u_axis] = origin[u_axis] + (a + du) * step[u_axis]
+                            p[v_axis] = origin[v_axis] + (b + dv) * step[v_axis]
+                            quad.append(p)
+                        # Wind counter-clockwise when seen from outside.
+                        normal = np.cross(np.subtract(quad[1], quad[0]), np.subtract(quad[3], quad[0]))
+                        if normal[axis] * direction < 0:
+                            quad.reverse()
+                        start = len(verts)
+                        verts.extend(quad)
+                        faces.append((start, start + 1, start + 2, start + 3))
+                        colors.append(c)
+    stats['voxels'] = int(solid.sum())
+    if style == 'bricks':
+        # Studs: a short cylinder on every exposed top (+Z in Blender).
+        top = solid & np.roll(outside, -1, 2)
+        sides = 10
+        radius, rise = cell * 0.3, step[2] * 0.17
+        studs = 0
+        for i, j, k in zip(*np.nonzero(top)):
+            cx = origin[0] + (i + 0.5) * step[0]
+            cy = origin[1] + (j + 0.5) * step[1]
+            z0 = origin[2] + (k + 1) * step[2]
+            c = color.get((i, j, k), (0.8, 0.8, 0.8))
+            start = len(verts)
+            for s in range(sides):
+                angle = 2 * math.pi * s / sides
+                x, y = cx + radius * math.cos(angle), cy + radius * math.sin(angle)
+                verts.extend([(x, y, z0), (x, y, z0 + rise)])
+            for s in range(sides):
+                a0, a1 = start + 2 * s, start + 2 * ((s + 1) % sides)
+                faces.append((a0, a1, a1 + 1, a0 + 1))
+                colors.append(c)
+            faces.append(tuple(start + 2 * s + 1 for s in range(sides)))
+            colors.append(c)
+            studs += 1
+        stats['studs'] = studs
+    result = build('Model', verts, faces, colors)
+    stats['colors'] = len(set(colors))
+    roughness = 0.35 if style == 'bricks' else 0.75
+else:
+    # Low poly: weld, collapse to the target, then one colour per flat face.
+    result = source.copy()
+    result.data = source.data.copy()
+    scene.collection.objects.link(result)
+    bm = bmesh.new()
+    bm.from_mesh(result.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=max(1e-5, 1e-4 * max(result.dimensions)))
+    bm.to_mesh(result.data)
+    bm.free()
+    select_only([result])
+    modifier = result.modifiers.new('Decimate', 'DECIMATE')
+    modifier.ratio = min(1.0, detail / max(1, sum(len(p.vertices) - 2 for p in result.data.polygons)))
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+    bm = bmesh.new()
+    bm.from_mesh(result.data)
+    bmesh.ops.triangulate(bm, faces=bm.faces)
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.calc_area() <= 1e-12], context='FACES')
+    verts = [tuple(result.matrix_world @ v.co) for v in bm.verts]
+    bm.verts.index_update()
+    faces = [tuple(v.index for v in f.verts) for f in bm.faces]
+    # Average a few samples per face so one thin dark stripe cannot paint a whole facet.
+    colors = []
+    for f in bm.faces:
+        centre = f.calc_center_median()
+        points = [centre] + [centre.lerp(v.co, 0.6) for v in f.verts]
+        samples = [surface_color(result.matrix_world @ p) for p in points]
+        # 5 bits per channel keeps the palette within 4096 cells for any triangle count.
+        colors.append(tuple(round(sum(c[i] for c in samples) / len(samples) * 31) / 31 for i in range(3)))
+    bm.free()
+    bpy.data.objects.remove(result)
+    result = build('Model', verts, faces, colors)
+    stats['colors'] = len(set(colors))
+    roughness = 0.8
+bpy.data.objects.remove(source)
+finish(result, roughness)
+# Bottom centre, like every published version.
+corners = [result.matrix_world @ Vector(c) for c in result.bound_box]
+lo, hi = Vector(map(min, *corners)), Vector(map(max, *corners))
+result.data.transform(Matrix.Translation(-Vector(((lo.x + hi.x) / 2, (lo.y + hi.y) / 2, lo.z))))
+select_only([result])
+bpy.ops.export_scene.gltf(
+    filepath=os.path.join(out, 'model.glb'), export_format='GLB', use_selection=True, export_yup=True,
+    export_apply=True, export_animations=False, export_cameras=False, export_lights=False, export_extras=False)
+report = {'style': style, 'detail': detail, 'triangles': sum(len(p.vertices) - 2 for p in result.data.polygons),
+          'sourceTriangles': source_triangles, **stats, 'seconds': round(time.time() - started, 2)}
+print('AHA_STYLIZE=' + json.dumps(report))
+`;

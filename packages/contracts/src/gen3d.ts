@@ -51,6 +51,16 @@ export const GEN3D_REPAINT_VIEWS = [
 ] as const;
 /** Procedural clips the fixed rigging script can add; generic skeletons get idle only. */
 export const GEN3D_ANIMATION_CLIPS = ["idle", "walk", "run", "attack"] as const;
+/** Fixed stylizations and the range of their detail value. */
+export const GEN3D_STYLES = {
+  /** Cells along the longest side. */
+  voxel: { min: 8, max: 96, default: 32 },
+  /** Brick widths along the longest side. */
+  bricks: { min: 6, max: 64, default: 20 },
+  /** Target triangles. */
+  lowpoly: { min: 50, max: 20_000, default: 600 },
+} as const;
+export type Gen3DStyle = keyof typeof GEN3D_STYLES;
 /** Square size of repaint view renders and of the edited image projected back. */
 export const GEN3D_REPAINT_SIZE = 1024;
 export const Gen3DId = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,128}$/));
@@ -178,6 +188,16 @@ export const Gen3DProcessReport = Schema.Struct({
       attachments: Schema.Finite,
     }),
   ),
+  /** Set on stylized versions. */
+  stylize: Schema.optional(
+    Schema.Struct({
+      style: Schema.Literals(["voxel", "bricks", "lowpoly"]),
+      detail: Schema.Finite,
+      colors: Schema.Finite,
+      voxels: Schema.optional(Schema.Finite),
+      studs: Schema.optional(Schema.Finite),
+    }),
+  ),
   /** Set on repainted versions: what the local repaint changed in the base colour texture. */
   repaint: Schema.optional(
     Schema.Struct({
@@ -188,6 +208,11 @@ export const Gen3DProcessReport = Schema.Struct({
   ),
 });
 export type Gen3DProcessReport = typeof Gen3DProcessReport.Type;
+export const Gen3DStylize = Schema.Struct({
+  style: Schema.Literals(["voxel", "bricks", "lowpoly"]),
+  detail: Schema.Finite.check(Schema.isInt(), Schema.isBetween({ minimum: 6, maximum: 20_000 })),
+});
+export type Gen3DStylize = typeof Gen3DStylize.Type;
 export const Gen3DRepaintView = Schema.Literals(GEN3D_REPAINT_VIEWS);
 export type Gen3DRepaintView = typeof Gen3DRepaintView.Type;
 export const Gen3DRepaint = Schema.Struct({
@@ -218,6 +243,8 @@ export const Gen3DBuild = Schema.Struct({
       ),
     }),
   ),
+  /** Rebuild the parent as voxels, bricks or flat low poly with colours from its surface. */
+  stylize: Schema.optional(Gen3DStylize),
   /** Local repaint of a baked parent: a masked drawing edit of one view, projected back. */
   repaint: Schema.optional(Gen3DRepaint),
 });
@@ -353,6 +380,7 @@ export const Gen3DCommand = Schema.Struct({
     "render-view",
     "repaint",
     "rig",
+    "stylize",
     "cancel",
     "adopt",
     "select-version",
@@ -383,6 +411,7 @@ export const Gen3DCommand = Schema.Struct({
   exportFormat: Schema.optional(Schema.Literals(["glb", "fbx", "obj", "usdz", "stl"])),
   repaintView: Schema.optional(Gen3DRepaintView),
   clips: Schema.optional(Schema.Array(Schema.Literals(GEN3D_ANIMATION_CLIPS))),
+  stylize: Schema.optional(Gen3DStylize),
   instruction: Schema.optional(Schema.String),
   feather: Schema.optional(Schema.Finite),
 });

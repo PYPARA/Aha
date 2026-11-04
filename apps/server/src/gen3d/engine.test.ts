@@ -548,6 +548,45 @@ describe("Gen3DEngine", () => {
     ).rejects.toThrow(/workbench service/);
   });
 
+  it("stylizes within each style's detail range", async () => {
+    const engine = new Gen3DEngine(root, makeHost({ blenderReady: true }));
+    let p = await project(engine);
+    await engine.command({
+      operation: "submit",
+      projectId: p.id,
+      revision: p.revision,
+      build: build(),
+      requestId: "s",
+    });
+    p = await settled(engine, p.id);
+    const stylize = (style: "voxel" | "bricks" | "lowpoly", detail: number) =>
+      engine.command({
+        operation: "stylize",
+        projectId: p.id,
+        revision: p.revision,
+        versionId: p.versions[0]!.id,
+        stylize: { style, detail },
+      });
+    await expect(stylize("voxel", 200)).rejects.toThrow(/8–96/);
+    await expect(stylize("lowpoly", 20)).rejects.toThrow(/50–20000/);
+    await stylize("bricks", 20);
+    p = await settled(engine, p.id);
+    expect(p.versions[1]!.build).toMatchObject({
+      mode: "process",
+      parentVersionId: p.versions[0]!.id,
+      stylize: { style: "bricks", detail: 20 },
+    });
+    await expect(
+      engine.command({
+        operation: "submit",
+        projectId: p.id,
+        revision: p.revision,
+        build: { ...build(), stylize: { style: "voxel", detail: 32 } },
+        requestId: "sz",
+      }),
+    ).rejects.toThrow(/workbench operations/);
+  });
+
   it("rigs only versions with a skeleton in their history", async () => {
     const engine = new Gen3DEngine(root, makeHost({ blenderReady: true }));
     let p = await project(engine);

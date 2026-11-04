@@ -44,6 +44,7 @@ import { drawingApi, useImageProviders } from "../drawing/useDrawing";
 import { ensureGen3DThread } from "./Gen3DChat";
 import { AnimationPanel, CLIP_LABELS, RIG_KIND_LABELS } from "./AnimationPanel";
 import { REPAINT_VIEW_LABELS, RepaintPanel } from "./RepaintPanel";
+import { STYLE_LABELS, StylizePanel } from "./StylizePanel";
 import { TiledTextureField, validTileSize, type TileChoice } from "./TiledTextureField";
 import {
   gen3dApi,
@@ -66,6 +67,7 @@ const TOOL_LABELS = {
   optimize: "Optimize",
   texture: "Texture",
   animation: "Rig & animate",
+  stylize: "Stylize",
   export: "Export",
 } as const;
 const STOP_REASONS: Record<string, string> = {
@@ -302,9 +304,9 @@ function ProjectWorkspace({
     command = useGen3DCommand(),
     { settings } = useAppSettings();
   const [selected, setSelected] = useState<string | null>(project.previewVersionId),
-    [tool, setTool] = useState<"generate" | "optimize" | "texture" | "animation" | "export">(
-      "generate",
-    ),
+    [tool, setTool] = useState<
+      "generate" | "optimize" | "texture" | "animation" | "stylize" | "export"
+    >("generate"),
     [panel, setPanel] = useState<"properties" | "assistant">("properties"),
     [view, setView] = useState<"model" | "compare">("model"),
     [drawer, setDrawer] = useState(false),
@@ -449,6 +451,14 @@ function ProjectWorkspace({
           act={act}
         />
       )}
+      {panel === "properties" && tool === "stylize" && (
+        <StylizePanel
+          version={version}
+          disabled={locked || !desktop || !blender?.headless}
+          blenderMissing={desktop && !blender?.headless}
+          act={act}
+        />
+      )}
       {panel === "properties" && tool === "export" && (
         <ExportPanel
           project={project}
@@ -504,21 +514,23 @@ function ProjectWorkspace({
           role="tablist"
           aria-label={tr("3D generation tools")}
         >
-          {(["generate", "optimize", "texture", "animation", "export"] as const).map((value) => (
-            <Button
-              key={value}
-              size="sm"
-              variant={tool === value ? "secondary" : "ghost"}
-              role="tab"
-              aria-selected={tool === value}
-              onClick={() => {
-                setTool(value);
-                setPanel("properties");
-              }}
-            >
-              {tr(TOOL_LABELS[value])}
-            </Button>
-          ))}
+          {(["generate", "optimize", "texture", "animation", "stylize", "export"] as const).map(
+            (value) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={tool === value ? "secondary" : "ghost"}
+                role="tab"
+                aria-selected={tool === value}
+                onClick={() => {
+                  setTool(value);
+                  setPanel("properties");
+                }}
+              >
+                {tr(TOOL_LABELS[value])}
+              </Button>
+            ),
+          )}
         </div>
         {version && (
           <Button
@@ -1564,7 +1576,7 @@ function VersionReport({ version }: { version: Gen3DVersion }) {
       <dt className="text-muted-foreground">{tr("Build route")}</dt>
       <dd className="break-words">
         {version.build.mode === "process"
-          ? `${tr(version.build.repaint ? "Repainted" : version.build.rig ? "Rigged" : "Optimized")}${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
+          ? `${tr(version.build.repaint ? "Repainted" : version.build.rig ? "Rigged" : version.build.stylize ? "Stylized" : "Optimized")}${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
           : version.build.mode === "blender"
             ? `Blender${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
             : "Three.js + SDF"}
@@ -1586,6 +1598,16 @@ function VersionReport({ version }: { version: Gen3DVersion }) {
                   "{n}",
                   String(version.process.projectedPct),
                 )}
+              </dd>
+            </>
+          )}
+          {version.process.stylize && (
+            <>
+              <dt className="text-muted-foreground">{tr("Style")}</dt>
+              <dd>
+                {tr(STYLE_LABELS[version.process.stylize.style])} ·{" "}
+                {version.process.stylize.detail.toLocaleString()} ·{" "}
+                {tr("{n} colours").replace("{n}", String(version.process.stylize.colors))}
               </dd>
             </>
           )}

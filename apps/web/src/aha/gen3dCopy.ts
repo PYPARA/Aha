@@ -1,4 +1,24 @@
 export const gen3dCopy: Record<string, string> = {
+  Stylize: "风格化",
+  Stylized: "风格化",
+  Style: "风格",
+  Voxels: "体素",
+  Bricks: "积木",
+  "Low poly": "低多边形",
+  Detail: "精细度",
+  "Use {min} to {max}.": "请填写 {min} 到 {max}。",
+  "{n} colours": "{n} 种颜色",
+  "Create stylized version": "生成风格化版本",
+  "Stylizing needs Blender. Set it up in the 3D workshop.":
+    "风格化需要 Blender，请在 3D 工坊中设置。",
+  "Solid cubes coloured from the model's surface. Detail is the number of cubes along the longest side.":
+    "实心方块，颜色取自模型表面。精细度是最长边上的方块数。",
+  "Building bricks with studs on top and a fixed colour palette. Detail is the number of bricks along the longest side.":
+    "带凸点的积木块，使用固定调色板。精细度是最长边上的积木数。",
+  "Flat-shaded facets, one colour each, sampled from the model's surface. Detail is the target triangle count.":
+    "平面着色的多边形，每个面一种颜色，取自模型表面。精细度是目标三角面数。",
+  "Runs Aha's fixed script in background Blender. Each face takes one colour from a small palette texture. Export the result directly, rig it if the source has a skeleton, or optimize it to bake a regular texture before repainting.":
+    "在后台 Blender 中运行 Aha 的固定脚本。每个面从一张小调色板贴图取一种颜色。结果可以直接导出；来源有骨架时可以绑定；要局部重绘时先优化，烘焙成常规贴图。",
   "Rig & animate": "绑定动画",
   Rigged: "绑定",
   Rig: "绑定",
