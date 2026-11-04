@@ -283,7 +283,9 @@ export const gen3dAssetEffectRouteLayer = HttpRouter.add(
           ? "model/gltf-binary"
           : name.endsWith(".json")
             ? "application/json"
-            : "image/png",
+            : name.endsWith(".webp")
+              ? "image/webp"
+              : "image/png",
         // Blueprints are replaced in place when re-extracted; versions and references are immutable.
         "Cache-Control":
           kind === "blueprint" ? "private, no-cache" : "private, max-age=31536000, immutable",

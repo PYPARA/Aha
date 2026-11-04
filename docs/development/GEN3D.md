@@ -18,6 +18,7 @@
   - `render-view`：`wsRpc` 调 `engine.renderView`，宿主用固定脚本渲染 `views/<versionId>/<view>.png`（1024 正交，渲染结果可重复），再存成绘图资产交给遮罩编辑器。
   - 网页端用这张图和 `MaskCanvasEditor` 的遮罩（透明 = 重绘区域）创建绘图编辑任务；完成后 `repaint` 只提交任务 ID。`wsRpc` 从绘图服务读出任务的输入图、遮罩和输出，`repaintBytes` 先确认输入图与该版本该视角的渲染逐字节一致（否则投影会错位），再把输出和遮罩缩放到 1024（只接受接近正方形的图）写入任务目录，创建 `mode: "process"`、带 `repaint` 的任务。
   - 只接受带烘焙颜色贴图（`process.baked` 含 `baseColor`）的版本，可以在重绘版本上继续重绘。Agent 工具的 `get.current` 沿父版本链跳过所有优化和重绘版本，回到最近的建模版本。
+- **绑定（`rig` 命令）**：只能由工作台发起，`submit` 拒绝带 `rig` 的构建。引擎用 `skeletonSource`（`@synara/shared/gen3dVersions`，沿父版本链找最近一个带骨架的版本）确认有骨架，再创建 `mode: "process"`、带 `rig.clips` 的任务。绑定版本的 `model.glb` 是父版本静态网格的原样副本，所以评分、查看器和工坊的模型校验都不受影响（工坊的加载器拒绝蒙皮和动画，不要放宽）；蒙皮动画模型是派生文件 `rigged.glb`（同样要通过 glTF Validator），每段动画另有预览 `anim-<clip>.webp`。版本记录 `process.rig`（类型、骨骼数、片段、按部件绑定的数量）。重绘一个绑定版本时，宿主同样替换 `rigged.glb` 里的基础色图片，并复制预览。
 - **蓝图提取、评分和差异图都在服务端完成**（sharp 加 `@synara/shared/gen3dScore`），没有桌面宿主时也能提取蓝图。
   - 对齐：纵向用共同的物理比例（px/m）和地面线，横向搜索 IoU 最大的平移；侧视另外尝试镜像。不能按各自的包围盒缩放或居中。
 - **构建契约**：`Gen3DBuild.mode`（`threejs`、`blender`、`process`）、`skeleton` 和 `process` 都是可选字段，没有 `mode` 的旧版本按 `threejs` 处理，所以不需要迁移。`Gen3DVersion.runtime.blender` 记录 Blender 版本。
@@ -63,6 +64,13 @@
     - 视图：七个正交方向（Blender 小键盘命名，glTF +Z 为正面），按模型投影范围的 1.1 倍取景。Cycles 1 采样、极小像素滤波渲染位置和法线（不做抗锯齿，像素中心可精确换算），16 采样渲染发射的基础色；输出的视图图片是基础色乘一个固定的明暗系数（来自法线和固定光向），让绘图模型看得出形体。渲染设置固定，同一版本同一视角的输出逐字节相同，引擎靠这一点核对编辑来源。
     - 重绘：EMIT 烘焙每个贴图像素的世界坐标和法线（超过 2048 的贴图按 2048 计算后放大），换算到视图像素；只接受落在画面内、朝向相机、并且就是该像素渲染到的那个表面（与位置图比较，代替光线检测）的像素。权重 = 向内柔化后的遮罩 × 掠射角衰减；编辑图先除以同一明暗系数还原成基础色再混合。权重为 0 的像素保持原值，只向 UV 岛外扩 4 像素。脚本报告改动的纹素数，和 8 位量化后的实际差异一致。
     - 宿主用 `replaceBaseColor`（`glbTexture.ts`）只替换 GLB 里基础色图片的数据，其余 bufferView 按原字节复制；父版本的 LOD 也换上同一张图，碰撞体原样复制。
+  - `rig`：
+    - 导入父版本 GLB 合并为一个网格，先按距离焊接（glTF 在 UV 接缝处拆开了顶点，热权重需要连通的表面；UV 存在面角上，导出时会重新拆开），再清除自定义法线。
+    - 每个关节一根骨骼：头在关节，尾指向后代最多的子关节（同等时优先 spine/chest/neck/head），叶关节沿父方向延长一个半径。骨骼局部 Z 在竖直骨骼上朝前、在水平骨骼上朝上，所以绕局部 X 的旋转总是身体侧平面内的摆动（腿前后摆、尾巴和脖子上下）。
+    - 权重：`ARMATURE_AUTO` 热权重；顶点数不少于 20% 的连通部件保留热权重，没解出的顶点用最近两根骨骼按距离混合；更小的部件（头盔、盾牌、耳朵）只用离其中心最近的骨骼和它的父骨骼，否则抬手会带动背后的盾牌（骑士样本实测）。蒙皮网格解除父子关系放在场景根上，只靠 Armature 修改器（glTF Validator 对非根蒙皮网格报警告）。
+    - 类型：有 `thigh_l/r` 和 `upperarm_l/r` 且前肢末端低于高度 30% 为四足，有 `thigh_l/r` 为两足，否则通用。片段用正弦和关键帧插值生成（行走、奔跑为对角步态或交替摆腿，原地动作），每段一条 NLA 轨道，用 `NLA_TRACKS` 导出；关键帧从第 0 帧开始并包含收尾帧（导出器写的是场景时间，否则长度会多一帧）。
+    - 预览：Workbench、烘焙贴图、固定 3/4 正交相机，每段 12 帧 256 像素；宿主用 sharp 的 `join.animated` 合成动画 WebP，再删除 PNG。
+  - `convert` 的绑定模式（`rigged: true`，只用于绑定版本的 GLB 和 FBX）：保留骨架和动画，删除导入器生成的骨骼显示形状，不带 LOD；FBX 用 `bake_anim_use_all_actions` 导出所有动作。
   - `convert`：FBX 对所有引擎都写同一套坐标系（`-Z` 前、`Y` 上、`FBX_SCALE_UNITS`），Unreal 导入器会自己换算；把数据改成 Z 轴向上会和文件头矛盾，Godot 导入时会躺倒（已实测）。FBX 里的 LOD 改用 LOD0 的材质，避免每级都带一份贴图。STL 先按距离焊接再统计开放边，因为 glTF 在 UV 接缝处拆开了顶点。
 - **可信层**（`gen3dRuntime.ts`）：
   - 检查 Worker 输出：沿用工坊的 `validateSceneJSON`，不接受灯光、相机、纹理、动画和骨骼。
@@ -74,13 +82,13 @@
 ## 核心回归
 
 ```sh
-bunx vitest run packages/shared/src/gen3dSdf.test.ts packages/shared/src/gen3dScore.test.ts packages/shared/src/gen3dTexture.test.ts apps/desktop/src/gen3d apps/server/src/gen3d apps/server/src/agentGateway/gen3dTools.test.ts apps/web/src/aha/translations.test.ts apps/web/src/components/resources apps/web/src/components/sprite/spriteNavigation.test.ts apps/desktop/src/model3d
+bunx vitest run packages/shared/src/gen3dSdf.test.ts packages/shared/src/gen3dScore.test.ts packages/shared/src/gen3dTexture.test.ts packages/shared/src/gen3dVersions.test.ts apps/desktop/src/gen3d apps/server/src/gen3d apps/server/src/agentGateway/gen3dTools.test.ts apps/web/src/aha/translations.test.ts apps/web/src/components/resources apps/web/src/components/sprite/spriteNavigation.test.ts apps/desktop/src/model3d
 bun run typecheck
 bun run build:desktop
 ```
 
 - 沙箱运行页只能用生产构建验证：开发模式下 Vite 不内联 Worker，CSP 会拦截。
-- 固定脚本的源码在 `.tmp/gen3d/m3b/`（`process.py`、`texture.py`，`convert.py` 在 `m2/`），用 `embed.py` 生成 `blenderScripts.ts`。改动后用 `.tmp/gen3d/m2/` 和 `m3b/` 的脚本跑一遍真实 Blender 和 Godot 导入（Godot 4.7 能直接读 FBX，可以用来核对 FBX 的轴向和单位）。
+- 固定脚本的源码在 `.tmp/gen3d/m4/`（`process.py`、`convert.py`、`texture.py`、`rig.py`），用其中的 `embed.py` 生成 `blenderScripts.ts`。改动绑定或动画后，用 `.tmp/gen3d/m4/godot/check.gd` 在 Godot 里逐段播放并测量骨骼转角（GLB 和 FBX 都要测）。改动后用 `.tmp/gen3d/m2/` 和 `m3b/` 的脚本跑一遍真实 Blender 和 Godot 导入（Godot 4.7 能直接读 FBX，可以用来核对 FBX 的轴向和单位）。
 - 局部重绘的不变量要用真实宿主核对：除基础色外的 bufferView 逐字节相同、改动纹素数等于报告、遮罩外（外扩 3 像素）渲染差异不超过 1 级、另一侧视图逐字节不变（`.tmp/gen3d/m3b/e2e.ts`）。
 - 改动 Blender 路线后，还要跑 3D 工坊的核心回归（见 [3D 工坊维护](MODEL3D_WORKSHOP.md)）。
 - 真实宿主、隔离后端、真实 Blender 和真实 AI 会话的验收脚本与证据放在 `.tmp/gen3d/`。模拟宿主的测试只证明状态机，不能代替实际的 Worker 和模型会话。

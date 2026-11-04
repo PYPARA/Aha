@@ -1,4 +1,27 @@
 export const gen3dCopy: Record<string, string> = {
+  "Rig & animate": "绑定动画",
+  Rigged: "绑定",
+  Rig: "绑定",
+  "Rig and animation": "绑定与动画",
+  "Animation clips": "动画片段",
+  Idle: "待机",
+  Walk: "行走",
+  Run: "奔跑",
+  Attack: "攻击",
+  Loop: "循环",
+  Biped: "两足",
+  Quadruped: "四足",
+  "Generic skeleton": "通用骨架",
+  "{n} bones": "{n} 根骨骼",
+  "Previews are rendered by Blender. glTF and FBX files carry no loop flag, so turn on looping for loop clips in your engine.":
+    "预览由 Blender 渲染。glTF 和 FBX 不带循环标记，循环片段需要在引擎里开启循环。",
+  "Rigging uses the skeleton saved with a modeling build. Ask the AI assistant to build with a skeleton (characters, creatures, tails), then rig that version or an optimized one made from it.":
+    "绑定使用建模时保存的骨架。请让 AI 助手按骨架建模（角色、生物、尾巴等），再绑定那个版本或由它优化出的版本。",
+  "Skeleton from {name}, {n} joints.": "骨架来自 {name}，{n} 个关节。",
+  "Create rigged version": "生成绑定版本",
+  "Rigging needs Blender. Set it up in the 3D workshop.": "绑定需要 Blender，请在 3D 工坊中设置。",
+  "Runs Aha's fixed script in background Blender: bones from the skeleton, automatic weights, then procedural clips. Bipeds and quadrupeds are detected from joint names; other skeletons get an idle sway only. Rig an optimized version for game use; LODs are not rigged.":
+    "在后台 Blender 中运行 Aha 的固定脚本：按骨架生成骨骼、自动计算权重，再加上程序动画。两足和四足按关节名识别，其他骨架只有待机摆动。用于游戏时请绑定优化版本；LOD 不会绑定。",
   "Tiled texture": "平铺贴图",
   "Choose a texture": "选择贴图",
   "Generate…": "生成…",

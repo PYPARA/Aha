@@ -479,6 +479,10 @@
     "./gen3dTexture": {
       "types": "./src/gen3dTexture.ts",
       "import": "./src/gen3dTexture.ts"
+    },
+    "./gen3dVersions": {
+      "types": "./src/gen3dVersions.ts",
+      "import": "./src/gen3dVersions.ts"
     }
   },
   "scripts": {

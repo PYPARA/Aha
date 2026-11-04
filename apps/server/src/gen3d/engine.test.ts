@@ -133,7 +133,7 @@ function makeHost(options: { offset?: number; blenderReady?: boolean } = {}): ty
     const frozen = JSON.parse(await fs.readFile(path.join(dir, "input.json"), "utf8"));
     const processed = frozen.build.mode === "process";
     if (processed)
-      for (const name of ["lod1.glb", "collision.glb"])
+      for (const name of frozen.build.rig ? ["rigged.glb"] : ["lod1.glb", "collision.glb"])
         await fs.writeFile(path.join(dir, name), triangleGlb());
     return {
       report,
@@ -546,6 +546,65 @@ describe("Gen3DEngine", () => {
     await expect(
       engine.command({ operation: "import-texture-asset", projectId: p.id, revision: p.revision }),
     ).rejects.toThrow(/workbench service/);
+  });
+
+  it("rigs only versions with a skeleton in their history", async () => {
+    const engine = new Gen3DEngine(root, makeHost({ blenderReady: true }));
+    let p = await project(engine);
+    await engine.command({
+      operation: "submit",
+      projectId: p.id,
+      revision: p.revision,
+      build: build(),
+      requestId: "plain",
+    });
+    p = await settled(engine, p.id);
+    const rig = (versionId: string, clips: unknown) =>
+      engine.command({
+        operation: "rig",
+        projectId: p.id,
+        revision: p.revision,
+        versionId,
+        clips: clips as never,
+      });
+    await expect(rig(p.versions[0]!.id, ["walk"])).rejects.toThrow(/has no skeleton/);
+    const skeleton = [
+      { id: "hips", parent: null, position: [0, 0.3, 0] as const, radius: 0.05 },
+      { id: "thigh_l", parent: "hips", position: [0.05, 0.15, 0] as const, radius: 0.03 },
+    ];
+    await engine.command({
+      operation: "submit",
+      projectId: p.id,
+      revision: p.revision,
+      build: { ...build(), skeleton },
+      requestId: "skeleton",
+      turnId: "turn-2",
+    });
+    p = await settled(engine, p.id);
+    const modeled = p.versions[1]!;
+    await expect(rig(modeled.id, [])).rejects.toThrow(/at least one animation clip/);
+    await rig(modeled.id, ["walk", "idle", "walk"]);
+    p = await settled(engine, p.id);
+    const rigged = p.versions[2]!;
+    expect(rigged.build).toMatchObject({
+      mode: "process",
+      parentVersionId: modeled.id,
+      rig: { clips: ["walk", "idle"] },
+    });
+    expect(rigged.files.map((f) => f.name)).toContain("rigged.glb");
+    // A later fixed step on top still finds the skeleton two versions back.
+    await rig(rigged.id, ["idle"]);
+    p = await settled(engine, p.id);
+    expect(p.jobs.at(-1)!.status).toBe("succeeded");
+    await expect(
+      engine.command({
+        operation: "submit",
+        projectId: p.id,
+        revision: p.revision,
+        build: { ...build(), rig: { clips: ["idle"] } },
+        requestId: "z",
+      }),
+    ).rejects.toThrow(/workbench operations/);
   });
 
   it("guards reference projection: baked textures, a score and the same blueprint", async () => {

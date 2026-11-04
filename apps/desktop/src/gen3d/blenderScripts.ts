@@ -627,8 +627,31 @@ def load(file, label):
     return obj
 
 
-model = load(cfg['input'], name if fmt != 'fbx' else name + '_LOD0')
-lods = [load(file, '%s_LOD%d' % (name, i)) for i, file in enumerate(cfg['lods'], start=1)] if fmt == 'fbx' else []
+def load_rigged(file):
+    """The rigged asset keeps its armature and clips; the importer's bone display shapes go."""
+    scene.render.fps = 30
+    before = set(scene.objects)
+    bpy.ops.import_scene.gltf(filepath=file)
+    added = [o for o in scene.objects if o not in before]
+    rig = next(o for o in added if o.type == 'ARMATURE')
+    skinned = next(o for o in added if o.type == 'MESH' and any(m.type == 'ARMATURE' for m in o.modifiers))
+    for bone in rig.pose.bones:
+        bone.custom_shape = None
+    for o in added:
+        if o not in (rig, skinned):
+            bpy.data.objects.remove(o)
+    rig.name = name + '_Rig'
+    skinned.name = skinned.data.name = name
+    return skinned
+
+
+rigged = bool(cfg.get('rigged'))
+if rigged:
+    model = load_rigged(cfg['input'])
+    lods = []
+else:
+    model = load(cfg['input'], name if fmt != 'fbx' else name + '_LOD0')
+    lods = [load(file, '%s_LOD%d' % (name, i)) for i, file in enumerate(cfg['lods'], start=1)] if fmt == 'fbx' else []
 # LODs share the low poly's UVs, so they reuse its material instead of a copy of every texture.
 for lod in lods:
     lod.data.materials.clear()
@@ -658,7 +681,8 @@ if fmt in ('fbx', 'obj'):
 report = {'format': fmt, 'preset': preset, 'files': []}
 if fmt == 'glb':
     bpy.ops.export_scene.gltf(filepath=os.path.join(out, 'model.glb'), export_format='GLB', export_yup=True,
-                              export_apply=True, export_tangents=True, export_animations=False)
+                              export_apply=not rigged, export_tangents=True, export_animations=rigged,
+                              export_animation_mode='ACTIONS', export_skins=rigged, export_def_bones=False)
     report['files'].append('model.glb')
 elif fmt == 'fbx':
     # One consistent axis header for every engine: Unity reads it as is, and Unreal's importer
@@ -666,7 +690,10 @@ elif fmt == 'fbx':
     bpy.ops.export_scene.fbx(filepath=os.path.join(out, name + '.fbx'), path_mode='RELATIVE', embed_textures=False,
                              axis_forward='-Z', axis_up='Y', apply_unit_scale=True,
                              apply_scale_options='FBX_SCALE_UNITS', bake_space_transform=True,
-                             add_leaf_bones=False, mesh_smooth_type='FACE', use_tspace=True, bake_anim=False)
+                             add_leaf_bones=False, mesh_smooth_type='FACE', use_tspace=True, bake_anim=rigged,
+                             bake_anim_use_all_actions=True, bake_anim_use_nla_strips=False,
+                             bake_anim_use_all_bones=True, bake_anim_force_startend_keying=True,
+                             bake_anim_simplify_factor=0.0)
     report['files'].append(name + '.fbx')
 elif fmt == 'obj':
     bpy.ops.wm.obj_export(filepath=os.path.join(out, name + '.obj'), export_materials=True, path_mode='RELATIVE',
@@ -1051,4 +1078,374 @@ report = {'view': cfg['view'], 'textureSize': size, 'maskPixels': mask_pixels,
           'paintedTexels': int(len(rows)), 'changedTexels': changed,
           'seconds': round(time.time() - started, 2)}
 print('AHA_TEXTURE=' + json.dumps(report))
+`;
+
+export const GEN3D_RIG_SCRIPT = String.raw`# Aha 3D generation fixed rigging script (headless Blender). Never runs AI source.
+# Usage: blender -b --factory-startup --disable-autoexec --python rig.py -- config.json
+# Builds an armature from the version's skeleton graph, skins the mesh with automatic weights,
+# adds procedural animation clips, exports rigged.glb and renders preview frames per clip.
+import bpy, json, math, os, sys, time
+import numpy as np
+from mathutils import Matrix, Vector
+
+started = time.time()
+with open(sys.argv[sys.argv.index('--') + 1], encoding='utf-8') as handle:
+    cfg = json.load(handle)
+out = cfg['output']
+bpy.ops.wm.read_factory_settings(use_empty=True)
+scene = bpy.context.scene
+FPS = 30
+scene.render.fps = FPS
+
+
+def blender(p):
+    """Aha / glTF point (Y up, +Z front) -> Blender (Z up, -Y front)."""
+    return Vector((p[0], -p[2], p[1]))
+
+
+def select_only(objects, active=None):
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in objects:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = active or objects[-1]
+
+
+# 1. The static mesh, merged into one object like the optimize step.
+bpy.ops.import_scene.gltf(filepath=cfg['input'])
+meshes = [o for o in scene.objects if o.type == 'MESH']
+if not meshes:
+    raise RuntimeError('The model contains no meshes.')
+select_only(meshes)
+bpy.ops.object.parent_clear(type='CLEAR_KEEP_TRANSFORM')
+bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+for o in [o for o in scene.objects if o.type != 'MESH']:
+    bpy.data.objects.remove(o)
+select_only(meshes, meshes[0])
+if len(meshes) > 1:
+    bpy.ops.object.join()
+body = bpy.context.active_object
+body.name = cfg.get('name', 'Model')
+# glTF splits vertices along UV seams; heat weighting needs one connected surface. UVs are
+# per corner in Blender, so welding keeps them and the exporter splits the seams again.
+import bmesh
+bm = bmesh.new()
+bm.from_mesh(body.data)
+bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+bm.to_mesh(body.data)
+bm.free()
+if body.data.has_custom_normals:
+    select_only([body])
+    bpy.ops.mesh.customdata_custom_splitnormals_clear()
+height = max(v.co.z for v in body.data.vertices) - min(v.co.z for v in body.data.vertices)
+
+# 2. Armature: one bone per joint, head at the joint, tail at its main child.
+nodes = cfg['skeleton']
+by_id = {n['id']: n for n in nodes}
+children = {n['id']: [] for n in nodes}
+for n in nodes:
+    if n['parent'] is not None:
+        children[n['parent']].append(n['id'])
+
+
+def descendants(i):
+    return 1 + sum(descendants(c) for c in children[i])
+
+
+armature_data = bpy.data.armatures.new('Armature')
+rig = bpy.data.objects.new('Armature', armature_data)
+scene.collection.objects.link(rig)
+select_only([rig])
+bpy.ops.object.mode_set(mode='EDIT')
+edit = armature_data.edit_bones
+for n in nodes:
+    bone = edit.new(n['id'])
+    head = blender(n['position'])
+    kids = children[n['id']]
+    if kids:
+        main = max(kids, key=lambda c: (descendants(c), c in ('spine', 'chest', 'neck', 'head')))
+        tail = blender(by_id[main]['position'])
+    elif n['parent'] is not None:
+        direction = head - blender(by_id[n['parent']]['position'])
+        tail = head + direction.normalized() * max(n['radius'], 0.02 * height)
+    else:
+        tail = head + Vector((0, 0, max(n['radius'], 0.1 * height)))
+    if (tail - head).length < 1e-4:
+        tail = head + Vector((0, 0, max(n['radius'], 0.01)))
+    bone.head, bone.tail = head, tail
+    # Local Z faces forward on upright bones and up on level ones, so rotation about local X
+    # is always a swing in the body's side plane (legs forward, tails and necks up).
+    axis = (tail - head).normalized()
+    bone.align_roll(Vector((0, -1, 0)) if abs(axis.z) > 0.7 else Vector((0, 0, 1)))
+for n in nodes:
+    if n['parent'] is not None:
+        edit[n['id']].parent = edit[n['parent']]
+bpy.ops.object.mode_set(mode='OBJECT')
+
+# 3. Skin with automatic (heat) weights; vertices the solver misses go to the nearest bone.
+select_only([body, rig], rig)
+bpy.ops.object.parent_set(type='ARMATURE_AUTO')
+# Skinned meshes belong at the glTF root; the Armature modifier alone keeps the binding.
+world = body.matrix_world.copy()
+body.parent = None
+body.matrix_world = world
+segments = []
+for b in rig.data.bones:
+    segments.append((b.name, rig.matrix_world @ b.head_local, rig.matrix_world @ b.tail_local))
+for b in segments:
+    if b[0] not in [g.name for g in body.vertex_groups]:
+        body.vertex_groups.new(name=b[0])
+def nearest_bones(p, allowed=None):
+    """(distance, bone) pairs to every allowed bone segment, nearest first."""
+    out_ = []
+    for name, a, b in segments:
+        if allowed is not None and name not in allowed:
+            continue
+        ab = b - a
+        t = max(0.0, min(1.0, (p - a).dot(ab) / max(ab.length_squared, 1e-12)))
+        out_.append(((a + ab * t - p).length, name))
+    return sorted(out_)
+
+
+def blend(index, near):
+    """Inverse-distance blend of the two nearest bones, replacing any heat weights."""
+    for g in body.vertex_groups:
+        g.remove([index])
+    (d0, n0) = near[0]
+    w0 = 1.0 / max(d0, 1e-5) ** 4
+    w1, n1 = 0.0, None
+    if len(near) > 1:
+        d1, n1 = near[1]
+        w1 = 1.0 / max(d1, 1e-5) ** 4
+    body.vertex_groups[n0].add([index], w0 / (w0 + w1), 'REPLACE')
+    if n1:
+        body.vertex_groups[n1].add([index], w1 / (w0 + w1), 'REPLACE')
+
+
+# Connected parts: large ones keep heat weights; small attachments (helmets, shields, ears)
+# follow only the bone nearest their centre and its parent, so a raised arm cannot drag a
+# tabard or a shield on the back.
+count = len(body.data.vertices)
+parent_of = list(range(count))
+
+
+def find(i):
+    while parent_of[i] != i:
+        parent_of[i] = parent_of[parent_of[i]]
+        i = parent_of[i]
+    return i
+
+
+for e in body.data.edges:
+    a, b = find(e.vertices[0]), find(e.vertices[1])
+    if a != b:
+        parent_of[a] = b
+islands = {}
+for i in range(count):
+    islands.setdefault(find(i), []).append(i)
+coords = [body.matrix_world @ v.co for v in body.data.vertices]
+unweighted = attached = 0
+bone_parent = {b.name: (b.parent.name if b.parent else None) for b in rig.data.bones}
+for members in islands.values():
+    if len(members) >= 0.2 * count:
+        for i in members:
+            if sum(g.weight for g in body.data.vertices[i].groups) <= 1e-4:
+                unweighted += 1
+                blend(i, nearest_bones(coords[i]))
+        continue
+    attached += 1
+    centre = sum((coords[i] for i in members), Vector()) / len(members)
+    home = nearest_bones(centre)[0][1]
+    allowed = {home, bone_parent[home]} - {None}
+    for i in members:
+        blend(i, nearest_bones(coords[i], allowed))
+
+
+# 4. Procedural clips. Angles in degrees; pitch rotates about local X (tip toward local Z).
+ids = set(by_id)
+low = lambda i: i in by_id and by_id[i]['position'][1] < 0.3 * height
+has = lambda *names: all(n in ids for n in names)
+if has('thigh_l', 'thigh_r', 'upperarm_l', 'upperarm_r') and (low('hand_l') or low('forearm_l')):
+    kind = 'quadruped'
+elif has('thigh_l', 'thigh_r'):
+    kind = 'biped'
+else:
+    kind = 'generic'
+tails = sorted([i for i in ids if i.startswith('tail')], key=lambda i: (len(i), i))
+root = next(n['id'] for n in nodes if n['parent'] is None)
+
+
+def chain(start):
+    """A joint and its main descendants: thigh_l -> shin_l -> foot_l."""
+    out_ = [start]
+    while children[out_[-1]]:
+        out_.append(max(children[out_[-1]], key=descendants))
+    return out_
+
+
+def wave(t, phase=0.0):
+    return math.sin(2 * math.pi * t + phase)
+
+
+def legs(t, pairs, amp, bend, phases):
+    """Swing each leg chain; the second joint folds backward during the forward swing."""
+    pose = {}
+    for (top, phase) in zip(pairs, phases):
+        if top not in ids:
+            continue
+        parts = chain(top)
+        pose[parts[0]] = (amp * wave(t, phase), 0)
+        if len(parts) > 1:
+            pose[parts[1]] = (-bend * max(0.0, wave(t, phase + math.pi / 2)), 0)
+    return pose
+
+
+def tail_pose(t, yaw, pitch=0.0, speed=1.0):
+    return {name: (pitch * wave(t * speed, k * 0.6), yaw * wave(t * speed, -k * 0.7))
+            for k, name in enumerate(tails)}
+
+
+def clip_pose(name, t):
+    """{bone: (pitch, side)} in degrees, plus the root's vertical offset in metres."""
+    pose, lift = {}, 0.0
+    if kind == 'biped':
+        if name == 'idle':
+            pose.update({'spine': (1.5 * wave(t), 0), 'chest': (1.5 * wave(t, 0.4), 0),
+                         'head': (2.5 * wave(t, 1.2), 3 * wave(t * 0.5)),
+                         'upperarm_l': (0, 3 * wave(t)), 'upperarm_r': (0, -3 * wave(t))})
+            lift = 0.004 * height * wave(t)
+        elif name in ('walk', 'run'):
+            amp, bend, arm = (25, 30, 20) if name == 'walk' else (45, 70, 40)
+            pose.update(legs(t, ['thigh_l', 'thigh_r'], amp, bend, [0, math.pi]))
+            for side, phase in (('l', math.pi), ('r', 0)):
+                pose['upperarm_' + side] = (arm * wave(t, phase), 0)
+                pose['forearm_' + side] = (-8 if name == 'walk' else -55, 0)
+            pose['spine'] = (3 if name == 'walk' else 10, 0)
+            lift = (0.015 if name == 'walk' else 0.04) * height * abs(math.cos(2 * math.pi * t))
+        elif name == 'attack':
+            keys = [(0, 0, 0, 0), (0.35, 150, -40, -8), (0.55, 20, -10, 14), (1, 0, 0, 0)]
+            arm, fore, spine = interpolate(keys, t)
+            pose.update({'upperarm_r': (arm, 0), 'forearm_r': (fore, 0), 'spine': (spine, 0),
+                         'chest': (spine * 0.5, 0)})
+    elif kind == 'quadruped':
+        hind, front = ['thigh_l', 'thigh_r'], ['upperarm_l', 'upperarm_r']
+        if name == 'idle':
+            pose.update({'chest': (1.5 * wave(t), 0), 'head': (2 * wave(t, 1.0), 10 * wave(t * 0.5)),
+                         'neck': (1.5 * wave(t, 0.5), 0)})
+            pose.update(tail_pose(t, 12, 0, 2))
+            lift = 0.004 * height * wave(t)
+        elif name == 'walk':
+            pose.update(legs(t, hind + front, 22, 25, [0, math.pi, math.pi, 0]))
+            pose.update(tail_pose(t, 8))
+            pose['head'] = (3 * wave(t * 2), 0)
+            lift = 0.01 * height * abs(math.cos(2 * math.pi * t))
+        elif name == 'run':
+            pose.update(legs(t, hind + front, 40, 45, [math.pi, math.pi, 0, 0]))
+            pose['spine'] = (6 * wave(t), 0)
+            pose.update(tail_pose(t, 4, 10))
+            lift = 0.05 * height * max(0.0, wave(t, math.pi / 2))
+        elif name == 'attack':
+            keys = [(0, 0, 0, 0), (0.3, -18, -10, 10), (0.55, 30, 15, -20), (1, 0, 0, 0)]
+            neck, head, front_ = interpolate(keys, t)
+            pose.update({'neck': (neck, 0), 'head': (head, 0), 'upperarm_l': (front_, 0),
+                         'upperarm_r': (front_, 0), 'chest': (neck * 0.3, 0)})
+            pose.update(tail_pose(t, 6))
+    else:
+        # Unknown names: every joint sways a little, delayed down the hierarchy.
+        depth = {}
+        for n in nodes:
+            depth[n['id']] = 0 if n['parent'] is None else depth[n['parent']] + 1
+        pose = {i: (3 * wave(t, -0.5 * d), 2 * wave(t * 0.5, -0.4 * d)) for i, d in depth.items() if d}
+        lift = 0.004 * height * wave(t)
+    return pose, lift
+
+
+def interpolate(keys, t):
+    for (t0, *a), (t1, *b) in zip(keys, keys[1:]):
+        if t0 <= t <= t1:
+            s = (t - t0) / max(t1 - t0, 1e-6)
+            s = s * s * (3 - 2 * s)
+            return [x + (y - x) * s for x, y in zip(a, b)]
+    return list(keys[-1][1:])
+
+
+CLIPS = {'idle': (2.5, True), 'walk': (1.0, True), 'run': (0.6, True), 'attack': (0.9, False)}
+supported = ['idle'] if kind == 'generic' else list(CLIPS)
+wanted = [c for c in cfg.get('clips', supported) if c in supported] or ['idle']
+rig.animation_data_create()
+for b in rig.pose.bones:
+    b.rotation_mode = 'XYZ'
+root_bone = rig.pose.bones[root]
+# Root offsets are keyed in the root bone's rest frame; convert world up into it.
+up_local = rig.data.bones[root].matrix_local.to_3x3().inverted() @ Vector((0, 0, 1))
+made = []
+for name in wanted:
+    seconds, loop = CLIPS[name]
+    frames = round(seconds * FPS)
+    action = bpy.data.actions.new(name)
+    rig.animation_data.action = action
+    # Keys from frame 0 (the exporter writes scene time) through the closing loop frame.
+    step = 2 if frames > 20 else 1
+    for frame in sorted(set(range(0, frames, step)) | {frames}):
+        t = (frame / frames) % 1.0 if loop else frame / frames
+        pose, lift = clip_pose(name, t)
+        for b in rig.pose.bones:
+            pitch, side = pose.get(b.name, (0, 0))
+            b.rotation_euler = (math.radians(pitch), 0, math.radians(side))
+            b.keyframe_insert('rotation_euler', frame=frame)
+        root_bone.location = up_local * lift
+        root_bone.keyframe_insert('location', frame=frame)
+    track = rig.animation_data.nla_tracks.new()
+    track.name = name
+    track.strips.new(name, 0, action)
+    rig.animation_data.action = None
+    made.append({'name': name, 'seconds': seconds, 'loop': loop, 'frames': frames})
+for b in rig.pose.bones:
+    b.rotation_euler = (0, 0, 0)
+    b.location = (0, 0, 0)
+
+# 5. Export the rigged asset with one glTF animation per NLA track.
+select_only([body, rig], rig)
+bpy.ops.export_scene.gltf(
+    filepath=os.path.join(out, 'rigged.glb'), export_format='GLB', use_selection=True,
+    export_yup=True, export_apply=False, export_tangents=True, export_animations=True,
+    export_animation_mode='NLA_TRACKS', export_skins=True, export_def_bones=False,
+    export_cameras=False, export_lights=False, export_extras=False)
+
+# 6. Preview frames: Workbench with the baked colours, a fixed 3/4 orthographic camera.
+preview = cfg.get('preview', {'size': 256, 'frames': 12})
+size, count = int(preview['size']), int(preview['frames'])
+scene.render.engine = 'BLENDER_WORKBENCH'
+scene.display.shading.light = 'STUDIO'
+scene.display.shading.color_type = 'TEXTURE'
+scene.display.shading.show_shadows = False
+scene.render.film_transparent = True
+scene.render.resolution_x = scene.render.resolution_y = size
+scene.render.image_settings.file_format = 'PNG'
+scene.render.image_settings.color_mode = 'RGBA'
+corners = [body.matrix_world @ Vector(c) for c in body.bound_box]
+lo, hi = Vector(map(min, *corners)), Vector(map(max, *corners))
+centre = (lo + hi) / 2
+camera_data = bpy.data.cameras.new('Preview')
+camera_data.type = 'ORTHO'
+camera_data.ortho_scale = max(hi - lo) * 1.2
+camera = bpy.data.objects.new('Preview', camera_data)
+scene.collection.objects.link(camera)
+direction = Vector((0.7, -1.0, 0.45)).normalized()
+camera.location = centre + direction * (max(hi - lo) * 4 + 1)
+camera.rotation_euler = (-direction).to_track_quat('-Z', 'Y').to_euler()
+scene.camera = camera
+for clip in made:
+    track = rig.animation_data.nla_tracks[clip['name']]
+    track.is_solo = True
+    for index in range(count):
+        frame = round(index * clip['frames'] / (count if clip['loop'] else count - 1))
+        scene.frame_set(frame)
+        scene.render.filepath = os.path.join(out, 'preview-%s-%02d.png' % (clip['name'], index))
+        bpy.ops.render.render(write_still=True)
+    track.is_solo = False
+
+report = {'kind': kind, 'bones': len(rig.data.bones), 'clips': made, 'unweighted': unweighted,
+          'attachments': attached,
+          'vertices': len(body.data.vertices), 'seconds': round(time.time() - started, 2)}
+print('AHA_RIG=' + json.dumps(report))
 `;

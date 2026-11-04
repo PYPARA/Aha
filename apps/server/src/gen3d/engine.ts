@@ -8,6 +8,7 @@ import sharp from "sharp";
 import {
   Gen3DCommand,
   Gen3DProject,
+  GEN3D_ANIMATION_CLIPS,
   GEN3D_LIMITS,
   GEN3D_REPAINT_SIZE,
   GEN3D_REPAINT_VIEWS,
@@ -36,6 +37,7 @@ import {
 } from "@synara/shared/gen3dScore";
 import { validateSkeleton } from "@synara/shared/gen3dSdf";
 import { makeSeamless } from "@synara/shared/gen3dTexture";
+import { skeletonSource } from "@synara/shared/gen3dVersions";
 import { validateBytes } from "gltf-validator";
 import { Gen3DHostTimeoutError, gen3dHostCall } from "./hostClient";
 
@@ -48,7 +50,15 @@ const digest = (bytes: string | Uint8Array) => createHash("sha256").update(bytes
 const baked = (version: Gen3DVersion | undefined) =>
   version?.process?.baked.includes("baseColor") === true;
 /** Extra GLBs an optimized version carries; each is validated like model.glb. */
-export const GEN3D_DERIVED_MODELS = ["lod1.glb", "lod2.glb", "lod3.glb", "collision.glb"];
+export const GEN3D_DERIVED_MODELS = [
+  "lod1.glb",
+  "lod2.glb",
+  "lod3.glb",
+  "collision.glb",
+  "rigged.glb",
+];
+/** Animated previews a rigged version carries, one per clip. */
+export const GEN3D_ANIMATION_PREVIEWS = GEN3D_ANIMATION_CLIPS.map((clip) => `anim-${clip}.webp`);
 /** Files a published version carries, besides the optional diff images. */
 export const GEN3D_RENDERS = [
   "render-34.png",
@@ -66,6 +76,7 @@ const VERSION_FILES = new Set([
   "model.blend",
   "process.json",
   ...GEN3D_DERIVED_MODELS,
+  ...GEN3D_ANIMATION_PREVIEWS,
   "version.json",
 ]);
 const png = (pixels: Uint8Array) =>
@@ -705,13 +716,56 @@ export class Gen3DEngine {
             void this.execute(p.id, id);
             return { project: p };
           }
+          case "rig": {
+            if (p.archived) throw new Error("Restore this project before rigging.");
+            if (p.jobs.some((j) => active(j.status)))
+              throw new Error("A model build is already in progress.");
+            const parent = p.versions.find((v) => v.id === (c.versionId ?? p.previewVersionId));
+            if (!parent) throw new Error("Choose a version to rig.");
+            if (!skeletonSource(p.versions, parent))
+              throw new Error(
+                "This version has no skeleton. Rigging uses the skeleton saved with a modeling build.",
+              );
+            const clips = [...new Set(c.clips ?? [])];
+            if (!clips.length || clips.some((clip) => !GEN3D_ANIMATION_CLIPS.includes(clip)))
+              throw new Error("Choose at least one animation clip.");
+            if (!(await this.environment()).blender?.headless)
+              throw new Error("Rigging needs Blender. Set it up in the 3D workshop.");
+            const build = {
+              source: "",
+              prompt: "Rig",
+              parentVersionId: parent.id,
+              mode: "process" as const,
+              rig: { clips },
+            };
+            const id = randomUUID();
+            p.jobs.push({
+              id,
+              requestId: c.requestId ?? randomUUID(),
+              fingerprint: digest(JSON.stringify(build)),
+              createdAt: now(),
+              status: "queued",
+              build,
+              runId: null,
+              turnId: null,
+              error: null,
+              versionId: null,
+            });
+            await atomicModelFile(
+              await modelPath(this.root, p.id, "jobs", id, "input.json"),
+              JSON.stringify({ build, blueprint: p.blueprint }),
+            );
+            await this.save(p);
+            void this.execute(p.id, id);
+            return { project: p };
+          }
           case "submit": {
             if (p.archived) throw new Error("Restore this project before building.");
             if (p.jobs.some((j) => active(j.status)))
               throw new Error("A model build is already in progress. Read its status first.");
             const build = c.build;
             if (!build?.source.trim()) throw new Error("Provide modeling source.");
-            if (build.mode === "process" || build.process || build.repaint)
+            if (build.mode === "process" || build.process || build.repaint || build.rig)
               throw new Error(
                 "Optimization and repaint are workbench operations, not modeling builds.",
               );

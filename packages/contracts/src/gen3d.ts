@@ -49,6 +49,8 @@ export const GEN3D_REPAINT_VIEWS = [
   "front-left",
   "top",
 ] as const;
+/** Procedural clips the fixed rigging script can add; generic skeletons get idle only. */
+export const GEN3D_ANIMATION_CLIPS = ["idle", "walk", "run", "attack"] as const;
 /** Square size of repaint view renders and of the edited image projected back. */
 export const GEN3D_REPAINT_SIZE = 1024;
 export const Gen3DId = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{1,128}$/));
@@ -160,6 +162,22 @@ export const Gen3DProcessReport = Schema.Struct({
   projectedPct: Schema.optional(Schema.Finite),
   /** Parent materials that received a procedural preset. */
   materials: Schema.optional(Schema.Array(Schema.String)),
+  /** Set on rigged versions (and versions derived from them): the skinned, animated asset. */
+  rig: Schema.optional(
+    Schema.Struct({
+      kind: Schema.Literals(["biped", "quadruped", "generic"]),
+      bones: Schema.Finite,
+      clips: Schema.Array(
+        Schema.Struct({
+          name: Schema.Literals(GEN3D_ANIMATION_CLIPS),
+          seconds: Schema.Finite,
+          loop: Schema.Boolean,
+        }),
+      ),
+      /** Separate small parts weighted to the bone nearest their centre. */
+      attachments: Schema.Finite,
+    }),
+  ),
   /** Set on repainted versions: what the local repaint changed in the base colour texture. */
   repaint: Schema.optional(
     Schema.Struct({
@@ -191,6 +209,15 @@ export const Gen3DBuild = Schema.Struct({
   /** Skeleton graph the body is grown from; kept with the version for later rigging. */
   skeleton: Schema.optional(Gen3DSkeleton),
   process: Schema.optional(Gen3DProcess),
+  /** Rig the parent from the nearest skeleton in its version chain and add these clips. */
+  rig: Schema.optional(
+    Schema.Struct({
+      clips: Schema.Array(Schema.Literals(GEN3D_ANIMATION_CLIPS)).check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(GEN3D_ANIMATION_CLIPS.length),
+      ),
+    }),
+  ),
   /** Local repaint of a baked parent: a masked drawing edit of one view, projected back. */
   repaint: Schema.optional(Gen3DRepaint),
 });
@@ -325,6 +352,7 @@ export const Gen3DCommand = Schema.Struct({
     "optimize",
     "render-view",
     "repaint",
+    "rig",
     "cancel",
     "adopt",
     "select-version",
@@ -354,6 +382,7 @@ export const Gen3DCommand = Schema.Struct({
   exportPreset: Schema.optional(Schema.Literals(["generic", "godot", "unity", "unreal"])),
   exportFormat: Schema.optional(Schema.Literals(["glb", "fbx", "obj", "usdz", "stl"])),
   repaintView: Schema.optional(Gen3DRepaintView),
+  clips: Schema.optional(Schema.Array(Schema.Literals(GEN3D_ANIMATION_CLIPS))),
   instruction: Schema.optional(Schema.String),
   feather: Schema.optional(Schema.Finite),
 });

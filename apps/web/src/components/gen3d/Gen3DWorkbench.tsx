@@ -42,6 +42,7 @@ import { collectResources } from "../resources/resourceLibrary";
 import { DrawingModelPicker } from "../drawing/DrawingPickers";
 import { drawingApi, useImageProviders } from "../drawing/useDrawing";
 import { ensureGen3DThread } from "./Gen3DChat";
+import { AnimationPanel, CLIP_LABELS, RIG_KIND_LABELS } from "./AnimationPanel";
 import { REPAINT_VIEW_LABELS, RepaintPanel } from "./RepaintPanel";
 import { TiledTextureField, validTileSize, type TileChoice } from "./TiledTextureField";
 import {
@@ -64,6 +65,7 @@ const TOOL_LABELS = {
   generate: "Generate",
   optimize: "Optimize",
   texture: "Texture",
+  animation: "Rig & animate",
   export: "Export",
 } as const;
 const STOP_REASONS: Record<string, string> = {
@@ -300,7 +302,9 @@ function ProjectWorkspace({
     command = useGen3DCommand(),
     { settings } = useAppSettings();
   const [selected, setSelected] = useState<string | null>(project.previewVersionId),
-    [tool, setTool] = useState<"generate" | "optimize" | "texture" | "export">("generate"),
+    [tool, setTool] = useState<"generate" | "optimize" | "texture" | "animation" | "export">(
+      "generate",
+    ),
     [panel, setPanel] = useState<"properties" | "assistant">("properties"),
     [view, setView] = useState<"model" | "compare">("model"),
     [drawer, setDrawer] = useState(false),
@@ -436,6 +440,15 @@ function ProjectWorkspace({
           />
         </div>
       )}
+      {panel === "properties" && tool === "animation" && (
+        <AnimationPanel
+          project={project}
+          version={version}
+          disabled={locked || !desktop || !blender?.headless}
+          blenderMissing={desktop && !blender?.headless}
+          act={act}
+        />
+      )}
       {panel === "properties" && tool === "export" && (
         <ExportPanel
           project={project}
@@ -491,7 +504,7 @@ function ProjectWorkspace({
           role="tablist"
           aria-label={tr("3D generation tools")}
         >
-          {(["generate", "optimize", "texture", "export"] as const).map((value) => (
+          {(["generate", "optimize", "texture", "animation", "export"] as const).map((value) => (
             <Button
               key={value}
               size="sm"
@@ -1551,7 +1564,7 @@ function VersionReport({ version }: { version: Gen3DVersion }) {
       <dt className="text-muted-foreground">{tr("Build route")}</dt>
       <dd className="break-words">
         {version.build.mode === "process"
-          ? `${tr(version.build.repaint ? "Repainted" : "Optimized")}${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
+          ? `${tr(version.build.repaint ? "Repainted" : version.build.rig ? "Rigged" : "Optimized")}${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
           : version.build.mode === "blender"
             ? `Blender${version.runtime.blender ? ` · ${version.runtime.blender}` : ""}`
             : "Three.js + SDF"}
@@ -1573,6 +1586,16 @@ function VersionReport({ version }: { version: Gen3DVersion }) {
                   "{n}",
                   String(version.process.projectedPct),
                 )}
+              </dd>
+            </>
+          )}
+          {version.process.rig && (
+            <>
+              <dt className="text-muted-foreground">{tr("Rig")}</dt>
+              <dd className="break-words">
+                {tr(RIG_KIND_LABELS[version.process.rig.kind])} ·{" "}
+                {tr("{n} bones").replace("{n}", String(version.process.rig.bones))} ·{" "}
+                {version.process.rig.clips.map((c) => tr(CLIP_LABELS[c.name])).join(" / ")}
               </dd>
             </>
           )}

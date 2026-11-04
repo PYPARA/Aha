@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import { Effect, Schema } from "effect";
 import { Gen3DBuild, type Gen3DEnvironment, type Gen3DProject } from "@synara/contracts";
+import { modelingAncestor } from "@synara/shared/gen3dVersions";
 import { modelPath } from "@synara/shared/model3dFiles";
 import { GEN3D_RENDERS, gen3DEngine } from "../gen3d/engine";
 import { mcpToolResultError, mcpToolResultJson } from "./protocol";
@@ -19,7 +20,7 @@ SDF builds organic or rounded shapes: sphere([x,y,z], r), capsule(a, b, r), cyli
 Blender route: source is Blender Python (bpy) run in Aha's dedicated Blender instance, which can take a minute to start. Every build starts from an empty scene, so always send the full source. Blender is Z up in metres and front faces -Y; the fixed export converts to glTF Y up, applies modifiers and centres the base. Use Principled BSDF materials only (no texture nodes). Helpers already defined: params; aha_skeleton (build.skeleton or None); aha_point([x,y,z]) converts an Aha Y-up point to Blender; aha_skin(skeleton=None, name='Body', subdivisions=2, material=None) grows a Skin + Subdivision body whose radii match the nodes and that ends at leaf joints; aha_material(name, '#rrggbb', roughness=0.6, metallic=0.0). Aha's policy rejects file and path operations, import/export operators, bpy.ops.wm, getattr/setattr/vars and dunder names. The shared Blender lock also serves the 3D workshop, so a build may wait for it.
 Skeletons: for characters, creatures, trees and tentacles, send build.skeleton as nodes { id, parent (null for the root), position [x,y,z] in metres Y up (the published model frame), radius } (up to 256), and grow the body from it with SDF.skeleton(params.skeleton) or aha_skin(). SDF.skeleton rounds every joint with its radius, so its leaf tips reach one radius beyond the leaf joint. Use rig-friendly ids (hips, spine, chest, neck, head, upperarm_l, forearm_l, hand_l, thigh_l, shin_l, foot_l, tail_1...). The skeleton is saved with the version for later rigging; keep it consistent with the body.
 Scoring: each build renders orthographic silhouettes at the blueprint scale and compares them. views returns the blueprint, diff images (grey = match, orange = model extra, blue = model missing) and renders. The side view may be mirrored in the reference; scoring matches either facing. The total score is a weak signal; the largest deviating region is what stops iteration. Fix the largest regions first and change only what deviates.
-Optimized versions (mode "process") are made by the workbench's fixed Blender pipeline (decimation, UV, baked textures, LODs, collision), and the user may locally repaint their baked texture from a view with a mask and the drawing channel; never submit either kind, and a new modeling build drops those texture edits. get.current is always a modeling version you can continue from, and get.optimizedPreview tells you when the user is viewing an optimized one.
+Optimized versions (mode "process") are made by the workbench's fixed Blender pipeline (decimation, UV, baked textures, LODs, collision), and the user may locally repaint their baked texture from a view with a mask and the drawing channel; the workbench can also rig a version from its skeleton and add idle, walk, run and attack clips. Never submit any of these kinds; a new modeling build drops texture edits and rigs, so keep the skeleton consistent with the body when you change it. get.current is always a modeling version you can continue from, and get.optimizedPreview tells you when the user is viewing an optimized one.
 Rounds: with an active authorization (get.authorization) you may submit up to its remaining rounds in this turn, reading status and views after each build, and stop early when it reports completed. Without one, submit at most one candidate per user message and then report. Jobs are asynchronous: poll status by jobId instead of resubmitting. Submit requires baseRevision and a unique requestId. Report failures accurately; the previous version is kept.`;
 
 const summary = (project: Gen3DProject, environment: Gen3DEnvironment) => {
@@ -27,12 +28,9 @@ const summary = (project: Gen3DProject, environment: Gen3DEnvironment) => {
     project.versions.find((v) => v.id === project.previewVersionId) ??
     project.versions.at(-1) ??
     null;
-  // Optimized and repainted versions have no source; the model keeps modeling from the version
-  // they came from, however many fixed steps (optimize, repaint) lie in between.
-  let current = previewed;
-  for (let i = 0; current?.build.mode === "process" && i < project.versions.length; i++)
-    current = project.versions.find((v) => v.id === current!.build.parentVersionId) ?? current;
-  if (current?.build.mode === "process") current = previewed;
+  // Optimized, repainted and rigged versions have no source; the model keeps modeling from the
+  // version they came from, however many fixed steps lie in between.
+  const current = (previewed && modelingAncestor(project.versions, previewed)) ?? previewed;
   const authorization =
     project.runs.find((r) => r.status === "active") ?? project.runs.at(-1) ?? null;
   return {
