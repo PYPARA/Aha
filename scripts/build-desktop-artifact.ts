@@ -1336,7 +1336,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     synaraSourceTag: options.sourceTag ?? null,
     synaraWindowsPublisherSubject: resolvedBuildConfig.windowsPublisherSubject,
     private: true,
-    description: "Synara desktop build",
+    description: "Aha desktop build",
     author: "Emanuele Di Pietro",
     main: "apps/desktop/dist-electron/main.js",
     build: resolvedBuildConfig.buildConfig,
@@ -1599,7 +1599,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for Synara."),
+  Command.withDescription("Build a desktop artifact for Aha."),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

@@ -11,7 +11,7 @@ const USAGE =
   "Usage: synara-restore-migration-backup <absolute-database-path> " +
   "[--backup-path <absolute-backup-path> --provenance-path <absolute-provenance-path>]";
 const STOP_PROCESSES_WARNING =
-  "WARNING: Stop every Synara process before restoring a migration backup.";
+  "WARNING: Stop every Aha process before restoring a migration backup.";
 
 type RestoreMigrationBackupOutput = Pick<Console, "error" | "log" | "warn">;
 

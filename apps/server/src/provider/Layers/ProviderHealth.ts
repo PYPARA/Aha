@@ -150,7 +150,7 @@ const OPENCODE_PROVIDER = "opencode" as const;
 const PI_PROVIDER = "pi" as const;
 const OMP_PROVIDER = "omp" as const;
 type ProviderStatuses = ReadonlyArray<ServerProviderStatus>;
-const DISABLED_PROVIDER_STATUS_MESSAGE = "Provider is disabled in Synara settings.";
+const DISABLED_PROVIDER_STATUS_MESSAGE = "Provider is disabled in Aha settings.";
 const MINIMUM_ANTIGRAVITY_CLI_VERSION = "1.0.12";
 
 const PROVIDERS = [
@@ -1009,7 +1009,7 @@ function parseCursorAuthStatusFromOutput(result: CommandResult): {
     return {
       status: "warning",
       authStatus: "unknown",
-      message: "Cursor Agent is installed, but Synara could not verify authentication status.",
+      message: "Cursor Agent is installed, but Aha could not verify authentication status.",
     };
   }
 
@@ -1761,7 +1761,7 @@ export const makeCheckDroidProviderStatus = (
         ? { authType: "apiKey", authLabel: "Factory API Key" }
         : {
             message:
-              "Droid CLI is installed. Synara can use the CLI's cached device-pairing login; run `droid` to authenticate locally if needed, or set FACTORY_API_KEY.",
+              "Droid CLI is installed. Aha can use the CLI's cached device-pairing login; run `droid` to authenticate locally if needed, or set FACTORY_API_KEY.",
           }),
     } satisfies ServerProviderStatus;
   });
@@ -2113,7 +2113,7 @@ export const checkPiProviderStatus = (
         checkedAt,
         message:
           versionProbe.outcome === "missing"
-            ? "Pi SDK is bundled, but the Pi CLI (`pi`) is not on PATH, so Synara could not verify the installed CLI version."
+            ? "Pi SDK is bundled, but the Pi CLI (`pi`) is not on PATH, so Aha could not verify the installed CLI version."
             : `Pi SDK is bundled, but the CLI health check failed: ${error instanceof Error ? error.message : String(error)}.`,
       } satisfies ServerProviderStatus;
     }
@@ -2128,7 +2128,7 @@ export const checkPiProviderStatus = (
         authStatus: "unknown" as const,
         checkedAt,
         message:
-          "Pi SDK is bundled, but the CLI health check timed out before Synara could verify the installed version.",
+          "Pi SDK is bundled, but the CLI health check timed out before Aha could verify the installed version.",
       } satisfies ServerProviderStatus;
     }
 
@@ -2162,7 +2162,7 @@ export const checkPiProviderStatus = (
       version: parsedVersion,
       checkedAt,
       message: configuredAgentDir
-        ? `Pi CLI is installed. Synara will use Pi agent dir ${configuredAgentDir}.`
+        ? `Pi CLI is installed. Aha will use Pi agent dir ${configuredAgentDir}.`
         : "Pi CLI is installed. Configure provider credentials inside Pi as needed.",
     } satisfies ServerProviderStatus;
   });
@@ -2217,7 +2217,7 @@ export const checkOmpProviderStatus = (
         available: false,
         authStatus: "unknown" as const,
         checkedAt,
-        message: "OMP CLI health check timed out before Synara could verify the installed version.",
+        message: "OMP CLI health check timed out before Aha could verify the installed version.",
       } satisfies ServerProviderStatus;
     }
 
@@ -2249,7 +2249,7 @@ export const checkOmpProviderStatus = (
       version: parsedVersion,
       checkedAt,
       message: configuredAgentDir
-        ? `OMP CLI is installed. Synara will use the OMP agent dir ${configuredAgentDir}.`
+        ? `OMP CLI is installed. Aha will use the OMP agent dir ${configuredAgentDir}.`
         : "OMP CLI is installed. Configure provider credentials inside the OMP app as needed.",
     } satisfies ServerProviderStatus;
   });
@@ -2330,7 +2330,7 @@ export const checkAntigravityProviderStatus = (
         authStatus: "unknown",
         version: parsedVersion,
         checkedAt,
-        message: `Antigravity CLI ${parsedVersion} is too old for Synara. Upgrade to ${MINIMUM_ANTIGRAVITY_CLI_VERSION} or newer.`,
+        message: `Antigravity CLI ${parsedVersion} is too old for Aha. Upgrade to ${MINIMUM_ANTIGRAVITY_CLI_VERSION} or newer.`,
       } satisfies ServerProviderStatus;
     }
     const models = yield* runAntigravityCommand(["models"], executable, probeEnv).pipe(
@@ -2364,7 +2364,7 @@ export const checkAntigravityProviderStatus = (
       authStatus: "unknown",
       version: parsedVersion,
       checkedAt,
-      message: "Antigravity CLI is installed, but Synara could not verify login by listing models.",
+      message: "Antigravity CLI is installed, but Aha could not verify login by listing models.",
     } satisfies ServerProviderStatus;
   });
 
@@ -2527,7 +2527,7 @@ export const makeCheckCursorProviderStatus = (
         version: parsedVersion,
         checkedAt,
         message:
-          "Cursor Agent is authenticated, but model discovery timed out before Synara could verify available models.",
+          "Cursor Agent is authenticated, but model discovery timed out before Aha could verify available models.",
       } satisfies ServerProviderStatus;
     }
 
@@ -2882,7 +2882,7 @@ function makeUnsupportedProviderInstanceStatus(
   instance: UnsupportedProviderInstance,
   checkedAt: string,
 ): ServerProviderStatus {
-  const unavailableReason = `Provider driver '${instance.driver}' is not supported by this Synara build.`;
+  const unavailableReason = `Provider driver '${instance.driver}' is not supported by this Aha build.`;
   return {
     provider: instance.driver,
     instanceId: instance.instanceId,
@@ -3827,8 +3827,8 @@ export function makeProviderHealthLive(options?: { readonly providerUpdateTimeou
             ...(instanceId ? { instanceId } : {}),
             reason: instance
               ? instanceId
-                ? "Provider instance is disabled in Synara settings."
-                : "Provider is disabled in Synara settings."
+                ? "Provider instance is disabled in Aha settings."
+                : "Provider is disabled in Aha settings."
               : "Provider instance is not configured.",
           });
         const initialInstance = yield* resolveEnabledInstance;
@@ -3967,7 +3967,7 @@ export function makeProviderHealthLive(options?: { readonly providerUpdateTimeou
               startedAt,
               finishedAt,
               message: stillOutdated
-                ? `Update command completed, but Synara still detects an outdated provider version${stillOutdatedVersions}.`
+                ? `Update command completed, but Aha still detects an outdated provider version${stillOutdatedVersions}.`
                 : "Provider updated.",
               output: output ? output.slice(0, UPDATE_OUTPUT_MAX_BYTES) : null,
             }),

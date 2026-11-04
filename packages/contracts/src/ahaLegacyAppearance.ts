@@ -169,7 +169,7 @@ export const defaultTheme = (): Theme => ({
 });
 export const synaraTheme = (): Theme => ({
   id: "aha-synara",
-  name: "Synara",
+  name: "Aha 经典",
   dark: {
     ...profile(true),
     palette: { background: "#181818", foreground: "#FFFFFF", accent: "#339CFF" },

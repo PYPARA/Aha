@@ -5,6 +5,7 @@ import {
   type ProviderInteractionMode,
   type ProviderKind,
 } from "@synara/contracts";
+import { FEEDBACK_AVAILABLE } from "./feedback";
 import { DEFAULT_PROVIDER_ORDER } from "./providerOrdering";
 import {
   BUILT_IN_COMPOSER_SLASH_COMMANDS,
@@ -231,7 +232,7 @@ const COMPOSER_SLASH_COMMAND_DEFINITIONS: Record<
   "computer-use": {
     command: "computer-use",
     label: "/computer-use",
-    description: "Use Synara Computer for this request only",
+    description: "Use Aha Computer for this request only",
     source: "app",
   },
   fast: {
@@ -261,7 +262,7 @@ const COMPOSER_SLASH_COMMAND_DEFINITIONS: Record<
   feedback: {
     command: "feedback",
     label: "/feedback",
-    description: "Send feedback to the Synara team",
+    description: "Send feedback to the Aha team",
     source: "app",
   },
   automation: {
@@ -518,7 +519,7 @@ export function getAvailableComposerSlashCommands(input: {
           ...(input.canOfferExportCommand ? (["export"] as const) : []),
           "goal",
           "rename",
-          "feedback",
+          ...(FEEDBACK_AVAILABLE ? (["feedback"] as const) : []),
           "automation",
         ]
       : [
@@ -536,7 +537,7 @@ export function getAvailableComposerSlashCommands(input: {
           "debug",
           "computer-use",
           "default",
-          "feedback",
+          ...(FEEDBACK_AVAILABLE ? (["feedback"] as const) : []),
           "automation",
         ];
   return availableCommands.filter((command) => !collidingNativeCommandNames.has(command));

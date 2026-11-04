@@ -16,7 +16,8 @@ export interface ProviderDescriptor {
    */
   readonly supportsNativeTurnSteering: boolean;
   /** Synara docs page covering install, sign-in, and verification for this runtime. */
-  readonly setupDocsHref: string;
+  /** Upstream setup guides live on the Synara site; Aha ships none, so the UI hides the link. */
+  readonly setupDocsHref: string | null;
   readonly usage: {
     readonly signInCommand: string;
     readonly learnMoreHref: string;
@@ -37,7 +38,7 @@ export const PROVIDER_DESCRIPTORS = defineProviderDescriptors([
     kind: "codex",
     displayName: PROVIDER_DISPLAY_NAMES.codex,
     available: true,
-    setupDocsHref: "https://trysynara.com/docs/providers/codex",
+    setupDocsHref: null,
     supportsNativeTurnSteering: true,
     usage: {
       signInCommand: "codex login",
@@ -48,7 +49,7 @@ export const PROVIDER_DESCRIPTORS = defineProviderDescriptors([
     kind: "claudeAgent",
     displayName: PROVIDER_DISPLAY_NAMES.claudeAgent,
     available: true,
-    setupDocsHref: "https://trysynara.com/docs/providers/claude-code",
+    setupDocsHref: null,
     supportsNativeTurnSteering: true,
     usage: {
       signInCommand: "claude",
@@ -59,7 +60,7 @@ export const PROVIDER_DESCRIPTORS = defineProviderDescriptors([
     kind: "cursor",
     displayName: PROVIDER_DISPLAY_NAMES.cursor,
     available: true,
-    setupDocsHref: "https://trysynara.com/docs/providers/cursor",
+    setupDocsHref: null,
     supportsNativeTurnSteering: false,
     usage: {
       signInCommand: "cursor-agent login",
@@ -70,7 +71,7 @@ export const PROVIDER_DESCRIPTORS = defineProviderDescriptors([
     kind: "antigravity",
     displayName: PROVIDER_DISPLAY_NAMES.antigravity,
     available: true,
-    setupDocsHref: "https://trysynara.com/docs/providers/antigravity",
+    setupDocsHref: null,
     supportsNativeTurnSteering: false,
     usage: {
       signInCommand: "agy",
@@ -81,7 +82,7 @@ export const PROVIDER_DESCRIPTORS = defineProviderDescriptors([
     kind: "grok",
     displayName: PROVIDER_DISPLAY_NAMES.grok,
     available: true,
-    setupDocsHref: "https://trysynara.com/docs/providers/grok",
+    setupDocsHref: null,
     supportsNativeTurnSteering: false,
     usage: {
       signInCommand: "grok login",
@@ -92,7 +93,7 @@ export const PROVIDER_DESCRIPTORS = defineProviderDescriptors([
     kind: "droid",
     displayName: PROVIDER_DISPLAY_NAMES.droid,
     available: true,
-    setupDocsHref: "https://trysynara.com/docs/providers/factory-droid",
+    setupDocsHref: null,
     supportsNativeTurnSteering: false,
     usage: {
       signInCommand: "droid",
@@ -103,7 +104,7 @@ export const PROVIDER_DESCRIPTORS = defineProviderDescriptors([
     kind: "opencode",
     displayName: PROVIDER_DISPLAY_NAMES.opencode,
     available: true,
-    setupDocsHref: "https://trysynara.com/docs/providers/opencode",
+    setupDocsHref: null,
     supportsNativeTurnSteering: false,
     usage: {
       signInCommand: "opencode auth login",
@@ -114,7 +115,7 @@ export const PROVIDER_DESCRIPTORS = defineProviderDescriptors([
     kind: "pi",
     displayName: PROVIDER_DISPLAY_NAMES.pi,
     available: true,
-    setupDocsHref: "https://trysynara.com/docs/providers/pi",
+    setupDocsHref: null,
     supportsNativeTurnSteering: true,
     usage: {
       signInCommand: "pi",
@@ -125,7 +126,7 @@ export const PROVIDER_DESCRIPTORS = defineProviderDescriptors([
     kind: "devin",
     displayName: PROVIDER_DISPLAY_NAMES.devin,
     available: true,
-    setupDocsHref: "https://trysynara.com/docs/providers/devin",
+    setupDocsHref: null,
     supportsNativeTurnSteering: false,
     usage: {
       signInCommand: "devin auth login",
@@ -136,7 +137,7 @@ export const PROVIDER_DESCRIPTORS = defineProviderDescriptors([
     kind: "omp",
     displayName: PROVIDER_DISPLAY_NAMES.omp,
     available: true,
-    setupDocsHref: "https://trysynara.com/docs/providers/omp",
+    setupDocsHref: null,
     supportsNativeTurnSteering: false,
     usage: null,
   },

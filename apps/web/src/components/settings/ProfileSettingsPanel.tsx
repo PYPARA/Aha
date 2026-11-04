@@ -130,7 +130,7 @@ function ProfileContent({
             <span>{handle}</span>
             <span aria-hidden>·</span>
             <span className="rounded-full border px-1.5 py-px text-ui leading-snug text-muted-foreground">
-              Synara
+              Aha
             </span>
           </div>
         </div>

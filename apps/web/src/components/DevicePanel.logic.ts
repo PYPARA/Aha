@@ -543,7 +543,7 @@ export function resolveDeviceAvailabilityView(
       return {
         kind: "blocked",
         title: "iOS Simulator needs macOS",
-        description: `This Synara server runs on ${availability.platform}. Simulators are only available when the server runs on a Mac with Xcode installed.`,
+        description: `This Aha server runs on ${availability.platform}. Simulators are only available when the server runs on a Mac with Xcode installed.`,
         steps: [],
         retryable: false,
       };

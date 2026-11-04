@@ -363,7 +363,7 @@ export function readTapRequest(input: {
     if (hasPoint) {
       throw new DeviceUiTargetError(
         "A tap takes either an element (identifier or label, with optional role) or x and y, not both. " +
-          "Pass the element alone to let Synara resolve its own tap point.",
+          "Pass the element alone to let Aha resolve its own tap point.",
       );
     }
     return {
@@ -374,7 +374,7 @@ export function readTapRequest(input: {
   if (!hasPoint) {
     throw new DeviceUiTargetError(
       "A tap needs an element (identifier or label, with optional role) or both x and y. " +
-        "Prefer the element: Synara then resolves its own tap point from the accessibility tree.",
+        "Prefer the element: Aha then resolves its own tap point from the accessibility tree.",
     );
   }
   return { kind: "point", x: input.x as number, y: input.y as number };

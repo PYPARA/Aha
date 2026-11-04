@@ -141,7 +141,7 @@ export function normalizeLibraryRelativePath(rawPath: string) {
       normalized.split("/").some(isGitDirName)
         ? Effect.fail(fail("Library paths cannot address repository metadata.", "forbidden"))
         : normalized.split("/").some(isReservedEntryName)
-          ? Effect.fail(fail(`Library path "${rawPath}" is reserved for Synara.`, "forbidden"))
+          ? Effect.fail(fail(`Library path "${rawPath}" is reserved for Aha.`, "forbidden"))
           : Effect.succeed(normalized),
     ),
   );
@@ -418,7 +418,7 @@ export function ensureLibraryRepo(
         // blocks them before requests ever reach this point.
         if (options?.isManaged !== true) {
           return yield* fail(
-            `Library root "${root}" is a git repository that was not created by Synara.`,
+            `Library root "${root}" is a git repository that was not created by Aha.`,
             "forbidden",
           );
         }
@@ -493,7 +493,7 @@ export function moveLibraryRoot(input: {
           return { moved: true };
         }
         return yield* fail(
-          `Library destination "${toRoot}" is a git repository that was not created by Synara.`,
+          `Library destination "${toRoot}" is a git repository that was not created by Aha.`,
           "conflict",
         );
       }
@@ -617,7 +617,7 @@ export function assertLibraryRootLocation(input: {
       // library; ensureLibraryRepo adopts it once by writing the marker.
       if (!input.isCustomPath) return;
       return yield* fail(
-        `Library path "${input.root}" is a git repository that was not created by Synara.`,
+        `Library path "${input.root}" is a git repository that was not created by Aha.`,
         "forbidden",
       );
     }

@@ -41,7 +41,7 @@ import {
   type ComputerBackendEventListener,
 } from "./ComputerBackend.ts";
 
-const FALLBACK_MESSAGE = "The Synara computer backend is unavailable for an unstated reason.";
+const FALLBACK_MESSAGE = "The Aha computer backend is unavailable for an unstated reason.";
 
 export interface UnavailableComputerBackendOptions {
   readonly computerId?: string;

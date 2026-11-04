@@ -10,7 +10,7 @@
 | v1.0.3 | `9e01962e0b1e8fec9fb0e17f17a64017bc4eaf94` | `56295aa4d0f0c58569a7bb548f1eca5d3678fe95` | 已合入                      |
 | v1.0.5 | `1eb2beb6b5019fc311f23a3deb5362f68d07d537` | `3027d94f4f79666513e8f99e8f5d6b9f273fabbc` | 已合入                      |
 | v1.0.7 | `b8cf9382d36ac1120b3fe16241cfd96189a9a71e` | `ee45cc9a3e7cc41c6c69e6532064970eb74d1697` | 已合入，包含 v1.0.6         |
-| v1.1.0 | `b6aa37bc82eec649dd527c5956fdccc2c63d3b24` | 本轮合并提交（`merge/synara-1.1.0`）       | 已合入，包含 v1.0.8、v1.0.9 |
+| v1.1.0 | `b6aa37bc82eec649dd527c5956fdccc2c63d3b24` | `08378b5241c274d9c5649f5d5887dad1fdc758f5` | 已合入，包含 v1.0.8、v1.0.9 |
 
 v1.1.0 升级日期为 2026-11-04，升级前 main 检查点为 `def5b0b0ce30e270b2878a0c9273f8ba7e72f057`。采用 v1.1.0 稳定版；未采用 `v1.1.1-beta.1` 和其后仅含文档的 `upstream/main`，也不接 Remote 谱系。
 
@@ -51,6 +51,8 @@ v1.0.7 当轮未新增或重编号迁移，迁移定义为 137 条，精灵工�
 1.0.5 源码合并及精简验收已完成；格式、lint、六个工作区类型检查、保留的单元和 Chromium 测试、显式本机 mock E2E、桌面源码构建、contracts 声明、原生依赖和迁移谱系检查均已通过。独立数据目录升级与重启检查通过。详细日志在忽略目录 `.tmp/synara-1.0.5-merge/` 和 `.tmp/aha-cleanup-20261016/`；这些是当轮结果，不代表后续未提交修改的验证状态。
 
 1.0.7 验收通过：564 项单元测试、226 项 Chromium 测试，绘图和精灵显式本机 mock E2E、六工作区类型检查、源码格式和 lint、桌面及 contracts 构建、运行时依赖与原生 PTY smoke、103 个同族发布标签的迁移谱系检查，以及独立数据升级重启比对。lint 无新增告警。本次格式检查排除并行新增且未纳入合并的 `docs/design/` 方案文档；保留原有核心回归，仅提取本轮必要的上游行为断言及夹具。详细文件决策、命令、截图和修正记录在 `.tmp/synara-1.0.7-merge/` 与 `.tmp/validation/`。本轮未打包、替换安装或推送远端，真实付费供应商会话及正式安装包升级未作为验收结果。
+
+1.1.0 合并后另行清理品牌与外部服务：界面、原生弹窗、关于面板、macOS 权限提示与原生 helper 文案改为 Aha；反馈不再默认提交到上游服务（仅在配置 `VITE_FEEDBACK_ENDPOINT` 时显示），移除 trysynara 文档、安装指南、分享与 OAuth 链接；删除未引用的 Synara 图标、`assets/prod`、`assets/dev` 和上游 PR 截图。内部包名、协议与工具标识保持不变，规则见 [品牌与界面语言](docs/development/BRANDING.md)。
 
 1.1.0 验收通过：719 项单元测试、254 项 Chromium 测试、六工作区类型检查、源码格式与 lint（无 Aha 新增告警，新增告警均来自上游代码）、`i18n:check`、桌面及 contracts 构建、110 个同族发布标签的迁移谱系检查，以及独立数据升级重启比对。排除上游新增的 118 个文件（文档、PR 素材、marketing、CI、Defender 与 release 脚本、编辑器 e2e、通用测试），221 个已删除文件保持删除；保留 141 迁移与 i18n 核心测试，并按上游 1.1.0 更新 Aha 提取的回归夹具。测试统一使用临时 `AHA_DOCUMENTS_DIR`，浏览器测试以 `VITE_AHA_DEFAULT_LANGUAGE=system` 维持上游英文断言。详细决策与日志在 `.tmp/synara-1.1.0-merge/`。本轮未打包、替换安装或推送远端。
 

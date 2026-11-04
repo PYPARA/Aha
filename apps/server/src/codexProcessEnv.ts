@@ -262,7 +262,7 @@ function parseManagedCodexConfig(config: string): {
     root = parseToml(config) as Record<string, unknown>;
   } catch (error) {
     throw new Error(
-      "Codex config.toml must be valid TOML so Synara can verify managed account state safely.",
+      "Codex config.toml must be valid TOML so Aha can verify managed account state safely.",
       { cause: error },
     );
   }
@@ -296,7 +296,7 @@ function assertCodexSqliteHomeMatchesSource(input: {
   ) {
     const displayPath = typeof configured === "string" && configured ? configured : "<invalid>";
     throw new Error(
-      `Codex config sqlite_home at ${displayPath} must resolve to the source CODEX_HOME ${path.resolve(input.sourceHomePath)} so Synara account overlays share one continuation database.`,
+      `Codex config sqlite_home at ${displayPath} must resolve to the source CODEX_HOME ${path.resolve(input.sourceHomePath)} so Aha account overlays share one continuation database.`,
     );
   }
 }
@@ -1063,7 +1063,7 @@ export function disableCodexConfigSections(
       : undefined;
     if (enabledValueIndex !== undefined) {
       if (!/^(?:true|false)[\t ]*(?:#.*)?$/.test(line.slice(enabledValueIndex))) {
-        throw new Error("Codex plugin enabled must be a boolean before Synara can disable it.");
+        throw new Error("Codex plugin enabled must be a boolean before Aha can disable it.");
       }
       output.push("enabled = false");
       targetSectionHasEnabled = true;

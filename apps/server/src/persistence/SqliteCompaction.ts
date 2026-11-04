@@ -190,7 +190,7 @@ export const compactSqliteDatabase = (dbPath: string, signal?: AbortSignal) =>
         installed
           ? Effect.fail(
               new Error(
-                `Compact database installed (${installed.beforeBytes} → ${installed.afterBytes} bytes), but final durability or lock cleanup could not be confirmed. Keep Synara closed and inspect the database before retrying. ${cause instanceof Error ? cause.message : String(cause)}`,
+                `Compact database installed (${installed.beforeBytes} → ${installed.afterBytes} bytes), but final durability or lock cleanup could not be confirmed. Keep Aha closed and inspect the database before retrying. ${cause instanceof Error ? cause.message : String(cause)}`,
               ),
             )
           : Effect.fail(cause),

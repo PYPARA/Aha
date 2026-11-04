@@ -305,7 +305,7 @@ export const droidUsageFetcher: ProviderUsageFetcher = {
             "droid",
             ctx.nowMs,
             SOURCE,
-            "Factory CLI is signed in, but Synara could not read its local credential.",
+            "Factory CLI is signed in, but Aha could not read its local credential.",
           )
         : needsAuthSnapshot("droid", ctx.nowMs, SOURCE);
     }

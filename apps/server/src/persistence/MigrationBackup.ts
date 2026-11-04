@@ -62,7 +62,7 @@ export class MigrationRecoveryRequiredError extends Error {
     detail?: string,
   ) {
     super(
-      `Migration recovery is required for ${dbPath}.${detail ? ` ${detail}` : ""} Stop every Synara process, then run: synara-restore-migration-backup ${shellQuote(dbPath)}`,
+      `Migration recovery is required for ${dbPath}.${detail ? ` ${detail}` : ""} Stop every Aha process, then run: synara-restore-migration-backup ${shellQuote(dbPath)}`,
     );
     this.name = "MigrationRecoveryRequiredError";
   }
@@ -96,7 +96,7 @@ export class InsufficientMigrationBackupSpaceError extends Error {
     super(
       `Not enough free disk space to back up the database before upgrading it. ` +
         `About ${formatBytes(requiredBytes)} is needed in ${directory}, but only ` +
-        `${formatBytes(availableBytes)} is free. Free up disk space and start Synara again.`,
+        `${formatBytes(availableBytes)} is free. Free up disk space and start Aha again.`,
     );
     this.name = "InsufficientMigrationBackupSpaceError";
   }
@@ -879,7 +879,7 @@ function migrationRecoveryPayload(dbPath: string, backup: MigrationBackupResult)
       arguments: [dbPath],
     },
     recovery:
-      "Stop every Synara process, then run the explicit migration-backup restore command for this database.",
+      "Stop every Aha process, then run the explicit migration-backup restore command for this database.",
   } as const;
 }
 

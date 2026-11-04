@@ -38,7 +38,7 @@ function escapeHtml(value: string): string {
 export function renderConnectorCallbackPage(outcome: McpConnectorCallbackOutcome): string {
   const title = outcome.ok ? `${outcome.name} is connected` : outcome.title;
   const message = outcome.ok
-    ? "You can close this tab and return to Synara."
+    ? "You can close this tab and return to Aha."
     : `${outcome.message} You can close this tab.`;
   return `<!doctype html>
 <html lang="en">

@@ -462,7 +462,7 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
     definition: {
       name: "synara_read_kanban_board",
       description:
-        "Read the durable Kanban board: projects and their columns (Draft, In Progress, Awaiting you, Done), each card with provider/model, branch/worktree, PR state, a thread summary, and its attention flags. Column and attention derive from the same shared model as the Synara board UI, so a card's column here matches what the board renders; client-only draft/optimistic overlays the UI shows are not included. Attention flags are awaiting-approval, awaiting-input, failed, stuck, needs-review — an Awaiting-you card is waiting on the human (approval or input) and cannot be moved by synara_move_kanban_card.",
+        "Read the durable Kanban board: projects and their columns (Draft, In Progress, Awaiting you, Done), each card with provider/model, branch/worktree, PR state, a thread summary, and its attention flags. Column and attention derive from the same shared model as the Aha board UI, so a card's column here matches what the board renders; client-only draft/optimistic overlays the UI shows are not included. Attention flags are awaiting-approval, awaiting-input, failed, stuck, needs-review — an Awaiting-you card is waiting on the human (approval or input) and cannot be moved by synara_move_kanban_card.",
       inputSchema: {
         type: "object",
         properties: {
@@ -474,7 +474,7 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
         additionalProperties: false,
       },
       annotations: {
-        title: "Read the Synara kanban board",
+        title: "Read the Aha kanban board",
         ...READ_ONLY_TOOL_ANNOTATIONS,
       },
     },
@@ -589,7 +589,7 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
         additionalProperties: false,
       },
       annotations: {
-        title: "Read a Synara kanban card",
+        title: "Read a Aha kanban card",
         ...READ_ONLY_TOOL_ANNOTATIONS,
       },
     },
@@ -652,7 +652,7 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
     definition: {
       name: "synara_create_kanban_task",
       description:
-        "Create a Kanban task from a title and optional description/prompt: starts a new Synara thread and immediately starts a turn, so the card renders In Progress while the turn is live. Reuse the returned threadId with synara_read_thread or synara_move_kanban_card. requestId is required and retries with the same requestId replay exactly-once.",
+        "Create a Kanban task from a title and optional description/prompt: starts a new Aha thread and immediately starts a turn, so the card renders In Progress while the turn is live. Reuse the returned threadId with synara_read_thread or synara_move_kanban_card. requestId is required and retries with the same requestId replay exactly-once.",
       inputSchema: {
         type: "object",
         properties: {
@@ -993,7 +993,7 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
     definition: {
       name: "synara_create_kanban_draft",
       description:
-        "Create a Kanban draft card from a local-checkout thread: starts a new Synara thread without starting a turn, so the card renders in Draft until synara_move_kanban_card starts its work with a message. Optional description is stored as the thread notes. requestId is required as the in-flight concurrency key but drafts are not idempotent: every call creates one thread, so never retry blindly — check the board first.",
+        "Create a Kanban draft card from a local-checkout thread: starts a new Aha thread without starting a turn, so the card renders in Draft until synara_move_kanban_card starts its work with a message. Optional description is stored as the thread notes. requestId is required as the in-flight concurrency key but drafts are not idempotent: every call creates one thread, so never retry blindly — check the board first.",
       inputSchema: {
         type: "object",
         properties: {

@@ -3308,7 +3308,7 @@ export const makeProjectAgentService = Effect.gen(function* () {
             .pipe(Effect.mapError(toServiceError("Failed to resolve workspacePath.")));
           if (Option.isNone(project)) {
             return yield* Effect.fail(
-              fail(`No Synara project owns workspace "${input.workspacePath}".`, "not-found"),
+              fail(`No Aha project owns workspace "${input.workspacePath}".`, "not-found"),
             );
           }
           return project.value.id;
@@ -4813,7 +4813,7 @@ export const makeProjectAgentService = Effect.gen(function* () {
           if (diskHash !== syncedMarker && diskHash !== head.value.contentHash) {
             return yield* Effect.fail(
               fail(
-                "The Markdown file changed outside Synara. Import the external copy explicitly instead of overwriting it.",
+                "The Markdown file changed outside Aha. Import the external copy explicitly instead of overwriting it.",
                 "conflict",
               ),
             );
@@ -5282,7 +5282,7 @@ export const makeProjectAgentService = Effect.gen(function* () {
                   text:
                     workerReports.length > 0
                       ? workerReports.join("\n\n")
-                      : "None yet. Synara writes inbox/<threadId>/report.md when a worker finishes or dies.",
+                      : "None yet. Aha writes inbox/<threadId>/report.md when a worker finishes or dies.",
                 },
               ]
             : []),

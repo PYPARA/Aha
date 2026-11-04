@@ -88,8 +88,8 @@ export function buildExternalMcpClientConfiguration(
       ),
       copyLabel: "Copy Codex command",
       instruction: /win/i.test(platform)
-        ? "Run this command in PowerShell. Codex will save Synara as a local MCP server; then open a new Codex task."
-        : "Run this command in Terminal. Codex will save Synara as a local MCP server; then open a new Codex task.",
+        ? "Run this command in PowerShell. Codex will save Aha as a local MCP server; then open a new Codex task."
+        : "Run this command in Terminal. Codex will save Aha as a local MCP server; then open a new Codex task.",
     };
   }
 
@@ -117,8 +117,8 @@ export function buildExternalMcpClientConfiguration(
       ),
       copyLabel: "Copy Claude command",
       instruction: /win/i.test(platform)
-        ? "Run this command in PowerShell. Claude Code will make Synara available in all your projects."
-        : "Run this command in Terminal. Claude Code will make Synara available in all your projects.",
+        ? "Run this command in PowerShell. Claude Code will make Aha available in all your projects."
+        : "Run this command in Terminal. Claude Code will make Aha available in all your projects.",
     };
   }
 
@@ -128,7 +128,7 @@ export function buildExternalMcpClientConfiguration(
     copyLabel: "Copy configuration",
     instruction:
       client === "claudeDesktop"
-        ? "In Claude Desktop, open Settings → Developer → Edit Config. Add the Synara entry without removing existing servers, save, and restart Claude Desktop."
+        ? "In Claude Desktop, open Settings → Developer → Edit Config. Add the Aha entry without removing existing servers, save, and restart Claude Desktop."
         : "Paste this into your app's local stdio MCP configuration.",
   };
 }
@@ -136,9 +136,9 @@ export function buildExternalMcpClientConfiguration(
 export function buildExternalMcpExamplePrompt(projectTitle: string | null): string {
   return [
     projectTitle === null
-      ? "Use Synara to create a new task: call synara_overview first, pick the most relevant project, and tell me which one you chose."
-      : `Use Synara to create a new task in the project named ${JSON.stringify(projectTitle)}.`,
-    "First inspect Synara's capabilities and choose an exact available provider and model; do not guess model names.",
+      ? "Use Aha to create a new task: call synara_overview first, pick the most relevant project, and tell me which one you chose."
+      : `Use Aha to create a new task in the project named ${JSON.stringify(projectTitle)}.`,
+    "First inspect Aha's capabilities and choose an exact available provider and model; do not guess model names.",
     "Use an isolated managed worktree and approval-required execution.",
     "Goal: [DESCRIBE THE WORK].",
     "Wait for the task to finish, then read the result and summarize it for me.",
@@ -158,7 +158,7 @@ export function buildExternalMcpSetupPrompt(input: {
   const codex = buildExternalMcpClientConfiguration("codex", input.stdio, platform);
   const claude = buildExternalMcpClientConfiguration("claudeCode", input.stdio, platform);
   const sections: string[] = [
-    "Connect this coding agent to Synara via MCP. Complete every step yourself, in order, and report what happened.",
+    "Connect this coding agent to Aha via MCP. Complete every step yourself, in order, and report what happened.",
   ];
   if (input.setupCommand !== null) {
     sections.push(
@@ -173,7 +173,7 @@ export function buildExternalMcpSetupPrompt(input: {
   }
   sections.push(
     [
-      `Step 2 — Register Synara as a stdio MCP server named "${EXTERNAL_MCP_SERVER_NAME}" in your own configuration, using whichever mechanism your app supports:`,
+      `Step 2 — Register Aha as a stdio MCP server named "${EXTERNAL_MCP_SERVER_NAME}" in your own configuration, using whichever mechanism your app supports:`,
       "",
       `If you are Codex, run: ${codex.value}`,
       `If you are Claude Code, run: ${claude.value}`,

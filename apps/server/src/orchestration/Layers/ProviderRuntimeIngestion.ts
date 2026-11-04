@@ -2568,7 +2568,7 @@ const make = Effect.gen(function* () {
                       id: overflowId,
                       tone: "error",
                       kind: "subagent.materialization.capped",
-                      summary: `Subagent limit reached: Synara shows up to ${MAX_NATIVE_CHILDREN_PER_PARENT_TURN} subagents per turn. Additional subagents keep running, but their work is not shown.`,
+                      summary: `Subagent limit reached: Aha shows up to ${MAX_NATIVE_CHILDREN_PER_PARENT_TURN} subagents per turn. Additional subagents keep running, but their work is not shown.`,
                       payload: {
                         source: "provider_native",
                         cap: MAX_NATIVE_CHILDREN_PER_PARENT_TURN,

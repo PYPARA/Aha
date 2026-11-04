@@ -162,7 +162,7 @@ const providerInstanceAvailability = (
 // tool definition, so repeating the full policy here adds tens of thousands of
 // context characters per round without adding authority or safety.
 const AGENT_GATEWAY_INSTRUCTIONS =
-  "Synara tools are thread-scoped. Use browser_* only for Synara's shared in-app browser runtime; follow the provider-delivered <synara_host_context> for full policy.";
+  "Aha tools are thread-scoped. Use browser_* only for Aha's shared in-app browser runtime; follow the provider-delivered <synara_host_context> for full policy.";
 
 function readThreadGoalArg(args: Record<string, unknown>): string {
   if (!("goal" in args)) {
@@ -468,13 +468,13 @@ export const makeAgentGateway = Effect.gen(function* () {
     maxItems: 16,
     items: { type: "string" },
     description:
-      "IDs of original human messages in this coordinator conversation. Omit only when delegating the current human turn. Synara forwards their canonical text and attachments.",
+      "IDs of original human messages in this coordinator conversation. Omit only when delegating the current human turn. Aha forwards their canonical text and attachments.",
   };
   const taskKeySchema = {
     type: "string",
     maxLength: 128,
     description:
-      "Stable identity of this task inside the request. In a Hub, pass one short lowercase key per task (letters, digits, '.', '_', ':', '-'). Synara freezes the key at the first decision, so retrying or restarting with the same key reuses the same worker instead of creating a second one, while a new key adds a new task from the same original message. Ignore this outside Hubs.",
+      "Stable identity of this task inside the request. In a Hub, pass one short lowercase key per task (letters, digits, '.', '_', ':', '-'). Aha freezes the key at the first decision, so retrying or restarting with the same key reuses the same worker instead of creating a second one, while a new key adds a new task from the same original message. Ignore this outside Hubs.",
   };
   const routingReasonSchema = {
     type: "string",
@@ -489,7 +489,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     definition: {
       name: "synara_create_threads",
       description:
-        "Create an exact batch of 1–20 standalone Synara threads. Hub coordinators instead submit durable workItems to the Hub queue: accepted does not mean started, and workerThreadId is available after admission. Give each Hub task a stable taskKey: the Hub freezes that key at the first decision, so a retry after a crash or a restart replays the same worker, while a new key from the same original message adds another task. Worktree threads start on a Synara-managed temporary branch pinned at baseRef (or the selected checkout's HEAD) and copy local checkout changes plus .worktreeinclude files when the ref is that checkout's HEAD; on the first turn Synara may rename the branch after the prompt and publish it. Validation/preflight failures create nothing and may be corrected with the same requestId; durable retries replay the exact operation. Each created thread's result includes a ready-to-use link (`thread://<threadId>`); when you mention a thread in a message to the user, write it as a markdown link like [title](thread://<threadId>).",
+        "Create an exact batch of 1–20 standalone Aha threads. Hub coordinators instead submit durable workItems to the Hub queue: accepted does not mean started, and workerThreadId is available after admission. Give each Hub task a stable taskKey: the Hub freezes that key at the first decision, so a retry after a crash or a restart replays the same worker, while a new key from the same original message adds another task. Worktree threads start on a Synara-managed temporary branch pinned at baseRef (or the selected checkout's HEAD) and copy local checkout changes plus .worktreeinclude files when the ref is that checkout's HEAD; on the first turn Aha may rename the branch after the prompt and publish it. Validation/preflight failures create nothing and may be corrected with the same requestId; durable retries replay the exact operation. Each created thread's result includes a ready-to-use link (`thread://<threadId>`); when you mention a thread in a message to the user, write it as a markdown link like [title](thread://<threadId>).",
       inputSchema: {
         type: "object",
         properties: {
@@ -541,7 +541,7 @@ export const makeAgentGateway = Effect.gen(function* () {
         additionalProperties: false,
       },
       annotations: {
-        title: "Create Synara threads",
+        title: "Create Aha threads",
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: true,
@@ -557,7 +557,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     definition: {
       name: "synara_create_thread",
       description:
-        "Create exactly one standalone Synara thread. Hub coordinators receive a durable workItems entry that can remain queued until a worker slot is available; pass a stable taskKey so a retry after a crash or restart reuses the same worker. Worktree threads start on a Synara-managed temporary branch pinned at baseRef; on the first turn Synara may rename the branch after the prompt and publish it. For two or more threads use one synara_create_threads call instead. The result includes a ready-to-use link (`thread://<threadId>`); when you mention the thread in a message to the user, write it as a markdown link like [title](thread://<threadId>).",
+        "Create exactly one standalone Aha thread. Hub coordinators receive a durable workItems entry that can remain queued until a worker slot is available; pass a stable taskKey so a retry after a crash or restart reuses the same worker. Worktree threads start on a Synara-managed temporary branch pinned at baseRef; on the first turn Aha may rename the branch after the prompt and publish it. For two or more threads use one synara_create_threads call instead. The result includes a ready-to-use link (`thread://<threadId>`); when you mention the thread in a message to the user, write it as a markdown link like [title](thread://<threadId>).",
       inputSchema: {
         type: "object",
         properties: {
@@ -599,7 +599,7 @@ export const makeAgentGateway = Effect.gen(function* () {
         additionalProperties: false,
       },
       annotations: {
-        title: "Create a Synara thread",
+        title: "Create a Aha thread",
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: true,
@@ -686,7 +686,7 @@ export const makeAgentGateway = Effect.gen(function* () {
         required: ["threadId", "message"],
         additionalProperties: false,
       },
-      annotations: { title: "Send a Synara message", ...WRITE_TOOL_ANNOTATIONS },
+      annotations: { title: "Send a Aha message", ...WRITE_TOOL_ANNOTATIONS },
     },
     handler: (args, context) =>
       Effect.gen(function* () {
@@ -843,7 +843,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     requiresActiveTurn: true,
     definition: {
       name: "synara_interrupt_thread",
-      description: "Interrupt the running turn of a Synara thread.",
+      description: "Interrupt the running turn of a Aha thread.",
       inputSchema: {
         type: "object",
         properties: {
@@ -852,7 +852,7 @@ export const makeAgentGateway = Effect.gen(function* () {
         required: ["threadId"],
         additionalProperties: false,
       },
-      annotations: { title: "Interrupt a Synara thread", ...WRITE_TOOL_ANNOTATIONS },
+      annotations: { title: "Interrupt a Aha thread", ...WRITE_TOOL_ANNOTATIONS },
     },
     handler: (args, context) =>
       Effect.gen(function* () {
@@ -889,7 +889,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     requiresActiveTurn: true,
     definition: {
       name: "synara_set_thread_title",
-      description: "Rename a Synara thread.",
+      description: "Rename a Aha thread.",
       inputSchema: {
         type: "object",
         properties: {
@@ -899,7 +899,7 @@ export const makeAgentGateway = Effect.gen(function* () {
         required: ["threadId", "title"],
         additionalProperties: false,
       },
-      annotations: { title: "Rename a Synara thread", ...WRITE_TOOL_ANNOTATIONS },
+      annotations: { title: "Rename a Aha thread", ...WRITE_TOOL_ANNOTATIONS },
     },
     handler: (args, context) =>
       Effect.gen(function* () {
@@ -926,7 +926,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     definition: {
       name: "synara_set_thread_pull_request",
       description:
-        "Associate a pull request with a Synara thread. Use this after successfully creating the pull request that represents that thread's own deliverable. Do not associate pull requests that the thread only reviews, references, or discusses. Defaults to your own thread when threadId is omitted.",
+        "Associate a pull request with a Aha thread. Use this after successfully creating the pull request that represents that thread's own deliverable. Do not associate pull requests that the thread only reviews, references, or discusses. Defaults to your own thread when threadId is omitted.",
       inputSchema: {
         type: "object",
         properties: {
@@ -990,7 +990,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     definition: {
       name: "synara_set_thread_archived",
       description:
-        "Archive or unarchive a Synara thread. Defaults to your own thread when threadId is omitted.",
+        "Archive or unarchive a Aha thread. Defaults to your own thread when threadId is omitted.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1000,7 +1000,7 @@ export const makeAgentGateway = Effect.gen(function* () {
         required: ["archived"],
         additionalProperties: false,
       },
-      annotations: { title: "Update a Synara thread", ...WRITE_TOOL_ANNOTATIONS },
+      annotations: { title: "Update a Aha thread", ...WRITE_TOOL_ANNOTATIONS },
     },
     handler: (args, context) =>
       Effect.gen(function* () {
@@ -1045,7 +1045,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     definition: {
       name: "synara_set_thread_goal",
       description:
-        "Set a persistent goal for a thread. Only set a goal when the user has explicitly asked for one (for example, 'keep working until X' or 'the goal of this thread is Y') or when dispatching a thread explicitly created to pursue a stated objective. Do NOT infer or invent goals from ordinary tasks or set one as a side effect of normal work. Clearing requires the same explicit user intent. When the active goal's objective has been accomplished, pass achieved: true instead of clearing: Synara records the achievement (with the time it took) and clears the goal. If the same external blocker prevents meaningful progress for three consecutive goal turns, pass blocked: true to pause the goal. Do not mark a goal blocked merely because the work is difficult, incomplete, or would benefit from clarification.",
+        "Set a persistent goal for a thread. Only set a goal when the user has explicitly asked for one (for example, 'keep working until X' or 'the goal of this thread is Y') or when dispatching a thread explicitly created to pursue a stated objective. Do NOT infer or invent goals from ordinary tasks or set one as a side effect of normal work. Clearing requires the same explicit user intent. When the active goal's objective has been accomplished, pass achieved: true instead of clearing: Aha records the achievement (with the time it took) and clears the goal. If the same external blocker prevents meaningful progress for three consecutive goal turns, pass blocked: true to pause the goal. Do not mark a goal blocked merely because the work is difficult, incomplete, or would benefit from clarification.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1073,7 +1073,7 @@ export const makeAgentGateway = Effect.gen(function* () {
         required: [],
         additionalProperties: false,
       },
-      annotations: { title: "Set a Synara thread goal", ...WRITE_TOOL_ANNOTATIONS },
+      annotations: { title: "Set a Aha thread goal", ...WRITE_TOOL_ANNOTATIONS },
     },
     handler: (args, context) =>
       Effect.gen(function* () {

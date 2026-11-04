@@ -4630,7 +4630,7 @@ export function makeAgentGatewayComputerTools(
     actionEntry(
       "computer_activate_window",
       "Activate window",
-      "Bring a window into view and aim the agent keyboard at it. Unless the user's own task text asked to see the screen (naming an app is not), Synara asks them on an approval card; a decline returns foreground_not_requested. Ordinary background targeting does not activate a window. A desktop that cannot raise the window refuses. It returns no screenshot; observe with computer_screenshot or computer_get_state when needed.",
+      "Bring a window into view and aim the agent keyboard at it. Unless the user's own task text asked to see the screen (naming an app is not), Aha asks them on an approval card; a decline returns foreground_not_requested. Ordinary background targeting does not activate a window. A desktop that cannot raise the window refuses. It returns no screenshot; observe with computer_screenshot or computer_get_state when needed.",
       {
         type: "object",
         properties: {

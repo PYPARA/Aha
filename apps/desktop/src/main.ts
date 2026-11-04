@@ -1,4 +1,5 @@
 import { registerSpriteLibrary } from "./sprites/ipc";
+import { UPSTREAM_BASELINE } from "@synara/shared/ahaBrand";
 import { Model3DHost } from "./model3d/host";
 import { Gen3DHost } from "./gen3d/host";
 import { attachNativeContextMenu } from "./nativeContextMenuBridge";
@@ -378,7 +379,7 @@ if (
   requestedSourceBuildMarker !== undefined &&
   requestedSourceBuildMarker !== SYNARA_SOURCE_DESKTOP_BUILD_MARKER
 ) {
-  throw new Error("The source desktop launcher and built main are incompatible. Rebuild Synara.");
+  throw new Error("The source desktop launcher and built main are incompatible. Rebuild Aha.");
 }
 
 // Capture the real archive identity before any explicit app.asar lookup. Static
@@ -453,6 +454,7 @@ const AGENT_CURSOR_PREFERENCE_PATH = Path.join(STATE_DIR, "agent-cursor-colors.j
 const DESKTOP_SCHEME = desktopIdentity.scheme;
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const APP_DISPLAY_NAME = desktopIdentity.displayName;
+const UPSTREAM_BASELINE_LABEL = `Based on ${UPSTREAM_BASELINE}`;
 const APP_USER_MODEL_ID = desktopIdentity.bundleId;
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
@@ -525,7 +527,7 @@ const betaDiagnostics = ahaDiagnosticsEnabled()
 if (betaDiagnostics) {
   crashReporter.start({
     productName: APP_DISPLAY_NAME,
-    companyName: "Synara",
+    companyName: "Aha",
     submitURL: `${resolveBetaDiagnosticsEndpoint(process.env)}/v1/crash`,
     uploadToServer: true,
     compress: true,
@@ -596,7 +598,7 @@ const DESKTOP_MENU_ZOOM_FACTOR_STEP = 1.1;
 let desktopMenuAccelerators: DesktopMenuAccelerators = DEFAULT_DESKTOP_MENU_ACCELERATORS;
 const DESKTOP_MENU_MIN_ZOOM_FACTOR = 0.25;
 const DESKTOP_MENU_MAX_ZOOM_FACTOR = 5;
-const SYNARA_BROWSER_LABEL = "Synara browser";
+const SYNARA_BROWSER_LABEL = "Aha browser";
 const browserPerfLoggingEnabled = process.env.SYNARA_BROWSER_PERF === "1";
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
@@ -2434,13 +2436,13 @@ function resolveUserDataPath(): string {
 function repairBrowserProfileBeforeElectronReady(userDataPath: string): void {
   const browserProfileRepair = repairBrowserProfileFromBridgeManifest(userDataPath);
   if (browserProfileRepair.status === "repaired") {
-    console.info("[desktop] Completed Synara browser profile bridge repair", {
+    console.info("[desktop] Completed Aha browser profile bridge repair", {
       sourcePath: browserProfileRepair.sourcePath,
       targetPath: browserProfileRepair.targetPath,
       copiedEntries: browserProfileRepair.copiedEntries,
     });
   } else if (browserProfileRepair.status === "repair-failed") {
-    console.warn("[desktop] Failed to complete Synara browser profile bridge repair", {
+    console.warn("[desktop] Failed to complete Aha browser profile bridge repair", {
       sourcePath: browserProfileRepair.sourcePath,
       targetPath: browserProfileRepair.targetPath,
       error: browserProfileRepair.error,
@@ -2454,8 +2456,9 @@ function configureAppIdentity(): void {
   app.setAboutPanelOptions({
     applicationName: APP_DISPLAY_NAME,
     applicationVersion: app.getVersion(),
-    version: `Aha · Synara v1.0.1 / f44ce959 · ${commitHash ?? "working-tree"}`,
-    copyright: `© ${new Date().getFullYear()} Emanuele Di Pietro`,
+    version: `${UPSTREAM_BASELINE_LABEL} · ${commitHash ?? "working-tree"}`,
+    // Synara's MIT notice stays in LICENSE; the panel credits it alongside Aha.
+    copyright: `© ${new Date().getFullYear()} PYPARA · Synara © Emanuele Di Pietro (MIT)`,
   });
 
   if (process.platform === "win32") {
@@ -5694,7 +5697,7 @@ function registerIpcHandlers(): void {
   for (const channel of Object.values(IPC.beta)) {
     ipcMain.removeHandler(channel);
     ipcMain.handle(channel, () => {
-      throw new Error("Aha does not install or switch Synara channels.");
+      throw new Error("Aha does not install or switch Aha channels.");
     });
   }
 
@@ -5805,7 +5808,7 @@ function registerIpcHandlers(): void {
             "Secure browser session persistence failed.",
           ];
           console.warn(
-            "[Synara browser]",
+            "[Aha browser]",
             error instanceof Error && allowed.includes(error.message)
               ? error.message
               : "Browser session checkpoint failed.",
@@ -6344,7 +6347,7 @@ async function bootstrap(): Promise<void> {
     }
   } catch {
     console.warn(
-      "[Synara browser] Secure session restoration is unavailable; no saved session cookies were restored.",
+      "[Aha browser] Secure session restoration is unavailable; no saved session cookies were restored.",
     );
   }
 
@@ -6363,7 +6366,7 @@ async function bootstrap(): Promise<void> {
   try {
     await ensureBrowserHostPipeServer();
   } catch (error) {
-    console.warn("[Synara browser] Failed to start browser host pipe", error);
+    console.warn("[Aha browser] Failed to start browser host pipe", error);
   }
   await startCuaHost();
   startBackend();

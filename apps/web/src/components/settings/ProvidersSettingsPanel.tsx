@@ -1016,7 +1016,7 @@ function providerAccountIdentityFields(
         label: t("settings:claudeConfigDirectory"),
         placeholder: "~/.claude-work",
         description:
-          "Leave blank and Synara keeps this account's sign-in in its own folder. " +
+          "Leave blank and Aha keeps this account's sign-in in its own folder. " +
           "Set a directory to use a Claude config folder you already signed in to.",
       },
     ];
@@ -1379,11 +1379,11 @@ function ProviderAccountsControl(props: {
           {isAccountProvider ? (
             <span className="block text-ui-sm text-muted-foreground sm:col-span-2">
               {provider === "codex"
-                ? "Leave both paths blank and Synara keeps this account's sign-in in its " +
+                ? "Leave both paths blank and Aha keeps this account's sign-in in its " +
                   "own folder. Set a shadow auth home to keep only the sign-in elsewhere " +
                   "while sharing settings and history with the default account, or a " +
                   "CODEX_HOME to keep everything separate."
-                : "Leave blank and Synara keeps this account's sign-in in its own folder. " +
+                : "Leave blank and Aha keeps this account's sign-in in its own folder. " +
                   t("Set a directory to use a Claude config folder you already signed in to.")}
             </span>
           ) : null}
@@ -2278,15 +2278,17 @@ export function ProvidersSettingsPanel({
         }
         actions={
           <>
-            <Button
-              variant="outline"
-              size="xs"
-              render={<a href={option.setupDocsHref} target="_blank" rel="noreferrer" />}
-              aria-label={t("settings:setupGuide2", { value0: option.title })}
-            >
-              {t("settings:setupGuide")}
-              <ExternalLinkIcon className="size-3" />
-            </Button>
+            {option.setupDocsHref ? (
+              <Button
+                variant="outline"
+                size="xs"
+                render={<a href={option.setupDocsHref} target="_blank" rel="noreferrer" />}
+                aria-label={t("settings:setupGuide2", { value0: option.title })}
+              >
+                {t("settings:setupGuide")}
+                <ExternalLinkIcon className="size-3" />
+              </Button>
+            ) : null}
             <Switch
               checked={enabled}
               disabled={!serverSettingsQuery.data || providerEnablementMutationPending}

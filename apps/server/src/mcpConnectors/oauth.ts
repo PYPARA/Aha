@@ -14,9 +14,10 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { outboundHttp } from "@synara/shared/outboundHttp";
+import { PRODUCT_HOMEPAGE_URL } from "@synara/shared/ahaBrand";
 
-export const SYNARA_OAUTH_CLIENT_NAME = "Synara";
-export const SYNARA_OAUTH_CLIENT_URI = "https://www.trysynara.com";
+export const SYNARA_OAUTH_CLIENT_NAME = "Aha";
+export const SYNARA_OAUTH_CLIENT_URI = PRODUCT_HOMEPAGE_URL;
 const OAUTH_TIMEOUT_MS = 20_000;
 const OAUTH_MAX_RESPONSE_BYTES = 1024 * 1024;
 

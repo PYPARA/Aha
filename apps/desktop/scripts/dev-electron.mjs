@@ -89,7 +89,7 @@ function cleanupStaleDevApps() {
 }
 
 function listStaleComputerUsePids() {
-  // Only macOS exposes a verifiable Synara (Dev) executable path for these
+  // Only macOS exposes a verifiable Aha (Dev) executable path for these
   // helpers. Linux process command lines do not currently carry a dev-owner
   // marker, so reaping by the generic script name could kill another install.
   if (process.platform !== "darwin") {
@@ -100,7 +100,7 @@ function listStaleComputerUsePids() {
 
   return candidatePids.filter((pid) => {
     const command = readProcessCommand(pid);
-    if (!/Synara \(Dev\)\.app\/Contents\/MacOS\/Electron/.test(command)) {
+    if (!/Aha \(Dev\)\.app\/Contents\/MacOS\/Electron/.test(command)) {
       return false;
     }
     if (!/computerUseMcp\.mjs\s+mcp(?:\s|$)/.test(command)) {
@@ -122,7 +122,7 @@ function cleanupStaleComputerUseApps() {
   }
 
   console.error(
-    `[desktop-dev] Cleaning up ${stalePids.length} stale Synara (Dev) Computer Use helper process${stalePids.length === 1 ? "" : "es"} from other worktrees.`,
+    `[desktop-dev] Cleaning up ${stalePids.length} stale Aha (Dev) Computer Use helper process${stalePids.length === 1 ? "" : "es"} from other worktrees.`,
   );
 
   for (const pid of stalePids) {
@@ -141,17 +141,18 @@ function warnIfAlphaAppRunning() {
     return;
   }
 
-  const pids = listPidsByExactProcessName("Synara").filter((pid) =>
-    readProcessCommand(pid).startsWith("/Applications/Synara.app/Contents/MacOS/Synara"),
+  const pids = listPidsByExactProcessName("Aha").filter((pid) =>
+    // The installed Aha bundle may live in /Applications or release/mac-arm64.
+    readProcessCommand(pid).includes("/Aha.app/Contents/MacOS/Aha"),
   );
   if (pids.length === 0) {
     return;
   }
 
   console.error(
-    "[desktop-dev] Synara is still running. Close it before testing voice in Synara (Dev), or you may be looking at the wrong app/runtime.",
+    "[desktop-dev] Aha is still running. Close it before testing voice in Aha (Dev), or you may be looking at the wrong app/runtime.",
   );
-  console.error(`[desktop-dev] Running Synara process IDs: ${pids.join(", ")}`);
+  console.error(`[desktop-dev] Running Aha process IDs: ${pids.join(", ")}`);
 }
 
 function startApp() {

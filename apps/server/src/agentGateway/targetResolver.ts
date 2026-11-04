@@ -296,7 +296,7 @@ export function loadAgentGatewayProviderCatalog(input: {
   );
   const unavailableReason =
     availability.enabled === false
-      ? `Provider "${input.provider}" is disabled in Synara settings.`
+      ? `Provider "${input.provider}" is disabled in Aha settings.`
       : availability.available === false
         ? (availability.message ?? `Provider "${input.provider}" is not available.`)
         : availability.authStatus === "unauthenticated"
@@ -704,7 +704,7 @@ export function resolveAgentGatewayTarget(input: {
         return yield* Effect.fail(
           new AgentGatewayTargetError(
             "provider_unavailable",
-            `Provider instance "${requestedInstanceId}" is disabled in Synara settings.`,
+            `Provider instance "${requestedInstanceId}" is disabled in Aha settings.`,
             { provider: input.target.provider, instanceId: requestedInstanceId },
           ),
         );

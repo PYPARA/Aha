@@ -1876,7 +1876,7 @@ export class DesktopBrowserManager {
       (this.window !== null && hostWebContentsId !== this.window.webContents.id) ||
       webContents.session !== electronSession.fromPartition(BROWSER_SESSION_PARTITION)
     ) {
-      throw new Error("The browser webview does not belong to this Synara window and partition.");
+      throw new Error("The browser webview does not belong to this Aha window and partition.");
     }
 
     // A pane can mount from stale renderer state while an agent opens a native

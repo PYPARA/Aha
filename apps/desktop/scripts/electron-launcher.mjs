@@ -37,9 +37,9 @@ const LAUNCHER_VERSION = 8;
 const ICON_COMPOSER_ASSET_NAME = "Aha";
 const ICON_COMPOSER_DEPLOYMENT_TARGET = "26.0";
 const MICROPHONE_USAGE_DESCRIPTION =
-  "Synara needs microphone access so you can record voice notes and transcribe them into the chat composer, and, if you turn it on, to move the chat message trail with your voice.";
+  "Aha needs microphone access so you can record voice notes and transcribe them into the chat composer, and, if you turn it on, to move the chat message trail with your voice.";
 const AUDIO_CAPTURE_USAGE_DESCRIPTION =
-  "Synara reads how loud your Mac's audio is to animate the chat message trail. The audio itself is never recorded.";
+  "Aha reads how loud your Mac's audio is to animate the chat message trail. The audio itself is never recorded.";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const desktopDir = resolve(__dirname, "..");
@@ -200,19 +200,19 @@ function patchMainBundleInfoPlist(appBundlePath, iconPath, localizedInfoPlists, 
   setPlistString(
     infoPlistPath,
     "NSScreenCaptureUsageDescription",
-    "Synara captures the windows you authorize for Computer use.",
+    "Aha captures the windows you authorize for Computer use.",
     runCommand,
   );
   setPlistString(
     infoPlistPath,
     "NSAccessibilityUsageDescription",
-    "Synara controls the windows you authorize for Computer use.",
+    "Aha controls the windows you authorize for Computer use.",
     runCommand,
   );
   setPlistString(
     infoPlistPath,
     "NSLocalNetworkUsageDescription",
-    "Synara connects to the browsers it drives on this Mac so agents can browse in the background.",
+    "Aha connects to the browsers it drives on this Mac so agents can browse in the background.",
     runCommand,
   );
 
@@ -301,7 +301,7 @@ function signMacLauncherBundle(appBundlePath, runCommand) {
         .join("\n")
         .trim();
       throw new Error(
-        `Failed to ${action} the generated Synara launcher at ${appBundlePath} (codesign exit ${result.status}). Check the codesign error and retry; the invalid bundle will not be launched. ${details}`.trim(),
+        `Failed to ${action} the generated Aha launcher at ${appBundlePath} (codesign exit ${result.status}). Check the codesign error and retry; the invalid bundle will not be launched. ${details}`.trim(),
         result.error ? { cause: result.error } : undefined,
       );
     }

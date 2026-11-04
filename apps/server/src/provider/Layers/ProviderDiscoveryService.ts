@@ -301,7 +301,7 @@ const make = Effect.gen(function* () {
             .pipe(
               Effect.catch((error) =>
                 Effect.logWarning(
-                  "provider-native skill discovery failed; serving the Synara skills catalog only",
+                  "provider-native skill discovery failed; serving the Aha skills catalog only",
                   { provider: resolved.provider, error },
                 ).pipe(Effect.as(null)),
               ),
@@ -418,7 +418,7 @@ const make = Effect.gen(function* () {
       if (!resolved.enabled) {
         return yield* new ProviderValidationError({
           operation: "ProviderDiscoveryService.readPlugin",
-          issue: `Provider instance '${resolved.instanceId}' is disabled in Synara settings.`,
+          issue: `Provider instance '${resolved.instanceId}' is disabled in Aha settings.`,
         });
       }
       const adapter = yield* registry.getByProvider(resolved.provider);

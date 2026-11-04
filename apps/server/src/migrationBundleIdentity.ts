@@ -17,11 +17,11 @@ export class MigrationRuntimeIdentityMismatchError extends Error {
       mismatch.kind === "launcher-bundle"
         ? [
             "desktop and server bundles were built from different migration sources",
-            "Rebuild with bun run build:desktop before starting Synara.",
+            "Rebuild with bun run build:desktop before starting Aha.",
           ]
         : [
             "the server bundle was built from a different migration source than this checkout",
-            "Rebuild the server with bun run build before starting Synara.",
+            "Rebuild the server with bun run build before starting Aha.",
           ];
     super(
       `Refusing database startup because ${relationship}. ` +

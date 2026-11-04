@@ -55,7 +55,7 @@ export function toDisplayName(basename: string): string {
     .trim()
     .replace(/\s+/g, " ");
   if (!cleaned) {
-    return "Synara";
+    return "Aha";
   }
   return cleaned
     .split(" ")

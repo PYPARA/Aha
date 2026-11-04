@@ -417,7 +417,7 @@ function fetchCodexUsage(state: CodexOAuthState) {
     headers: {
       Authorization: `Bearer ${state.accessToken}`,
       Accept: "application/json",
-      "User-Agent": "Synara",
+      "User-Agent": "Aha",
       ...(state.accountId ? { "ChatGPT-Account-Id": state.accountId } : {}),
     },
   });

@@ -1,4 +1,5 @@
 import { APP_RAIL_LABEL_KEYS } from "./AppRail";
+import { FEEDBACK_AVAILABLE } from "../feedback";
 import { PR_STATE_LABEL_KEYS } from "./pullRequest/pullRequestStatePresentation";
 import { THREAD_STATUS_LABEL_KEYS } from "./Sidebar.logic";
 import { useProjectImportDialogStore } from "~/projectImport/projectImportDialogStore";
@@ -9,7 +10,6 @@ import { useProjectImportDialogStore } from "~/projectImport/projectImportDialog
 import {
   AddPlusIcon,
   ArchiveIcon,
-  BookIcon,
   BotIcon,
   CircleQuestionIcon,
   ClockIcon,
@@ -329,7 +329,6 @@ import { useProviderStatusesForLocalConfig } from "../hooks/useProviderStatusesF
 import { useThreadHandoff } from "../hooks/useThreadHandoff";
 import { useCreateProjectDialogStore } from "../createProjectDialogStore";
 import { useFeedbackDialogStore } from "../feedbackDialogStore";
-import { openExternalLink } from "~/lib/linkChips";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
 import {
@@ -951,8 +950,6 @@ function ProjectSortMenu({
   );
 }
 
-const SYNARA_DOCS_URL = "https://trysynara.com/docs";
-
 // Latest curated releases surfaced directly in the help menu. Static data, so
 // computed once at module scope rather than per render.
 const HELP_MENU_RELEASE_ENTRIES = sortEntriesByVersionDesc(WHATS_NEW_ENTRIES).slice(0, 3);
@@ -1050,17 +1047,12 @@ function SidebarHelpMenu({
               <SidebarContextMenuIcon icon={KeyboardIcon} />
               <span>{t("common:advanced_keybindings")}</span>
             </MenuItem>
-            <MenuItem className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME} onClick={onOpenFeedback}>
-              <SidebarContextMenuIcon icon={FeedbackIcon} />
-              <span>{t("workspace:sendFeedback")}</span>
-            </MenuItem>
-            <MenuItem
-              className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME}
-              onClick={() => openExternalLink(SYNARA_DOCS_URL)}
-            >
-              <SidebarContextMenuIcon icon={BookIcon} />
-              <span>{t("workspace:docs")}</span>
-            </MenuItem>
+            {FEEDBACK_AVAILABLE ? (
+              <MenuItem className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME} onClick={onOpenFeedback}>
+                <SidebarContextMenuIcon icon={FeedbackIcon} />
+                <span>{t("workspace:sendFeedback")}</span>
+              </MenuItem>
+            ) : null}
           </MenuGroup>
         </ComposerPickerMenuPopup>
       </Menu>
@@ -6695,12 +6687,16 @@ export default function Sidebar() {
         ],
         shortcutLabel: importThreadShortcutLabel,
       },
-      {
-        id: "feedback",
-        label: t("workspace:feedbackSynara"),
-        description: t("workspace:sendFeedbackOrReportAnIssueToTheSynara"),
-        keywords: ["feedback", "bug", "issue", "problem", "report", "support", "synara"],
-      },
+      ...(FEEDBACK_AVAILABLE
+        ? [
+            {
+              id: "feedback" as const,
+              label: t("workspace:feedbackSynara"),
+              description: t("workspace:sendFeedbackOrReportAnIssueToTheSynara"),
+              keywords: ["feedback", "bug", "issue", "problem", "report", "support"],
+            },
+          ]
+        : []),
       {
         id: "settings",
         label: t("workspace:toast_settings"),
@@ -6975,7 +6971,7 @@ export default function Sidebar() {
 
   const betaBadge = isBetaDesktopFlavor ? (
     <span
-      aria-label="Synara Beta"
+      aria-label="Aha Beta"
       className="inline-flex shrink-0 items-center rounded-full bg-[var(--beta-pill)] px-1.5 py-0.5 text-ui-xs font-semibold leading-none text-[var(--beta-pill-ink)]"
     >
       {t("workspace:beta")}

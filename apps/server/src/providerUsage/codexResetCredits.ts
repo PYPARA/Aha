@@ -176,7 +176,7 @@ async function withAppServer<T>(
       failed,
       (async () => {
         await request("initialize", {
-          clientInfo: { name: "synara", title: "Synara", version: "0.1.0" },
+          clientInfo: { name: "synara", title: "Aha", version: "0.1.0" },
           capabilities: { experimentalApi: true },
         });
         await writer.write({ method: "initialized" });

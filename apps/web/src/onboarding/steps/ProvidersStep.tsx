@@ -231,7 +231,7 @@ export function ProvidersStep(props: { readonly detection: ProviderDetection }) 
                       {isConnecting ? t("git:detail_done") : t("chat:providerModelPicker_signIn")}
                     </button>
                   ) : null}
-                  {state === "not-installed" ? (
+                  {state === "not-installed" && descriptor.setupDocsHref ? (
                     <a
                       href={descriptor.setupDocsHref}
                       target="_blank"

@@ -86,7 +86,7 @@ export function resolveSynaraDesktopRuntimeFlavor(input: {
     if (flavor === "production" || flavor === "canary" || flavor === "cua" || flavor === "beta") {
       return flavor;
     }
-    throw new Error("The packaged Synara desktop flavor is invalid. Rebuild the application.");
+    throw new Error("The packaged Aha desktop flavor is invalid. Rebuild the application.");
   }
   // Source launchers also use an app bundle on macOS. Their build marker keeps
   // the existing environment-based routing, while legacy packaged apps remain

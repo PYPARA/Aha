@@ -151,7 +151,7 @@ export function computerStaleGrantAdvice(
   const sorted = sortComputerPermissions(permissions);
   if (sorted.length === 0) return null;
   const base =
-    "This is a locally built copy of Synara, so macOS may already list it with the switch on from " +
+    "This is a locally built copy of Aha, so macOS may already list it with the switch on from " +
     "an earlier build. Remove this app from the permission list, add the current build again, " +
     "then fully quit and reopen it.";
   const responsibleBundleId = bundleId?.trim();
@@ -174,8 +174,8 @@ export function computerPermissionSetupMessage(
   const labels = listComputerPermissions(permissions);
   const base =
     labels.length > 0
-      ? `Synara needs ${labels} to control this Mac. Turn Synara on in System Settings › Privacy & Security › ${labels}, then try again.`
-      : "Synara needs a macOS privacy permission to control this Mac. Grant it in System Settings › Privacy & Security, then try again.";
+      ? `Aha needs ${labels} to control this Mac. Turn Aha on in System Settings › Privacy & Security › ${labels}, then try again.`
+      : "Aha needs a macOS privacy permission to control this Mac. Grant it in System Settings › Privacy & Security, then try again.";
   const advice = computerStaleGrantAdvice(permissions, buildSignature, bundleId);
   return advice ? `${base} ${advice}` : base;
 }

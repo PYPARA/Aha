@@ -814,7 +814,7 @@ function withProviderThreadStatePrompts(input: {
 function providerPromptOverflowIssue(goalPromptOverheadChars: number): string {
   return goalPromptOverheadChars > 0
     ? "The latest message is too long to include the persistent thread goal. Shorten the message and retry."
-    : "The latest message is too long to include Synara Debug mode instructions. Shorten the message and retry.";
+    : "The latest message is too long to include Aha Debug mode instructions. Shorten the message and retry.";
 }
 
 // First visible turns and later continuations share the same pursuit fence.
@@ -3546,7 +3546,7 @@ const make = Effect.gen(function* () {
     // Synara owns this command. Keep it in durable user text for provenance,
     // but do not ask the provider to interpret a native slash command.
     const authoredMessageText = computerInvocation
-      ? computerInvocation.prompt || "Use Synara Computer for this task."
+      ? computerInvocation.prompt || "Use Aha Computer for this task."
       : input.messageText;
     // The project packet is ambient context, not user words: it prefixes the
     // assembled provider input rather than joining `<latest_user_message>`.
@@ -10364,7 +10364,7 @@ const make = Effect.gen(function* () {
                 threadId: blocker.threadId,
                 kind: "provider.turn.start.failed",
                 summary: "Previous messages were not sent",
-                detail: `Synara recovered an earlier provider failure, but ${skippedPromptCount} ${noun} skipped while the thread was blocked. Resend ${skippedPromptCount === 1 ? "it" : "them"} to continue.`,
+                detail: `Aha recovered an earlier provider failure, but ${skippedPromptCount} ${noun} skipped while the thread was blocked. Resend ${skippedPromptCount === 1 ? "it" : "them"} to continue.`,
                 turnId: null,
                 createdAt,
               });

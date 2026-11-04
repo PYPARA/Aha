@@ -18,9 +18,9 @@ import {
 } from "./desktop-bundle-files.ts";
 
 export const MICROPHONE_USAGE_DESCRIPTION =
-  "Synara needs microphone access so you can record voice notes and transcribe them into the chat composer, and, if you turn it on, to move the chat message trail with your voice.";
+  "Aha needs microphone access so you can record voice notes and transcribe them into the chat composer, and, if you turn it on, to move the chat message trail with your voice.";
 export const AUDIO_CAPTURE_USAGE_DESCRIPTION =
-  "Synara reads how loud your Mac's audio is to animate the chat message trail. The audio itself is never recorded.";
+  "Aha reads how loud your Mac's audio is to animate the chat message trail. The audio itself is never recorded.";
 // Bundle metadata uses the product version; electron-updater compares Darwin releases.
 export const MAC_MINIMUM_SYSTEM_VERSION = "13.0";
 export const MAC_MINIMUM_DARWIN_VERSION = "22.0.0";
@@ -159,12 +159,10 @@ export function createDesktopPlatformBuildConfig(
       extendInfo: {
         NSMicrophoneUsageDescription: MICROPHONE_USAGE_DESCRIPTION,
         NSAudioCaptureUsageDescription: AUDIO_CAPTURE_USAGE_DESCRIPTION,
-        NSScreenCaptureUsageDescription:
-          "Synara captures the windows you authorize for Computer use.",
-        NSAccessibilityUsageDescription:
-          "Synara controls the windows you authorize for Computer use.",
+        NSScreenCaptureUsageDescription: "Aha captures the windows you authorize for Computer use.",
+        NSAccessibilityUsageDescription: "Aha controls the windows you authorize for Computer use.",
         NSLocalNetworkUsageDescription:
-          "Synara connects to the browsers it drives on this Mac so agents can browse in the background.",
+          "Aha connects to the browsers it drives on this Mac so agents can browse in the background.",
         ...(input.useIconComposer === false ? {} : { CFBundleIconName: MAC_ICON_ASSET_NAME }),
       },
     } satisfies Record<string, unknown>;

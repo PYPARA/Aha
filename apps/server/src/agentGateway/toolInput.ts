@@ -210,7 +210,7 @@ export function decodeCreateThreadsInput(value: unknown) {
   try {
     return Schema.decodeUnknownSync(SynaraCreateThreadsInput)(value);
   } catch (error) {
-    throw new ToolInputError(`Invalid Synara creation plan: ${errorText(error)}`);
+    throw new ToolInputError(`Invalid Aha creation plan: ${errorText(error)}`);
   }
 }
 
@@ -218,6 +218,6 @@ export function decodeWaitForThreadsInput(value: unknown) {
   try {
     return Schema.decodeUnknownSync(SynaraWaitForThreadsInput)(value);
   } catch (error) {
-    throw new ToolInputError(`Invalid Synara wait request: ${errorText(error)}`);
+    throw new ToolInputError(`Invalid Aha wait request: ${errorText(error)}`);
   }
 }

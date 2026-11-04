@@ -28,7 +28,7 @@ import { SYNARA_E2E_REVIEW_GUIDANCE } from "./e2eReviewGuidance.ts";
 import { ToolGuidanceCadence } from "./toolGuidanceCadence.ts";
 
 const BROWSER_TOOL_REFRESH_GUIDANCE =
-  "Browser routing reminder: use browser_* for Synara's integrated browser and Computer Use for native apps or OS surfaces. Prefer WebMCP, WebAgents, site requests, and structured DOM reads before screenshots. For long or virtualized histories, scan in bounded batches, deduplicate stable item identities, preserve text/link/media order, return progress and a resumable checkpoint, and state when the true boundary cannot be proven.";
+  "Browser routing reminder: use browser_* for Aha's integrated browser and Computer Use for native apps or OS surfaces. Prefer WebMCP, WebAgents, site requests, and structured DOM reads before screenshots. For long or virtualized histories, scan in bounded batches, deduplicate stable item identities, preserve text/link/media order, return progress and a resumable checkpoint, and state when the true boundary cannot be proven.";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -367,7 +367,7 @@ export function makeAgentGatewayBrowserTools(
       definition: {
         name: "synara_e2e_review",
         description:
-          "Load Synara's E2E testing workflow for web apps and iOS simulator apps: delegate a test subagent, verify real journeys, and report screenshot proof. Call only for an explicit E2E request.",
+          "Load Aha's E2E testing workflow for web apps and iOS simulator apps: delegate a test subagent, verify real journeys, and report screenshot proof. Call only for an explicit E2E request.",
         inputSchema: { type: "object", properties: {}, additionalProperties: false },
         annotations: {
           title: "E2E test workflow",

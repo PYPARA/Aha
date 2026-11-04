@@ -89,7 +89,7 @@ export const DESTRUCTIVE_LOCAL = {
 } as const;
 
 const BROWSER_COMMON_AGENT_GUIDANCE =
-  "Controls this thread's shared Synara browser, not chat/desktop. Stop and answer once the outcome is observed.";
+  "Controls this thread's shared Aha browser, not chat/desktop. Stop and answer once the outcome is observed.";
 const BROWSER_TAB_SCOPED_AGENT_GUIDANCE =
   " Omit tabId, or use this thread's browser_tabs/open tabId.";
 const BROWSER_INTERRUPTION_AGENT_GUIDANCE =

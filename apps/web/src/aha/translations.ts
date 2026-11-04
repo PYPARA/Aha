@@ -1444,7 +1444,7 @@ export const copy: Record<string, string> = {
   "Enabled providers": "已启用的供应商",
   "Provider tools": "供应商工具",
   "Provider updates": "供应商更新",
-  "Review installed provider tools that Synara can safely update.":
+  "Review installed provider tools that Aha can safely update.":
     "检查 Aha 可安全更新的供应商工具。",
   "Review provider versions and update tools. Open a row only when you need binary overrides.":
     "查看供应商版本与更新工具，需要自定义可执行文件时打开对应条目。",
@@ -1518,7 +1518,7 @@ export const copy: Record<string, string> = {
   Translucency: "透明效果",
   Customize: "自定义",
   "Choose icon": "选择图标",
-  "Choose the icon Synara uses in the dock or taskbar.": "选择 Aha 在 Dock 或任务栏中使用的图标。",
+  "Choose the icon Aha uses in the dock or taskbar.": "选择 Aha 在 Dock 或任务栏中使用的图标。",
   "Adjust the app text base in pixels. Chat and UI typography scale proportionally from this value.":
     "按像素调整基础字号，界面与会话文字会按比例缩放。",
   "Control spacing in the sidebar, composer, chat gutters, and settings rows without changing font size.":

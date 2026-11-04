@@ -329,7 +329,7 @@ const packCmd = Command.make(
 // ---------------------------------------------------------------------------
 
 const cli = Command.make("cli").pipe(
-  Command.withDescription("Synara server build & publish CLI."),
+  Command.withDescription("Aha server build & publish CLI."),
   Command.withSubcommands([buildCmd, publishCmd, packCmd]),
 );
 

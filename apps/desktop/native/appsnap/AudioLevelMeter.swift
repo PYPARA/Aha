@@ -177,12 +177,12 @@ final class SystemAudioLevelTap {
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.isPrivate = true
         description.muteBehavior = .unmuted
-        description.name = "Synara audio level"
+        description.name = "Aha audio level"
 
         try check(AudioHardwareCreateProcessTap(description, &tapID), "create the system audio tap")
 
         let aggregateDescription: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Synara audio level",
+            kAudioAggregateDeviceNameKey: "Aha audio level",
             kAudioAggregateDeviceUIDKey: "synara-audio-level-\(UUID().uuidString)",
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
@@ -338,7 +338,7 @@ final class MicrophoneLevelReader {
     }
 
     private func denied() -> AppSnapFailure {
-        AppSnapFailure(code: "microphone_denied", message: "Microphone access is off for Synara.")
+        AppSnapFailure(code: "microphone_denied", message: "Microphone access is off for Aha.")
     }
 }
 

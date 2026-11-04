@@ -125,7 +125,7 @@ export async function fetchSynaraServerStatus(
         reachable: false,
         ready: false,
         url: healthUrl.displayUrl,
-        error: "Health response did not match the Synara health shape.",
+        error: "Health response did not match the Aha health shape.",
       };
     }
 
@@ -148,14 +148,14 @@ export async function fetchSynaraServerStatus(
 
 export function formatSynaraServerStatus(result: SynaraServerStatusResult): string {
   if (!result.reachable) {
-    return `Synara server: unreachable\nURL: ${result.url}\nError: ${result.error}`;
+    return `Aha server: unreachable\nURL: ${result.url}\nError: ${result.error}`;
   }
 
   const projectionState = result.health.projection?.state;
   const status = result.ready ? "ready" : result.health.startupReady ? "not ready" : "starting";
   const loop = result.health.eventLoop;
   return [
-    `Synara server: ${status}`,
+    `Aha server: ${status}`,
     `URL: ${result.url}`,
     ...(projectionState ? [`Projection: ${projectionState}`] : []),
     ...(loop

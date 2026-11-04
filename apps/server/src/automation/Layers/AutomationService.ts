@@ -797,7 +797,7 @@ export const AutomationServiceLive = Layer.effect(
       }
       return instance.instanceId === instance.driver
         ? providerDisabledSettingsMessage(instance.driver)
-        : `Provider instance '${instance.displayName}' is disabled in Synara settings.`;
+        : `Provider instance '${instance.displayName}' is disabled in Aha settings.`;
     };
     const providerDisabledReason = (definition: AutomationDefinition) =>
       serverSettings.getSettings.pipe(

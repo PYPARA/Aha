@@ -66,7 +66,7 @@ export function providerCliCommandName(input: {
 export const PROVIDER_AUTHENTICATION = {
   codex: {
     args: ["login"],
-    instructions: "Complete the browser sign-in. Synara will check this account afterward.",
+    instructions: "Complete the browser sign-in. Aha will check this account afterward.",
   },
   claudeAgent: {
     args: ["auth", "login"],

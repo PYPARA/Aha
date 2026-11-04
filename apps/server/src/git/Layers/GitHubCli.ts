@@ -102,7 +102,7 @@ function normalizeGitHubCliError(operation: "execute" | "stdout", error: unknown
     if (isGitHubRateLimitMessage(error.message)) {
       return new GitHubCliError({
         operation,
-        detail: "GitHub rate limit reached. Synara will retry after the limit resets.",
+        detail: "GitHub rate limit reached. Aha will retry after the limit resets.",
         reason: "rate-limited",
         cause: error,
       });
@@ -1363,7 +1363,7 @@ function graphQlErrorFailure(
   return new GitHubCliError({
     operation,
     detail: rateLimited
-      ? "GitHub rate limit reached. Synara will retry after the limit resets."
+      ? "GitHub rate limit reached. Aha will retry after the limit resets."
       : detail,
     reason: rateLimited ? "rate-limited" : "other",
   });

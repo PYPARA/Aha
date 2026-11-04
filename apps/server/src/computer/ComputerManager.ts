@@ -2686,7 +2686,7 @@ export class ComputerManager {
       );
     }
     const appName = target.title?.trim() || target.appName || "this window";
-    const label = `Synara is activating ${appName}`;
+    const label = `Aha is activating ${appName}`;
     const shieldId = `shield-${randomUUID().slice(0, 8)}`;
     try {
       return await timedComputerLeg("shield", () =>

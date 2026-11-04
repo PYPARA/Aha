@@ -1,7 +1,7 @@
 // FILE: feedback.ts
 // Purpose: Owns feedback categories, privacy-safe diagnostics, and delivery.
 // Layer: Web feature logic
-// Depends on: The public trysynara feedback endpoint.
+// Depends on: an explicitly configured VITE_FEEDBACK_ENDPOINT (Aha ships none by default).
 
 import { APP_VERSION } from "./branding";
 
@@ -13,7 +13,7 @@ export const FEEDBACK_CATEGORIES = [
   { value: "bug", label: "Bug", lead: "I ran into a bug" },
   { value: "session", label: "Session", lead: "I hit a session problem" },
   { value: "ui", label: "UI", lead: "Something looked wrong" },
-  { value: "performance", label: "Performance", lead: "Synara felt slow" },
+  { value: "performance", label: "Performance", lead: "Aha felt slow" },
   { value: "idea", label: "Idea", lead: "I have an idea" },
   { value: "other", label: "Other", lead: "I have some feedback" },
 ] as const;
@@ -55,7 +55,11 @@ export interface FeedbackSubmission {
   diagnostics: FeedbackDiagnostics;
 }
 
-const DEFAULT_FEEDBACK_ENDPOINT = "https://www.trysynara.com/api/feedback";
+/**
+ * Aha never sends feedback or diagnostics to the upstream Synara service. Feedback
+ * entry points appear only when a build configures its own endpoint.
+ */
+export const FEEDBACK_AVAILABLE = Boolean(import.meta.env.VITE_FEEDBACK_ENDPOINT?.trim());
 const FEEDBACK_REQUEST_TIMEOUT_MS = 20_000;
 
 function formatStateFlags(diagnostics: FeedbackThreadContext): string {
@@ -109,7 +113,7 @@ export function formatFeedbackSummary(input: {
     .filter((row): row is [string, string] => row[1] !== null && row[1] !== "")
     .map(([label, value]) => `${label}: ${value}`);
 
-  return [`${lead} in Synara ${diagnostics.appVersion}${usageContext}.`, "", ...detailLines].join(
+  return [`${lead} in Aha ${diagnostics.appVersion}${usageContext}.`, "", ...detailLines].join(
     "\n",
   );
 }
@@ -147,7 +151,9 @@ export function buildFeedbackSubmission(input: {
 }
 
 function feedbackEndpoint(): string {
-  return import.meta.env.VITE_FEEDBACK_ENDPOINT?.trim() || DEFAULT_FEEDBACK_ENDPOINT;
+  const endpoint = import.meta.env.VITE_FEEDBACK_ENDPOINT?.trim();
+  if (!endpoint) throw new Error("Feedback is not configured for this build.");
+  return endpoint;
 }
 
 export async function submitFeedback(

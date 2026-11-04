@@ -29,7 +29,7 @@ export function makeBrowserAutomationHost(
         return Effect.fail(
           new BrowserHostRpcError(
             "unavailable",
-            "The visible Synara browser is only available in the desktop app.",
+            "The visible Aha browser is only available in the desktop app.",
           ),
         );
       }

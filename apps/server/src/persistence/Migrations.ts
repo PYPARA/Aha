@@ -547,7 +547,7 @@ export const reconcileMigrationLineage = Effect.gen(function* () {
   );
   if (aliasRepairs.length > 0) {
     yield* Effect.logInfo(
-      "Migration tracker records a renumbered Synara migration; repairing tracker metadata in place",
+      "Migration tracker records a renumbered Aha migration; repairing tracker metadata in place",
     ).pipe(
       Effect.annotateLogs({
         repairs: aliasRepairs.map((repair) =>
@@ -606,7 +606,7 @@ export const reconcileMigrationLineage = Effect.gen(function* () {
   }
 
   yield* Effect.logWarning(
-    "Migration tracker diverges from the Synara lineage (legacy import); re-running migrations from the divergence point",
+    "Migration tracker diverges from the Aha lineage (legacy import); re-running migrations from the divergence point",
   ).pipe(Effect.annotateLogs({ firstDivergedId, expectedName, recordedName, highWaterMark }));
 
   yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= ${firstDivergedId}`;

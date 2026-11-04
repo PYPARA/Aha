@@ -6,6 +6,12 @@ import type { UiLanguagePreference } from "@synara/contracts/uiLocale";
 
 export const PRODUCT_DISPLAY_NAME = "Aha";
 
+/** Public home of the Aha project (share links, OAuth client metadata). */
+export const PRODUCT_HOMEPAGE_URL = "https://github.com/PYPARA/Aha";
+
+/** Upstream release this build is merged from; update together with UPSTREAM.md. */
+export const UPSTREAM_BASELINE = "Synara v1.1.0 / b6aa37bc";
+
 /** Aha ships Simplified Chinese by default; "system" stays an explicit opt-in. */
 export const AHA_DEFAULT_LANGUAGE_PREFERENCE: UiLanguagePreference = "zh-CN";
 

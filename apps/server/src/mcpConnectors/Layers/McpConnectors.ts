@@ -75,7 +75,7 @@ export const makeMcpConnectors = (options: { readonly enabled?: boolean } = {}) 
         enabled
           ? Effect.tryPromise({
               try: () => runtime.connect(input),
-              catch: toConnectorError("Synara could not connect this server."),
+              catch: toConnectorError("Aha could not connect this server."),
             })
           : unavailable,
       setup: () =>
@@ -88,7 +88,7 @@ export const makeMcpConnectors = (options: { readonly enabled?: boolean } = {}) 
         enabled
           ? Effect.tryPromise({
               try: () => runtime.disconnect(connectorId),
-              catch: toConnectorError("Synara could not disconnect this server."),
+              catch: toConnectorError("Aha could not disconnect this server."),
             })
           : unavailable,
       completeAuthorization: (query) =>
@@ -98,21 +98,19 @@ export const makeMcpConnectors = (options: { readonly enabled?: boolean } = {}) 
                 Effect.succeed({
                   ok: false as const,
                   title: "Connection failed",
-                  message: "Synara could not finish the sign-in. Try connecting again.",
+                  message: "Aha could not finish the sign-in. Try connecting again.",
                 }),
               ),
             )
           : Effect.succeed({
               ok: false as const,
               title: "Connectors are unavailable",
-              message: "This version of Synara does not support connectors.",
+              message: "This version of Aha does not support connectors.",
             }),
       forward: (connectorId, request) =>
         Effect.tryPromise((signal) => runtime.forward(connectorId, { ...request, signal })).pipe(
           Effect.catch(() =>
-            Effect.succeed(
-              jsonRpcErrorResult(request.body, "Synara could not forward this request."),
-            ),
+            Effect.succeed(jsonRpcErrorResult(request.body, "Aha could not forward this request.")),
           ),
         ),
     } satisfies McpConnectorsShape;

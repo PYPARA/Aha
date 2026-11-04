@@ -11,7 +11,7 @@ export async function runCompactDatabaseCli(
   output: Pick<Console, "error" | "log" | "warn"> = console,
   signal?: AbortSignal,
 ): Promise<number> {
-  output.warn("WARNING: Stop every Synara process and other database client before compacting.");
+  output.warn("WARNING: Stop every Aha process and other database client before compacting.");
   if (args.length !== 1 || !args[0] || !path.isAbsolute(args[0])) {
     output.error(USAGE);
     return 2;

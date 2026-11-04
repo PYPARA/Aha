@@ -285,7 +285,7 @@ export function makeProjectAgentTools(
     definition: {
       name: "synara_project_link_repository",
       description:
-        "Coordinator only. Link an existing ordinary Synara project to this hub, by linkedProjectId or by its workspacePath. New hub threads can then be started in that repository. Unlinking stays a user action.",
+        "Coordinator only. Link an existing ordinary Aha project to this hub, by linkedProjectId or by its workspacePath. New hub threads can then be started in that repository. Unlinking stays a user action.",
       inputSchema: {
         type: "object",
         properties: {

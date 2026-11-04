@@ -1365,9 +1365,7 @@ const makeWsRpcHandlersLayer = () =>
             }),
           );
         }
-        yield* requireLoopbackOwner(
-          "Connectors can be managed only on the computer running Synara.",
-        );
+        yield* requireLoopbackOwner("Connectors can be managed only on the computer running Aha.");
       });
       const connectorRpc = <A>(
         effect: Effect.Effect<A, McpConnectorError>,
@@ -1983,7 +1981,7 @@ const makeWsRpcHandlersLayer = () =>
                     operationId: input.operationId,
                     kind: "phase",
                     phase: "registering",
-                    message: "Adding project to Synara",
+                    message: "Adding project to Aha",
                   });
 
                   const { command: normalizedCommand, prepareWorkspaceRoot } =

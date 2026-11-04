@@ -46,7 +46,7 @@ final class WindowFrameStream: NSObject, SCStreamOutput, SCStreamDelegate {
         queue.async { [self] in
             guard !stopped else { return }
             guard CGPreflightScreenCaptureAccess() else {
-                fail("screen_recording_required", "Screen Recording is required for the preview. Enable it in Synara’s permission setup.")
+                fail("screen_recording_required", "Screen Recording is required for the preview. Enable it in Aha’s permission setup.")
                 return
             }
             queue.asyncAfter(deadline: .now() + 6) { [weak self] in

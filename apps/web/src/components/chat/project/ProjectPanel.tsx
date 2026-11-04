@@ -686,7 +686,7 @@ function ProjectContextFile({
         lastSavedRef.current = read.document.content;
         setConflict(
           read.head.conflictPending
-            ? "This file changed outside Synara. Keep typing to overwrite, or reopen the panel."
+            ? "This file changed outside Aha. Keep typing to overwrite, or reopen the panel."
             : null,
         );
       } catch (cause) {

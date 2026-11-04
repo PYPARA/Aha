@@ -264,7 +264,7 @@ function buildCrashResumeRecord(input: {
     request: {
       threadIds: threads.slice(0, QUIT_RESUME_MAX_THREADS).map((thread) => thread.id),
       continuationPrompt:
-        "Synara stopped unexpectedly while this task was running. Check the conversation and current workspace state, verify whether pending operations already completed before repeating them, and continue the remaining work. Preserve pending approval and user decisions; ask again when needed.",
+        "Aha stopped unexpectedly while this task was running. Check the conversation and current workspace state, verify whether pending operations already completed before repeating them, and continue the remaining work. Preserve pending approval and user decisions; ask again when needed.",
     },
     threads,
     recordId: `crash:${randomUUID()}`,

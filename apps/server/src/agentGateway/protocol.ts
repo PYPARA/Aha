@@ -171,7 +171,7 @@ export function buildMcpInitializeResult(input: {
     },
     serverInfo: {
       name: "synara",
-      title: "Synara App Control",
+      title: "Aha App Control",
       version: input.serverVersion,
     },
     instructions: input.instructions,

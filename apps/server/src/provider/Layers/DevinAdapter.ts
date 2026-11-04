@@ -1799,7 +1799,7 @@ export function makeDevinAdapter(
         childProcessSpawner,
         cwd: input.cwd,
         runtimeMode: "approval-required",
-        clientInfo: { name: "Synara Command Discovery", version: "0.0.0" },
+        clientInfo: { name: "Aha Command Discovery", version: "0.0.0" },
       });
 
     const discoverDevinModelsUncached = (
@@ -2540,8 +2540,7 @@ export function makeDevinAdapter(
             try: async () => {
               if (!gatewaySessionLease || !agentGatewayCredentials) return undefined;
               const bootstrapToken = gatewaySessionLease.issueStdioBootstrapToken?.();
-              if (!bootstrapToken)
-                throw new Error("Synara gateway bootstrap token was unavailable.");
+              if (!bootstrapToken) throw new Error("Aha gateway bootstrap token was unavailable.");
               return createDevinSessionConfig({
                 connection: gatewaySessionLease.connection,
                 stdioProxy: agentGatewayCredentials.stdioProxy,
@@ -2675,7 +2674,7 @@ export function makeDevinAdapter(
             childProcessSpawner,
             cwd,
             runtimeMode: input.runtimeMode,
-            clientInfo: { name: "Synara", version: "0.0.0" },
+            clientInfo: { name: "Aha", version: "0.0.0" },
             clientCapabilities: {
               elicitation: { form: {} },
               _meta: {

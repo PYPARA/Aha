@@ -19,7 +19,7 @@ export function nativeEditorUnavailableError(
 ): WsRpcError | null {
   if (isBetaFeatureEnabled(NATIVE_EDITOR_BETA_FEATURE, flavor)) return null;
   return new WsRpcError({
-    message: "The native editor is unavailable in this build of Synara.",
+    message: "The native editor is unavailable in this build of Aha.",
     code: NATIVE_EDITOR_UNAVAILABLE_CODE,
     retryable: false,
   });

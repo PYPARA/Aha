@@ -363,8 +363,8 @@ const installOpenCodeGatewayMcp = Effect.fn("installOpenCodeGatewayMcp")(functio
     operation: "mcp.add",
     detail:
       status?.status === "failed"
-        ? `${input.displayName} Synara MCP connection failed: ${status.error}`
-        : `${input.displayName} Synara MCP connection did not become ready.`,
+        ? `${input.displayName} Aha MCP connection failed: ${status.error}`
+        : `${input.displayName} Aha MCP connection did not become ready.`,
   });
 });
 
@@ -3853,7 +3853,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               provider,
               method: "session/start",
               detail:
-                "Computer Use could not start because the thread-scoped Synara gateway is unavailable.",
+                "Computer Use could not start because the thread-scoped Aha gateway is unavailable.",
             });
           }
           const poolIsolationKey = agentGatewayConnection ? randomUUID() : undefined;
@@ -3902,7 +3902,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                           input.enableComputerControl === true
                             ? new OpenCodeRuntimeError({
                                 operation: "mcp.add",
-                                detail: `Computer Use could not start because the thread-scoped Synara MCP connection is not ready: ${openCodeRuntimeErrorDetail(cause)}`,
+                                detail: `Computer Use could not start because the thread-scoped Aha MCP connection is not ready: ${openCodeRuntimeErrorDetail(cause)}`,
                               })
                             : cause,
                         ),
@@ -3912,7 +3912,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                             : Effect.sync(() => agentGatewaySessionLease?.release()).pipe(
                                 Effect.andThen(
                                   Effect.logWarning(
-                                    `${adapterConfig.displayName} could not install thread-scoped Synara MCP control`,
+                                    `${adapterConfig.displayName} could not install thread-scoped Aha MCP control`,
                                     Cause.squash(cause),
                                   ),
                                 ),
@@ -3953,7 +3953,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                               : {}),
                             ...(initialAgent ? { agent: initialAgent } : {}),
                             permission: buildOpenCodePermissionRules(input.runtimeMode),
-                            title: `Synara ${input.threadId}`,
+                            title: `Aha ${input.threadId}`,
                           };
                           return client.session.create(
                             sessionCreateInput as unknown as Parameters<
@@ -4749,7 +4749,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             return yield* new ProviderAdapterValidationError({
               provider,
               operation: "forkThread",
-              issue: `The source ${adapterConfig.displayName} session has a turn in flight; Synara will rebuild the fork from its retained transcript.`,
+              issue: `The source ${adapterConfig.displayName} session has a turn in flight; Aha will rebuild the fork from its retained transcript.`,
             });
           }
           const sourceSessionId =

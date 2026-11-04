@@ -254,7 +254,7 @@ export function registerEditorProviders() {
     }),
     // Outline for sticky headers, diff breadcrumbs and the symbol picker.
     monaco.languages.registerDocumentSymbolProvider(selector, {
-      displayName: "Synara TypeScript",
+      displayName: "Aha TypeScript",
       async provideDocumentSymbols(model, token) {
         const entry = editorEntry(model);
         if (!entry) return [];
@@ -325,7 +325,7 @@ export function registerEditorProviders() {
       },
     }),
     monaco.languages.registerDocumentFormattingEditProvider(selector, {
-      displayName: "Synara TypeScript",
+      displayName: "Aha TypeScript",
       async provideDocumentFormattingEdits(model, _options, token) {
         const entry = editorEntry(model);
         if (!entry) return [];

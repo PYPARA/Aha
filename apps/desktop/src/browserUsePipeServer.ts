@@ -474,7 +474,7 @@ export class BrowserHostPipeServer {
     }
     client.sessionId = sessionId;
     return {
-      name: "Synara Browser Host",
+      name: "Aha Browser Host",
       version: "1.0.0",
       type: "synara-browser-host",
       metadata: {

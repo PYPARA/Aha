@@ -19,9 +19,9 @@ export { slugifyGroupTitle };
 
 const GROUP_WORKSPACE_INSTRUCTIONS = `# Hub workspace
 
-This folder is the coordinator's scratch space for this Synara Hub.
+This folder is the coordinator's scratch space for this Aha Hub.
 
-The hub's instructions live in Synara Hub settings (Memory → Instructions).
+The hub's instructions live in Aha Hub settings (Memory → Instructions).
 Do not treat this folder as the source of those instructions.
 
 Keep working files here. Do not create Studio-style Inbox/Context/Logs/Skills/Outbox

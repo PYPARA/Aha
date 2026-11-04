@@ -398,7 +398,7 @@ export class EditorDebugService {
     };
     dap.onRequest = async (command, args) => {
       if (command !== "startDebugging")
-        throw new Error(`Synara does not support the adapter's ${command} request.`);
+        throw new Error(`Aha does not support the adapter's ${command} request.`);
       const config = dapObject(args.configuration);
       if (
         typeof config.__pendingTargetId !== "string" ||
@@ -422,7 +422,7 @@ export class EditorDebugService {
     };
     await dap.request("initialize", {
       clientID: "synara",
-      clientName: "Synara",
+      clientName: "Aha",
       adapterID: "pwa-node",
       locale: "en",
       linesStartAt1: true,

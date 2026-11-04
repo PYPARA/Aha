@@ -51,7 +51,7 @@ final class ShieldContentView: NSView {
         layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
 
-        let text = label.flatMap { $0.isEmpty ? nil : $0 } ?? "Synara is activating this window"
+        let text = label.flatMap { $0.isEmpty ? nil : $0 } ?? "Aha is activating this window"
         let field = NSTextField(labelWithString: text)
         field.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         field.textColor = .white

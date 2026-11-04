@@ -85,7 +85,7 @@ export function useChatRuntimeModes({
             toastManager.add({
               type: "error",
               title: "Could not update access mode",
-              description: "Synara is not connected to the server.",
+              description: "Aha is not connected to the server.",
             });
             return false;
           }

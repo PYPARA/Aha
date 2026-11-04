@@ -151,7 +151,7 @@ function priorityExecArgs(
 ): string[] {
   return [
     "-c",
-    'renice "$1" -p "$$" >/dev/null 2>/dev/null || printf "%s\\n" "Synara: failed to lower agent process priority; continuing" >&2; shift; exec "$@"',
+    'renice "$1" -p "$$" >/dev/null 2>/dev/null || printf "%s\\n" "Aha: failed to lower agent process priority; continuing" >&2; shift; exec "$@"',
     "synara-agent-priority",
     String(priority),
     command,

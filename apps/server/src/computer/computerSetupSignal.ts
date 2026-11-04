@@ -168,7 +168,7 @@ export function computerSetupSignal(input: {
 export function computerSetupToolNote(signal: ComputerSetupSignal): string {
   const labels = listComputerPermissions(signal.missing);
   const needed = labels.length > 0 ? labels : "a macOS privacy permission";
-  const asked = `Synara needs ${needed} and has shown the user a setup card with a guided flow.`;
+  const asked = `Aha needs ${needed} and has shown the user a setup card with a guided flow.`;
   if (signal.blocking) {
     return (
       `${asked} Nothing on the desktop can be driven without it. ` +

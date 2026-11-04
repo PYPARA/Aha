@@ -457,7 +457,7 @@ function ActivityScopeMenu({
     scopeSelection === null
       ? t("workspace:allActivity")
       : scopeSelection === "chats"
-        ? "Synara"
+        ? "Aha"
         : resolveThreadProjectLabel(projectById.get(scopeSelection));
 
   return (
@@ -510,7 +510,7 @@ function ActivityScopeMenu({
                 <span className="min-w-0 flex-1 truncate">
                   {option.kind === "project"
                     ? resolveThreadProjectLabel(projectById.get(option.projectId))
-                    : "Synara"}
+                    : "Aha"}
                 </span>
                 <span className="ml-2 shrink-0 tabular-nums text-muted-foreground/60">
                   {option.threadCount}
@@ -1082,7 +1082,7 @@ export function SidebarActivityView({
             <SidebarSectionLabel
               label={
                 group.kind === "chats"
-                  ? "Synara"
+                  ? "Aha"
                   : resolveThreadProjectLabel(projectById.get(group.projectId))
               }
               {...(group.kind === "project"

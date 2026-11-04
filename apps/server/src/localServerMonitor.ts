@@ -833,7 +833,7 @@ function toServerProcess(
     ports,
     addresses,
     isStoppable,
-    ...(isStoppable ? {} : { stopDisabledReason: "Synara cannot signal this process." }),
+    ...(isStoppable ? {} : { stopDisabledReason: "Aha cannot signal this process." }),
   };
   pageTitleProbeArgs.set(server, detectionArgs);
   return server;
@@ -1011,7 +1011,7 @@ export async function stopLocalServer(
     return {
       pid: input.pid,
       stopped: false,
-      message: target.stopDisabledReason ?? "Synara cannot stop this process.",
+      message: target.stopDisabledReason ?? "Aha cannot stop this process.",
     };
   }
 

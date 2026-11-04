@@ -570,11 +570,7 @@ function LeaveBetaDialog({
 
 function BetaChannelMark() {
   return (
-    <img
-      src="/app-icons/beta.png"
-      alt="Synara Beta"
-      className="mt-0.5 size-9 shrink-0 rounded-xl"
-    />
+    <img src="/app-icons/beta.png" alt="Aha Beta" className="mt-0.5 size-9 shrink-0 rounded-xl" />
   );
 }
 
@@ -750,7 +746,7 @@ export function BetaChannelSettingsPanel({ active }: { readonly active: boolean 
         <BetaChannelMark />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
-            <p className={SETTINGS_CARD_ROW_TITLE_CLASS_NAME}>Synara Beta</p>
+            <p className={SETTINGS_CARD_ROW_TITLE_CLASS_NAME}>Aha Beta</p>
             <span className="inline-flex items-center rounded-full bg-[var(--beta-pill)] px-1.5 py-0.5 text-ui-xs font-semibold leading-none text-[var(--beta-pill-ink)]">
               {t("workspace:beta")}
             </span>

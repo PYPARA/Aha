@@ -22,7 +22,7 @@ export function providerDisabledSettingsMessage(
 ): string {
   return isEnabled(provider)
     ? `${PROVIDER_DISPLAY_NAMES[provider]} is disabled in Settings > Providers.`
-    : `${PROVIDER_DISPLAY_NAMES[provider]} is available in Synara Beta.`;
+    : `${PROVIDER_DISPLAY_NAMES[provider]} is available in Aha Beta.`;
 }
 
 export function ensureProviderEnabled(provider: ProviderKind, serverSettings: ServerSettingsShape) {

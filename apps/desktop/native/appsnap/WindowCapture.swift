@@ -68,7 +68,7 @@ private let windowListUnavailableFailure = AppSnapFailure(
 
 private let excludedFrontmostApplicationFailure = AppSnapFailure(
     code: "excluded_frontmost_application",
-    message: "Synara cannot capture its own window."
+    message: "Aha cannot capture its own window."
 )
 
 private func onScreenWindowInfo() -> [[String: Any]]? {

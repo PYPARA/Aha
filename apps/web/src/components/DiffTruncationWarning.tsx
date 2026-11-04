@@ -10,7 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { useTranslation } from "~/i18n";
 
 export const DEFAULT_DIFF_TRUNCATION_MESSAGE =
-  "Synara stopped reading at the diff size limit. Some files or changes may be missing.";
+  "Aha stopped reading at the diff size limit. Some files or changes may be missing.";
 
 export function DiffTruncationWarning({
   className,

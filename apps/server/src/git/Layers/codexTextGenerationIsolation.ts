@@ -93,7 +93,7 @@ export function assertNoExternalCodexConfigLayers(
   );
   if (configuredSystemPath) {
     throw new CodexTextGenerationConfigError(
-      `Isolated Codex text generation is disabled because ${configuredSystemPath} can add or force tool configuration outside Synara's isolated home.`,
+      `Isolated Codex text generation is disabled because ${configuredSystemPath} can add or force tool configuration outside Aha's isolated home.`,
     );
   }
   if ((options.platform ?? process.platform) !== "darwin") return;
@@ -477,7 +477,7 @@ export function buildCodexTextGenerationModelCatalog(model: string): string {
       {
         slug: model,
         display_name: model,
-        description: "Isolated Synara text generation without local or network tools.",
+        description: "Isolated Aha text generation without local or network tools.",
         default_reasoning_level: "low",
         supported_reasoning_levels: [{ effort: "low", description: "Low" }],
         shell_type: "shell_command",
