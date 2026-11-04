@@ -124,6 +124,17 @@ export type Gen3DSkeletonNode = typeof Gen3DSkeletonNode.Type;
 export const Gen3DSkeleton = Schema.Array(Gen3DSkeletonNode).check(
   Schema.isMaxLength(GEN3D_LIMITS.skeletonNodes),
 );
+/** Joints attached to an existing version for rigging (the version itself stays immutable). */
+export const Gen3DAttachedSkeleton = Schema.Struct({
+  versionId: Gen3DId,
+  nodes: Gen3DSkeleton,
+  /** Who placed the joints: the AI from the renders, a workbench template, or the user. */
+  origin: Schema.Literals(["ai", "template", "user"]),
+  /** Only confirmed joints can be rigged; AI proposals wait for the user. */
+  confirmed: Schema.Boolean,
+  updatedAt: Schema.String,
+});
+export type Gen3DAttachedSkeleton = typeof Gen3DAttachedSkeleton.Type;
 /** Fixed post-processing of a parent version into a game-ready low poly. */
 export const Gen3DProcess = Schema.Struct({
   targetTriangles: Schema.Finite.check(Schema.isBetween({ minimum: 100, maximum: 200_000 })),
@@ -339,6 +350,8 @@ export const Gen3DProject = Schema.Struct({
   adoptedVersionId: Schema.NullOr(Gen3DId),
   previewVersionId: Schema.NullOr(Gen3DId),
   references: Schema.Array(Gen3DReference),
+  /** Joints attached to versions that were built without a skeleton; older projects have none. */
+  skeletons: Schema.optional(Schema.Array(Gen3DAttachedSkeleton).check(Schema.isMaxLength(64))),
   /** Added with tiled materials; older projects have none. */
   textures: Schema.optional(Schema.Array(Gen3DTexture).check(Schema.isMaxLength(64))),
   blueprint: Schema.NullOr(Gen3DBlueprint),
@@ -381,6 +394,8 @@ export const Gen3DCommand = Schema.Struct({
     "repaint",
     "rig",
     "stylize",
+    "set-skeleton",
+    "propose-skeleton",
     "cancel",
     "adopt",
     "select-version",
@@ -414,6 +429,10 @@ export const Gen3DCommand = Schema.Struct({
   stylize: Schema.optional(Gen3DStylize),
   instruction: Schema.optional(Schema.String),
   feather: Schema.optional(Schema.Finite),
+  /** set-skeleton / propose-skeleton: the joints (empty removes them). */
+  skeleton: Schema.optional(Gen3DSkeleton),
+  confirmed: Schema.optional(Schema.Boolean),
+  skeletonOrigin: Schema.optional(Schema.Literals(["template", "user"])),
 });
 export type Gen3DExportFormat = NonNullable<Gen3DCommand["exportFormat"]>;
 export type Gen3DCommand = typeof Gen3DCommand.Type;

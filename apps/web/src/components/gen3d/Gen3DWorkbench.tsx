@@ -374,6 +374,22 @@ function ProjectWorkspace({
       setBusy(false);
     }
   };
+  /** Prefills a message for the AI assistant; the user still sends it. */
+  const askAssistant = async (prompt: string) => {
+    try {
+      const threadId = await ensureGen3DThread(
+        project.id,
+        command,
+        settings,
+        tr("Chat workspace is not ready. Try again after connecting."),
+      );
+      useComposerDraftStore.getState().setPrompt(threadId, prompt);
+      setPanel("assistant");
+      if (narrow) setDrawer(true);
+    } catch (error) {
+      onError(error);
+    }
+  };
   const locked = busy || !!activeJob || !!activeRun || project.archived;
   const tools = (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -449,6 +465,7 @@ function ProjectWorkspace({
           disabled={locked || !desktop || !blender?.headless}
           blenderMissing={desktop && !blender?.headless}
           act={act}
+          onAskAssistant={(prompt) => void askAssistant(prompt)}
         />
       )}
       {panel === "properties" && tool === "stylize" && (

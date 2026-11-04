@@ -587,6 +587,64 @@ describe("Gen3DEngine", () => {
     ).rejects.toThrow(/workbench operations/);
   });
 
+  it("rigs from confirmed joints attached to a version built without a skeleton", async () => {
+    const engine = new Gen3DEngine(root, makeHost({ blenderReady: true }));
+    let p = await project(engine);
+    await engine.command({
+      operation: "submit",
+      projectId: p.id,
+      revision: p.revision,
+      build: build(),
+      requestId: "j",
+    });
+    p = await settled(engine, p.id);
+    const version = p.versions[0]!;
+    const [w, h] = version.report.dimensions as [number, number, number];
+    const joints = [
+      { id: "hips", parent: null, position: [0, h * 0.5, 0] as const, radius: 0.02 },
+      { id: "thigh_l", parent: "hips", position: [w * 0.2, h * 0.3, 0] as const, radius: 0.02 },
+    ];
+    const command = (operation: "set-skeleton" | "propose-skeleton", extra: object) =>
+      engine.get(p.id).then((latest) =>
+        engine.command({
+          operation,
+          projectId: p.id,
+          revision: latest.revision,
+          versionId: version.id,
+          ...extra,
+        }),
+      );
+    await expect(
+      command("propose-skeleton", {
+        skeleton: [{ id: "hips", parent: null, position: [0, h * 3, 0], radius: 0.02 }],
+      }),
+    ).rejects.toThrow(/outside the model/);
+    // An AI proposal is never confirmed, even if it asks to be.
+    p = (await command("propose-skeleton", { skeleton: joints, confirmed: true })).project!;
+    expect(p.skeletons![0]).toMatchObject({ origin: "ai", confirmed: false });
+    const rig = () =>
+      engine.get(p.id).then((latest) =>
+        engine.command({
+          operation: "rig",
+          projectId: p.id,
+          revision: latest.revision,
+          versionId: version.id,
+          clips: ["idle"],
+        }),
+      );
+    await expect(rig()).rejects.toThrow(/Confirm joints/);
+    p = (
+      await command("set-skeleton", { skeleton: joints, confirmed: true, skeletonOrigin: "user" })
+    ).project!;
+    expect(p.skeletons).toHaveLength(1);
+    expect(p.skeletons![0]).toMatchObject({ origin: "user", confirmed: true });
+    await rig();
+    p = await settled(engine, p.id);
+    expect(p.jobs.at(-1)!.status).toBe("succeeded");
+    p = (await command("set-skeleton", { skeleton: [] })).project!;
+    expect(p.skeletons).toHaveLength(0);
+  });
+
   it("rigs only versions with a skeleton in their history", async () => {
     const engine = new Gen3DEngine(root, makeHost({ blenderReady: true }));
     let p = await project(engine);

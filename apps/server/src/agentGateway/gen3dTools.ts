@@ -1,7 +1,12 @@
 import * as fs from "node:fs/promises";
 import { Effect, Schema } from "effect";
-import { Gen3DBuild, type Gen3DEnvironment, type Gen3DProject } from "@synara/contracts";
-import { modelingAncestor } from "@synara/shared/gen3dVersions";
+import {
+  Gen3DBuild,
+  Gen3DSkeleton,
+  type Gen3DEnvironment,
+  type Gen3DProject,
+} from "@synara/contracts";
+import { modelingAncestor, rigSkeleton } from "@synara/shared/gen3dVersions";
 import { modelPath } from "@synara/shared/model3dFiles";
 import { GEN3D_RENDERS, gen3DEngine } from "../gen3d/engine";
 import { mcpToolResultError, mcpToolResultJson } from "./protocol";
@@ -18,6 +23,7 @@ Two routes, chosen per build with build.mode. "threejs" (default) suits most ass
 Three.js route: source is a self-contained function buildModel({ THREE, SDF, params }) returning a THREE.Group, with bundled Three.js 0.186.1, metres, Y up, origin at the bottom centre, front facing +Z. No imports, network, files, DOM, lights, cameras or textures. The isolated worker has 60 seconds, 1 MiB source and 1 million triangles.
 SDF builds organic or rounded shapes: sphere([x,y,z], r), capsule(a, b, r), cylinder(a, b, r), cappedCone(a, b, r1, r2), roundCone(a, b, r1, r2) (rounded ends), skeleton(nodes, { blend }), roundBox(centre, halfSize, edgeRadius) (axis aligned), ellipsoid(centre, radii), torus(centre, ringRadius, tubeRadius) (around Y), smoothUnion(k, ...shapes), union(...shapes), subtract(a, b), intersect(a, b). SDF.mesh(shape, { id, name, material, resolution }) returns a THREE.Mesh (resolution 16–256, default 128); give each mesh a stable id and a MeshStandardMaterial. Combine SDF meshes with ordinary Three.js meshes for hard-surface parts, and group parts with stable userData.ahaId values. Preserve parts and ids the user did not ask to change.
 Blender route: source is Blender Python (bpy) run in Aha's dedicated Blender instance, which can take a minute to start. Every build starts from an empty scene, so always send the full source. Blender is Z up in metres and front faces -Y; the fixed export converts to glTF Y up, applies modifiers and centres the base. Use Principled BSDF materials only (no texture nodes). Helpers already defined: params; aha_skeleton (build.skeleton or None); aha_point([x,y,z]) converts an Aha Y-up point to Blender; aha_skin(skeleton=None, name='Body', subdivisions=2, material=None) grows a Skin + Subdivision body whose radii match the nodes and that ends at leaf joints; aha_material(name, '#rrggbb', roughness=0.6, metallic=0.0). Aha's policy rejects file and path operations, import/export operators, bpy.ops.wm, getattr/setattr/vars and dunder names. The shared Blender lock also serves the 3D workshop, so a build may wait for it.
+Joints for an existing version: when the user wants to rig a version built without a skeleton (get.joints is null), read views for it, then call skeleton with versionId, baseRevision and the joints in the same published frame (metres, Y up, bottom centre at the origin, front +Z) using the ids below; the renders are orthographic and centred on the model, so read positions from the front render (x to the right, y up) and the side render (y up; the model's front, +Z, faces left). Each render spans 1.2 times the model's longest side. This only proposes joints: ask the user to review and confirm them in Rig & animate. It does not consume a build round.
 Skeletons: for characters, creatures, trees and tentacles, send build.skeleton as nodes { id, parent (null for the root), position [x,y,z] in metres Y up (the published model frame), radius } (up to 256), and grow the body from it with SDF.skeleton(params.skeleton) or aha_skin(). SDF.skeleton rounds every joint with its radius, so its leaf tips reach one radius beyond the leaf joint. Use rig-friendly ids (hips, spine, chest, neck, head, upperarm_l, forearm_l, hand_l, thigh_l, shin_l, foot_l, tail_1...). The skeleton is saved with the version for later rigging; keep it consistent with the body.
 Scoring: each build renders orthographic silhouettes at the blueprint scale and compares them. views returns the blueprint, diff images (grey = match, orange = model extra, blue = model missing) and renders. The side view may be mirrored in the reference; scoring matches either facing. The total score is a weak signal; the largest deviating region is what stops iteration. Fix the largest regions first and change only what deviates.
 Optimized versions (mode "process") are made by the workbench's fixed Blender pipeline (decimation, UV, baked textures, LODs, collision), and the user may locally repaint their baked texture from a view with a mask and the drawing channel; the workbench can also rig a version from its skeleton and add idle, walk, run and attack clips. Never submit any of these kinds; a new modeling build drops texture edits and rigs, so keep the skeleton consistent with the body when you change it. get.current is always a modeling version you can continue from, and get.optimizedPreview tells you when the user is viewing an optimized one.
@@ -72,6 +78,20 @@ const summary = (project: Gen3DProject, environment: Gen3DEnvironment) => {
       source: current.build.source,
       skeleton: current.build.skeleton ?? null,
     },
+    // Joints for rigging the version the user is looking at (from its build or attached later).
+    joints: previewed
+      ? (() => {
+          const found = rigSkeleton(project, previewed, true);
+          return found
+            ? {
+                versionId: found.version.id,
+                origin: found.origin,
+                confirmed: found.origin === "build" || found.attached?.confirmed === true,
+                joints: found.nodes.length,
+              }
+            : null;
+        })()
+      : null,
     optimizedPreview:
       previewed && previewed !== current
         ? {
@@ -106,6 +126,22 @@ const summary = (project: Gen3DProject, environment: Gen3DEnvironment) => {
   };
 };
 
+const SKELETON_SCHEMA = {
+  type: "array",
+  maxItems: 256,
+  items: {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      parent: { type: ["string", "null"] },
+      position: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3 },
+      radius: { type: "number" },
+    },
+    required: ["id", "parent", "position", "radius"],
+    additionalProperties: false,
+  },
+} as const;
+
 export function makeGen3DTools(): ToolEntry[] {
   return [
     {
@@ -116,11 +152,15 @@ export function makeGen3DTools(): ToolEntry[] {
         inputSchema: {
           type: "object",
           properties: {
-            operation: { type: "string", enum: ["get", "views", "submit", "status", "report"] },
+            operation: {
+              type: "string",
+              enum: ["get", "views", "submit", "skeleton", "status", "report"],
+            },
             baseRevision: { type: "integer" },
             requestId: { type: "string" },
             jobId: { type: "string" },
             versionId: { type: "string" },
+            skeleton: SKELETON_SCHEMA,
             build: {
               type: "object",
               properties: {
@@ -128,26 +168,7 @@ export function makeGen3DTools(): ToolEntry[] {
                 prompt: { type: "string" },
                 parentVersionId: { type: ["string", "null"] },
                 mode: { type: "string", enum: ["threejs", "blender"] },
-                skeleton: {
-                  type: "array",
-                  maxItems: 256,
-                  items: {
-                    type: "object",
-                    properties: {
-                      id: { type: "string" },
-                      parent: { type: ["string", "null"] },
-                      position: {
-                        type: "array",
-                        items: { type: "number" },
-                        minItems: 3,
-                        maxItems: 3,
-                      },
-                      radius: { type: "number" },
-                    },
-                    required: ["id", "parent", "position", "radius"],
-                    additionalProperties: false,
-                  },
-                },
+                skeleton: SKELETON_SCHEMA,
               },
               required: ["source", "prompt", "parentVersionId"],
               additionalProperties: false,
@@ -246,6 +267,30 @@ export function makeGen3DTools(): ToolEntry[] {
             );
             const job = result.project?.jobs.find((j) => j.requestId === args.requestId);
             return mcpToolResultJson({ job, location: "/gen3d?projectId=" + project.id });
+          }
+          if (args.operation === "skeleton") {
+            // A proposal only: the user checks the joints in the workbench and confirms them.
+            const skeleton = yield* Effect.try({
+              try: () => Schema.decodeUnknownSync(Gen3DSkeleton)(args.skeleton),
+              catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+            });
+            if (typeof args.baseRevision !== "number" || typeof args.versionId !== "string")
+              return mcpToolResultError("Provide baseRevision and versionId.");
+            yield* context.assertCallerTurnActive();
+            const result = yield* genPromise(() =>
+              engine.command({
+                operation: "propose-skeleton",
+                projectId: project.id,
+                revision: args.baseRevision as number,
+                versionId: args.versionId as string,
+                skeleton,
+              }),
+            );
+            return mcpToolResultJson({
+              proposed: result.project?.skeletons?.find((s) => s.versionId === args.versionId),
+              next: "Tell the user to review and confirm the joints in Rig & animate before rigging.",
+              location: "/gen3d?projectId=" + project.id,
+            });
           }
           if (args.operation === "status") {
             const job = args.jobId

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelingAncestor, skeletonSource, versionChain } from "./gen3dVersions";
+import { modelingAncestor, rigSkeleton, skeletonSource, versionChain } from "./gen3dVersions";
 
 const v = (id: string, parentVersionId: string | null, mode?: string, skeleton?: unknown[]) => ({
   id,
@@ -24,5 +24,24 @@ describe("gen3dVersions", () => {
     expect(versionChain(loop, loop[0]!).map((x) => x.id)).toEqual(["x", "y"]);
     expect(modelingAncestor(loop, loop[0]!)).toBeUndefined();
     expect(skeletonSource([v("z", "gone", "process")], v("z", "gone", "process"))).toBeUndefined();
+  });
+  it("prefers confirmed attached joints nearest in the chain", () => {
+    const plain = [v("m", null, "threejs"), v("o", "m", "process")];
+    const attached = (confirmed: boolean) => ({
+      versionId: "m",
+      nodes: [{ id: "hips" }],
+      origin: "ai",
+      confirmed,
+    });
+    expect(rigSkeleton({ versions: plain }, plain[1]!)).toBeUndefined();
+    expect(
+      rigSkeleton({ versions: plain, skeletons: [attached(false)] }, plain[1]!),
+    ).toBeUndefined();
+    expect(
+      rigSkeleton({ versions: plain, skeletons: [attached(false)] }, plain[1]!, true)?.origin,
+    ).toBe("ai");
+    const found = rigSkeleton({ versions: plain, skeletons: [attached(true)] }, plain[1]!);
+    expect(found?.version.id).toBe("m");
+    expect(rigSkeleton({ versions }, versions[3]!)?.origin).toBe("build");
   });
 });

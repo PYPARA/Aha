@@ -1264,7 +1264,17 @@ for members in islands.values():
 ids = set(by_id)
 low = lambda i: i in by_id and by_id[i]['position'][1] < 0.3 * height
 has = lambda *names: all(n in ids for n in names)
-if has('thigh_l', 'thigh_r', 'upperarm_l', 'upperarm_r') and (low('hand_l') or low('forearm_l')):
+def level_body():
+    """True when the torso runs front to back (hips to chest/neck/head mostly horizontal)."""
+    top = next((i for i in ('chest', 'neck', 'head', 'spine') if i in ids), None)
+    if 'hips' not in ids or not top:
+        return False
+    a, b = by_id['hips']['position'], by_id[top]['position']
+    return abs(b[2] - a[2]) > abs(b[1] - a[1])
+
+
+# Front legs reaching the ground alone is not enough: chibi arms hang low too.
+if has('thigh_l', 'thigh_r', 'upperarm_l', 'upperarm_r') and (low('hand_l') or low('forearm_l')) and level_body():
     kind = 'quadruped'
 elif has('thigh_l', 'thigh_r'):
     kind = 'biped'

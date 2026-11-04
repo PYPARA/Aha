@@ -1,4 +1,26 @@
 export const gen3dCopy: Record<string, string> = {
+  Joints: "关节",
+  "Selected joint": "选中的关节",
+  "Mirror left and right": "左右对称",
+  "Save and confirm joints": "保存并确认关节",
+  "Confirm joints": "确认关节",
+  "Discard joints": "删除关节",
+  "Edit joints": "调整关节",
+  "Biped template": "两足模板",
+  "Quadruped template": "四足模板",
+  "Ask the AI assistant": "让 AI 助手放置",
+  "Joints from {name}, {n} joints.": "关节来自 {name}，共 {n} 个。",
+  "Move the selected joint with the arrow keys (Shift for larger steps).":
+    "用方向键移动选中的关节（按住 Shift 移动更多）。",
+  "Proposed by the AI assistant from the renders. Drag the joints onto the body, then confirm.":
+    "AI 助手根据渲染图提出的关节。把关节拖到身体上的合适位置，再确认。",
+  "A template scaled to the model. Drag each joint onto the body, then confirm.":
+    "按模型尺寸缩放的模板。把每个关节拖到身体上的合适位置，再确认。",
+  "Drag the joints to adjust them, then confirm.": "拖动关节调整位置，再确认。",
+  "This version has no joints yet. Start from a template and drag the joints onto the body, or ask the AI assistant to place them from the renders.":
+    "这个版本还没有关节。可以从模板开始，把关节拖到身体上；也可以让 AI 助手根据渲染图放置。",
+  "Propose joints for rigging version {name}: look at its front and side renders and call the gen3d skeleton operation. Do not rebuild the model.":
+    "请为版本 {name} 提出绑定用的关节：查看它的正面和侧面渲染图，调用 gen3d 的 skeleton 操作。不要重新建模。",
   Stylize: "风格化",
   Stylized: "风格化",
   Style: "风格",

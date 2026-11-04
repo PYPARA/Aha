@@ -23,7 +23,7 @@ import {
 import { atomicModelFile, modelErrorText, modelPath } from "@synara/shared/model3dFiles";
 import type { BlenderRuntime } from "../model3d/blender";
 import { GEN3D_BLENDER_PRELUDE, mapBlenderError } from "./blenderPrelude";
-import { skeletonSource, versionChain } from "@synara/shared/gen3dVersions";
+import { rigSkeleton, versionChain } from "@synara/shared/gen3dVersions";
 import {
   GEN3D_CONVERT_SCRIPT,
   GEN3D_PROCESS_SCRIPT,
@@ -559,9 +559,9 @@ export class Gen3DHost {
     build: Gen3DBuild,
   ) {
     const parent = project.versions.find((v) => v.id === build.parentVersionId);
-    const source = parent && skeletonSource(project.versions, parent);
-    if (!parent || !build.rig || !source?.build.skeleton)
-      throw new Error("Rigging needs a version with a skeleton in its history.");
+    const source = parent && rigSkeleton(project, parent);
+    if (!parent || !build.rig || !source)
+      throw new Error("Rigging needs confirmed joints or a skeleton in the version history.");
     const model = await this.versionFile(project, parent, "model.glb");
     const input = await modelPath(directory, "input.glb");
     await atomicModelFile(input, model);
@@ -573,7 +573,7 @@ export class Gen3DHost {
           input,
           output: directory,
           name: "Model",
-          skeleton: source.build.skeleton,
+          skeleton: source.nodes,
           clips: build.rig.clips,
           preview: { size: 256, frames: PREVIEW_FRAMES },
         },
@@ -1046,14 +1046,21 @@ export class Gen3DHost {
       // Optimized, repainted and rigged versions carry no source; walk up to the modeled one.
       const chain = versionChain(project.versions, version);
       const source = chain.find((v) => v.build.mode !== "process");
-      const skeletonVersion = skeletonSource(project.versions, version);
+      const joints = rigSkeleton(project, version);
       const sourceName = source?.build.mode === "blender" ? "source.py" : "source.js";
       if (source?.build.source)
         await atomicModelFile(path.join(temporary, sourceName), source.build.source);
-      const skeleton = skeletonVersion
-        ? await modelPath(this.root, project.id, "versions", skeletonVersion.id, "skeleton.json")
-        : null;
-      if (skeleton) await fs.copyFile(skeleton, path.join(temporary, "skeleton.json"));
+      // The joints the rig used: a build's skeleton.json, or confirmed joints attached later.
+      if (joints?.attached)
+        await atomicModelFile(
+          path.join(temporary, "skeleton.json"),
+          JSON.stringify({ format: 1, units: "meters", upAxis: "Y", nodes: joints.nodes }),
+        );
+      else if (joints)
+        await fs.copyFile(
+          await modelPath(this.root, project.id, "versions", joints.version.id, "skeleton.json"),
+          path.join(temporary, "skeleton.json"),
+        );
       await atomicModelFile(
         path.join(temporary, "asset.json"),
         JSON.stringify(

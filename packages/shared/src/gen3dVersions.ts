@@ -31,3 +31,30 @@ export function modelingAncestor<V extends ChainVersion>(versions: readonly V[],
 export function skeletonSource<V extends ChainVersion>(versions: readonly V[], version: V) {
   return versionChain(versions, version).find((v) => !!v.build.skeleton?.length);
 }
+
+interface AttachedSkeleton {
+  versionId: string;
+  nodes: readonly unknown[];
+  origin: string;
+  confirmed: boolean;
+}
+
+/**
+ * The joints a rig would use: walking the chain nearest first, a joint set attached to that
+ * version (confirmed, unless `includeProposals`) wins over the skeleton its build carried.
+ */
+export function rigSkeleton<V extends ChainVersion, S extends AttachedSkeleton>(
+  project: { versions: readonly V[]; skeletons?: readonly S[] | undefined },
+  version: V,
+  includeProposals = false,
+): { version: V; nodes: readonly unknown[]; origin: string; attached: S | null } | undefined {
+  for (const v of versionChain(project.versions, version)) {
+    const attached = project.skeletons?.find(
+      (s) => s.versionId === v.id && s.nodes.length && (s.confirmed || includeProposals),
+    );
+    if (attached) return { version: v, nodes: attached.nodes, origin: attached.origin, attached };
+    if (v.build.skeleton?.length)
+      return { version: v, nodes: v.build.skeleton, origin: "build", attached: null };
+  }
+  return undefined;
+}

@@ -38,7 +38,7 @@ import {
 } from "@synara/shared/gen3dScore";
 import { validateSkeleton } from "@synara/shared/gen3dSdf";
 import { makeSeamless } from "@synara/shared/gen3dTexture";
-import { skeletonSource } from "@synara/shared/gen3dVersions";
+import { rigSkeleton } from "@synara/shared/gen3dVersions";
 import { validateBytes } from "gltf-validator";
 import { Gen3DHostTimeoutError, gen3dHostCall } from "./hostClient";
 
@@ -723,9 +723,9 @@ export class Gen3DEngine {
               throw new Error("A model build is already in progress.");
             const parent = p.versions.find((v) => v.id === (c.versionId ?? p.previewVersionId));
             if (!parent) throw new Error("Choose a version to rig.");
-            if (!skeletonSource(p.versions, parent))
+            if (!rigSkeleton(p, parent))
               throw new Error(
-                "This version has no skeleton. Rigging uses the skeleton saved with a modeling build.",
+                "This version has no skeleton. Confirm joints for it, or rig a version built with a skeleton.",
               );
             const clips = [...new Set(c.clips ?? [])];
             if (!clips.length || clips.some((clip) => !GEN3D_ANIMATION_CLIPS.includes(clip)))
@@ -798,6 +798,51 @@ export class Gen3DEngine {
             await this.save(p);
             void this.execute(p.id, id);
             return { project: p };
+          }
+          case "set-skeleton":
+          case "propose-skeleton": {
+            if (p.archived) throw new Error("Restore this project before editing.");
+            const version = p.versions.find((v) => v.id === c.versionId);
+            if (!version || !c.skeleton) throw new Error("Choose a version and its joints.");
+            const skeletons = (p.skeletons ??= []);
+            const index = skeletons.findIndex((s) => s.versionId === version.id);
+            if (!c.skeleton.length) {
+              if (c.operation === "propose-skeleton")
+                throw new Error("Propose at least one joint.");
+              if (index >= 0) skeletons.splice(index, 1);
+              break;
+            }
+            validateSkeleton(c.skeleton);
+            // Joints must sit on the model: inside its bounds with a margin for tips and ears.
+            const [w = 0, h = 0, d = 0] = version.report.dimensions;
+            const margin = 0.25 * Math.max(w, h, d);
+            for (const node of c.skeleton) {
+              const [x, y, z] = node.position;
+              if (
+                Math.abs(x) > w / 2 + margin ||
+                y < -margin ||
+                y > h + margin ||
+                Math.abs(z) > d / 2 + margin
+              )
+                throw new Error(
+                  `Joint ${node.id} lies outside the model (${w.toFixed(2)} × ${h.toFixed(2)} × ${d.toFixed(2)} m, bottom centre at the origin).`,
+                );
+            }
+            const entry = {
+              versionId: version.id,
+              nodes: c.skeleton,
+              // The agent only proposes; the user confirms in the workbench.
+              origin:
+                c.operation === "propose-skeleton" ? ("ai" as const) : (c.skeletonOrigin ?? "user"),
+              confirmed: c.operation === "set-skeleton" && c.confirmed === true,
+              updatedAt: now(),
+            };
+            if (index >= 0) skeletons[index] = entry;
+            else {
+              if (skeletons.length >= 64) throw new Error("A project keeps at most 64 joint sets.");
+              skeletons.push(entry);
+            }
+            break;
           }
           case "submit": {
             if (p.archived) throw new Error("Restore this project before building.");

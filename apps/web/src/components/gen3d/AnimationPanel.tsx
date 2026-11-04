@@ -6,10 +6,12 @@ import {
   type Gen3DProject,
   type Gen3DVersion,
 } from "@synara/contracts";
-import { skeletonSource } from "@synara/shared/gen3dVersions";
+import { rigSkeleton } from "@synara/shared/gen3dVersions";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
+import { SkeletonEditor } from "./SkeletonEditor";
+import { templateSkeleton, type Dimensions } from "./skeletonJoints";
 import { gen3dAssetUrl } from "./useGen3D";
 
 type Clip = (typeof GEN3D_ANIMATION_CLIPS)[number];
@@ -32,19 +34,38 @@ export function AnimationPanel({
   disabled,
   blenderMissing,
   act,
+  onAskAssistant,
 }: {
   project: Gen3DProject;
   version: Gen3DVersion | undefined;
   disabled: boolean;
   blenderMissing: boolean;
   act: (input: Omit<Gen3DCommand, "projectId" | "revision">) => Promise<Gen3DCommandResult | null>;
+  onAskAssistant: (prompt: string) => void;
 }) {
   const tr = useAhaTranslation();
-  const [clips, setClips] = useState<Clip[]>([...GEN3D_ANIMATION_CLIPS]);
-  const source = version && skeletonSource(project.versions, version);
+  const [clips, setClips] = useState<Clip[]>([...GEN3D_ANIMATION_CLIPS]),
+    [editing, setEditing] = useState(false);
+  // Joints from the version's history, including proposals that still wait for confirmation.
+  const joints = version && rigSkeleton(project, version, true);
+  const confirmed = !!joints && (joints.origin === "build" || joints.attached?.confirmed === true);
+  useEffect(() => setEditing(false), [version?.id]);
+  const ORIGIN_STATUS: Record<string, string> = {
+    ai: "Proposed by the AI assistant from the renders. Drag the joints onto the body, then confirm.",
+    template: "A template scaled to the model. Drag each joint onto the body, then confirm.",
+  };
   const rig = version?.process?.rig;
   const animated = !!rig && version.files.some((f) => f.name === "rigged.glb");
   useEffect(() => setClips([...GEN3D_ANIMATION_CLIPS]), [version?.id]);
+  const template = (kind: "biped" | "quadruped") =>
+    version &&
+    void act({
+      operation: "set-skeleton",
+      versionId: version.id,
+      skeleton: templateSkeleton(kind, version.report.dimensions as unknown as Dimensions),
+      confirmed: false,
+      skeletonOrigin: "template",
+    });
   const toggle = (clip: Clip, on: boolean) =>
     setClips((current) =>
       GEN3D_ANIMATION_CLIPS.filter((c) => (c === clip ? on : current.includes(c))),
@@ -92,19 +113,90 @@ export function AnimationPanel({
           <p>
             {tr("Source version")}: <strong>{version.name}</strong>
           </p>
-          {!source ? (
-            <p className="text-ui-xs leading-relaxed text-muted-foreground">
-              {tr(
-                "Rigging uses the skeleton saved with a modeling build. Ask the AI assistant to build with a skeleton (characters, creatures, tails), then rig that version or an optimized one made from it.",
+          {!joints ? (
+            <section className="space-y-2" aria-label={tr("Joints")}>
+              <p className="text-ui-xs leading-relaxed text-muted-foreground">
+                {tr(
+                  "This version has no joints yet. Start from a template and drag the joints onto the body, or ask the AI assistant to place them from the renders.",
+                )}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={disabled}
+                  onClick={() => template("biped")}
+                >
+                  {tr("Biped template")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={disabled}
+                  onClick={() => template("quadruped")}
+                >
+                  {tr("Quadruped template")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={disabled}
+                  onClick={() =>
+                    onAskAssistant(
+                      tr(
+                        "Propose joints for rigging version {name}: look at its front and side renders and call the gen3d skeleton operation. Do not rebuild the model.",
+                      ).replace("{name}", version.name),
+                    )
+                  }
+                >
+                  {tr("Ask the AI assistant")}
+                </Button>
+              </div>
+            </section>
+          ) : !confirmed || editing ? (
+            <SkeletonEditor
+              project={project}
+              version={joints.version}
+              initial={joints.nodes as never}
+              status={tr(
+                ORIGIN_STATUS[joints.origin] ?? "Drag the joints to adjust them, then confirm.",
               )}
-            </p>
+              disabled={disabled}
+              onConfirm={(nodes) =>
+                void act({
+                  operation: "set-skeleton",
+                  versionId: joints.version.id,
+                  skeleton: nodes,
+                  confirmed: true,
+                }).then((result) => result && setEditing(false))
+              }
+              onDiscard={() =>
+                joints.attached
+                  ? void act({
+                      operation: "set-skeleton",
+                      versionId: joints.version.id,
+                      skeleton: [],
+                    })
+                  : setEditing(false)
+              }
+            />
           ) : (
             <>
-              <p className="text-ui-xs text-muted-foreground">
-                {tr("Skeleton from {name}, {n} joints.")
-                  .replace("{name}", source.name)
-                  .replace("{n}", String(source.build.skeleton!.length))}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 flex-1 text-ui-xs text-muted-foreground">
+                  {tr("Joints from {name}, {n} joints.")
+                    .replace("{name}", joints.version.name)
+                    .replace("{n}", String(joints.nodes.length))}
+                </p>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={disabled}
+                  onClick={() => setEditing(true)}
+                >
+                  {tr("Edit joints")}
+                </Button>
+              </div>
               <fieldset className="space-y-2">
                 <legend className="mb-1 text-ui-xs text-muted-foreground">
                   {tr("Animation clips")}
