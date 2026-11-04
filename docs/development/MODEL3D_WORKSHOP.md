@@ -13,6 +13,7 @@
 - `apps/desktop/src/model3d/host.ts` 提供随机凭据认证的本机 Host HTTP，使用私有 UNIX socket / named pipe。请求只传工程与任务 ID；大模型和贴图通过受控工程目录交换，不进入聊天文本或大型 RPC。
 - Three.js 固定版本 0.186.1，Vite 独立构建 `model3d-runtime.html` 与内联 Worker。专用 BrowserWindow 开启 Electron sandbox/contextIsolation，关闭 Node（包括 Worker），没有主应用 bridge、认证信息或持久会话。生成代码仅在 Worker 执行，CSP 只允许进程内 `data:`/`blob:` 读取，禁止网络和文件连接；宿主只允许启动阶段加载同源静态代码。超时销毁 Worker/专用进程。
 - Worker 输出仅接受有限 BufferGeometry、标准材质、Group/Object3D/Mesh。验证属性、索引、变换、容量和层级后才交给可信 Three.js 层；不接受灯光、相机、纹理 URL、动画、骨骼或外部包。
+- Worker 序列化前必须 `root.updateMatrixWorld(true)`：`toJSON` 只写 `matrix`，未更新时源码里 `position/rotation/scale` 设置的部件经 `ObjectLoader` 解析后回到原点（回归见 `model3dWorker.browser.tsx`）。兼容：已发布版本是不可变 GLB，不受影响；此修复之前构建的版本若用此方式摆放部件，重新执行同一份 Three.js 源码（参数调整、AI 基于旧源码的新一轮）时部件会移到源码指定的位置，与旧版本外观不同。仅材质调整读取父版本 GLB，不重跑源码，布局保持不变。
 - 可信层负责本地贴图、PBR 通道、统计、GLTFExporter、缩略图。GLTFLoader 即使返回场景，也必须检查内嵌纹理是否成功解码，不能发布无贴图的降级结果。查看器和导出读取同一份规范 GLB；显示网格、灯光、相机不进入资产。查看器按需绘制并释放几何、材质、贴图、辅助对象和 renderer。
 - Blender 固定 mcp-for-blender 2.2.2 和同包 addon，uvx/Python/缓存/配置在 Aha 私有运行目录。独立 GUI 使用 factory startup、disable-autoexec、环回端口和工程标识；经 MCP SDK stdio Client 连接。开启上游 safe mode，关闭遥测及资产服务，只调用场景读取和 Python 建模/固定发布脚本。
 - 单次 Python 调用 120 秒，整体任务另有宿主超时。取消/崩溃/超时只使用 Aha 保存的 ChildProcess 句柄，禁止按进程名终止 Blender。工程隔离不等于 OS 沙箱。生成源码另经 AST 发布规则检查，拒绝文件操作、发布路径、动态属性访问和窗口管理；这不是通用 Python 安全沙箱。固定发布脚本决定规范保存路径，保存 `.blend` 后发布 GLB；不能自动重放不明 Python 操作。

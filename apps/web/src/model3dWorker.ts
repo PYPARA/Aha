@@ -19,6 +19,8 @@ globalThis.onmessage = (
         object.geometry = new THREE.BufferGeometry().copy(object.geometry);
       }
     });
+    // toJSON serializes `matrix`, which only follows position/rotation/scale after an update.
+    root.updateMatrixWorld(true);
     const json = root.toJSON();
     if (JSON.stringify(json).length > 100 * 1024 * 1024)
       throw new Error("Model exceeds the memory limit.");
