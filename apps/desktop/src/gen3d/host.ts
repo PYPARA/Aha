@@ -27,6 +27,7 @@ import { rigSkeleton, versionChain } from "@synara/shared/gen3dVersions";
 import {
   GEN3D_CONVERT_SCRIPT,
   GEN3D_PROCESS_SCRIPT,
+  GEN3D_PROP_SCRIPT,
   GEN3D_RIG_SCRIPT,
   GEN3D_STYLIZE_SCRIPT,
   GEN3D_TEXTURE_SCRIPT,
@@ -57,8 +58,11 @@ const FIXED_SCRIPTS = {
   texture: { source: GEN3D_TEXTURE_SCRIPT, label: "texture" },
   rig: { source: GEN3D_RIG_SCRIPT, label: "rigging" },
   stylize: { source: GEN3D_STYLIZE_SCRIPT, label: "stylization" },
+  prop: { source: GEN3D_PROP_SCRIPT, label: "prop animation" },
 } as const;
 const PREVIEW_FRAMES = 12;
+/** Animated companions of a version's static model.glb: a skinned rig or animated parts. */
+const ANIMATED_MODELS = ["rigged.glb", "animated.glb"] as const;
 /** Repaint works on the baked base colour texture an optimized version carries. */
 const baked = (version: Gen3DVersion | undefined) =>
   version?.process?.baked.includes("baseColor") === true;
@@ -519,12 +523,16 @@ export class Gen3DHost {
           await modelPath(directory, parent.process.collision.file),
           await this.versionFile(project, parent, parent.process.collision.file),
         );
-      // A rigged parent keeps its rig: same skin and clips, new colour (previews show the old one).
-      if (parent.files.some((f) => f.name === "rigged.glb")) {
+      // An animated parent keeps its rig or parts: same clips, new colour (previews show the old one).
+      const animatedFiles = ANIMATED_MODELS.filter((name) =>
+        parent.files.some((f) => f.name === name),
+      );
+      for (const name of animatedFiles)
         await atomicModelFile(
-          await modelPath(directory, "rigged.glb"),
-          replaceBaseColor(await this.versionFile(project, parent, "rigged.glb"), color),
+          await modelPath(directory, name),
+          replaceBaseColor(await this.versionFile(project, parent, name), color),
         );
+      if (animatedFiles.length) {
         for (const file of parent.files.filter((f) => /^anim-[a-z]+\.webp$/.test(f.name)))
           await atomicModelFile(
             await modelPath(directory, file.name),
@@ -588,19 +596,7 @@ export class Gen3DHost {
       const rigged = await modelPath(directory, "rigged.glb");
       if ((await fs.stat(rigged)).size > GEN3D_LIMITS.fileBytes)
         throw new Error("Rigged model exceeds 200 MiB.");
-      const clips = (raw.clips ?? []).map(({ name, seconds, loop }) => ({ name, seconds, loop }));
-      for (const clip of clips) {
-        if (!/^[a-z]+$/.test(clip.name)) throw new Error("Unexpected rigging output.");
-        const frames = [];
-        for (let i = 0; i < PREVIEW_FRAMES; i++)
-          frames.push(
-            await modelPath(directory, `preview-${clip.name}-${String(i).padStart(2, "0")}.png`),
-          );
-        await sharp(frames, { join: { animated: true } })
-          .webp({ loop: 0, delay: Math.round((clip.seconds * 1000) / PREVIEW_FRAMES), quality: 80 })
-          .toFile(await modelPath(directory, `anim-${clip.name}.webp`));
-        for (const frame of frames) await fs.rm(frame, { force: true });
-      }
+      const clips = await this.clipPreviews(directory, raw.clips);
       if (parent.process?.collision)
         await atomicModelFile(
           await modelPath(directory, parent.process.collision.file),
@@ -675,6 +671,83 @@ export class Gen3DHost {
       await fs.rm(input, { force: true });
     }
   }
+  /** Turns each clip's preview frames into a looping WebP and returns the clip list. */
+  private async clipPreviews(
+    directory: string,
+    raw: { name: string; seconds: number; loop: boolean }[] | undefined,
+  ) {
+    const clips = (raw ?? []).map(({ name, seconds, loop }) => ({ name, seconds, loop }));
+    for (const clip of clips) {
+      if (!/^[a-z]+$/.test(clip.name)) throw new Error("Unexpected animation output.");
+      const frames = [];
+      for (let i = 0; i < PREVIEW_FRAMES; i++)
+        frames.push(
+          await modelPath(directory, `preview-${clip.name}-${String(i).padStart(2, "0")}.png`),
+        );
+      await sharp(frames, { join: { animated: true } })
+        .webp({ loop: 0, delay: Math.round((clip.seconds * 1000) / PREVIEW_FRAMES), quality: 80 })
+        .toFile(await modelPath(directory, `anim-${clip.name}.webp`));
+      for (const frame of frames) await fs.rm(frame, { force: true });
+    }
+    return clips;
+  }
+  /** Animates chosen parts of the parent around a pivot (lid, door, spin or slide). */
+  private async animateBuild(
+    project: Gen3DProject,
+    jobId: string,
+    directory: string,
+    build: Gen3DBuild,
+  ) {
+    const parent = project.versions.find((v) => v.id === build.parentVersionId);
+    if (!parent || !build.animate) throw new Error("Choose a version and the parts to move.");
+    const model = await this.versionFile(project, parent, "model.glb");
+    const input = await modelPath(directory, "input.glb");
+    await atomicModelFile(input, model);
+    try {
+      const raw = (await this.runFixedScript(
+        "prop",
+        directory,
+        {
+          input,
+          output: directory,
+          ...build.animate,
+          preview: { size: 256, frames: PREVIEW_FRAMES },
+        },
+        jobId,
+      )) as {
+        motion?: unknown;
+        parts?: unknown;
+        clips?: { name: string; seconds: number; loop: boolean }[];
+        seconds?: unknown;
+      };
+      if ((await fs.stat(await modelPath(directory, "animated.glb"))).size > GEN3D_LIMITS.fileBytes)
+        throw new Error("Animated model exceeds 200 MiB.");
+      const clips = await this.clipPreviews(directory, raw.clips);
+      if (parent.process?.collision)
+        await atomicModelFile(
+          await modelPath(directory, parent.process.collision.file),
+          await this.versionFile(project, parent, parent.process.collision.file),
+        );
+      const base = parent.process ?? {
+        highTriangles: parent.report.triangles,
+        lowTriangles: parent.report.triangles,
+        lods: [],
+        collision: null,
+        baked: [],
+        textureSize: 0,
+      };
+      const report = Schema.decodeUnknownSync(Gen3DProcessReport)({
+        ...base,
+        lods: [],
+        seconds: Number(raw.seconds) || 0,
+        props: { motion: build.animate.motion, parts: Number(raw.parts) || 0, clips },
+      });
+      await atomicModelFile(await modelPath(directory, "process.json"), JSON.stringify(report));
+      return { bytes: new Uint8Array(model), report };
+    } finally {
+      await fs.rm(input, { force: true });
+    }
+  }
   private async addReference(projectId: string) {
     const selection = await dialog.showOpenDialog({
       title: "Choose a three-view reference image",
@@ -739,7 +812,9 @@ export class Gen3DHost {
                 ? await this.rigBuild(project, jobId, directory, build)
                 : build.stylize
                   ? await this.stylizeBuild(project, jobId, directory, build)
-                  : await this.processBuild(project, jobId, directory, build);
+                  : build.animate
+                    ? await this.animateBuild(project, jobId, directory, build)
+                    : await this.processBuild(project, jobId, directory, build);
             this.log(`job ${jobId} optimization done +${Date.now() - started}ms`);
             input = processed.bytes;
             blender.version = (await this.blender()?.environment())?.blenderVersion ?? null;
@@ -970,7 +1045,7 @@ export class Gen3DHost {
       return file;
     };
     // A rigged version exports its skinned, animated model (no LODs) in GLB and FBX.
-    const riggedFile = await derived("rigged.glb");
+    const riggedFile = (await derived("rigged.glb")) ?? (await derived("animated.glb"));
     const animated = !!riggedFile && (format === "glb" || format === "fbx");
     const lodFiles = animated
       ? []
@@ -1087,15 +1162,23 @@ export class Gen3DHost {
               ? { kind: version.build.process?.collision, ...version.process.collision }
               : "not-provided",
             uv: version.report.warnings.some((w) => w.includes("UV")) ? "missing" : "provided",
+            // glTF and FBX carry no loop flag; engines need it set on the loop clips listed here.
             animation:
               animated && version.process?.rig
                 ? {
                     kind: version.process.rig.kind,
                     bones: version.process.rig.bones,
-                    // glTF and FBX carry no loop flag; engines need it set on these clips.
                     clips: version.process.rig.clips,
                   }
-                : "not-provided",
+                : animated && version.process?.props
+                  ? {
+                      kind: "prop",
+                      motion: version.process.props.motion,
+                      parts: version.process.props.parts,
+                      pivot: "Pivot",
+                      clips: version.process.props.clips,
+                    }
+                  : "not-provided",
             textures: version.process?.baked.length
               ? { maps: version.process.baked, size: version.process.textureSize }
               : "not-provided",

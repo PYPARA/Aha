@@ -10,16 +10,20 @@ import { rigSkeleton } from "@synara/shared/gen3dVersions";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
+import { MOTION_LABELS, PropAnimationPanel } from "./PropAnimationPanel";
 import { SkeletonEditor } from "./SkeletonEditor";
 import { templateSkeleton, type Dimensions } from "./skeletonJoints";
 import { gen3dAssetUrl } from "./useGen3D";
 
 type Clip = (typeof GEN3D_ANIMATION_CLIPS)[number];
-export const CLIP_LABELS: Record<Clip, string> = {
+export const CLIP_LABELS: Record<Clip | "open" | "close" | "spin", string> = {
   idle: "Idle",
   walk: "Walk",
   run: "Run",
   attack: "Attack",
+  open: "Open",
+  close: "Close",
+  spin: "Spin",
 };
 export const RIG_KIND_LABELS = {
   biped: "Biped",
@@ -54,8 +58,12 @@ export function AnimationPanel({
     ai: "Proposed by the AI assistant from the renders. Drag the joints onto the body, then confirm.",
     template: "A template scaled to the model. Drag each joint onto the body, then confirm.",
   };
-  const rig = version?.process?.rig;
-  const animated = !!rig && version.files.some((f) => f.name === "rigged.glb");
+  const rig = version?.process?.rig,
+    props = version?.process?.props;
+  const animated =
+    !!(rig || props) &&
+    !!version?.files.some((f) => f.name === "rigged.glb" || f.name === "animated.glb");
+  const shownClips = rig?.clips ?? props?.clips ?? [];
   useEffect(() => setClips([...GEN3D_ANIMATION_CLIPS]), [version?.id]);
   const template = (kind: "biped" | "quadruped") =>
     version &&
@@ -77,14 +85,15 @@ export function AnimationPanel({
         <p className="text-muted-foreground">{tr("Build a version first.")}</p>
       ) : (
         <>
-          {animated && rig && (
+          {animated && (
             <section className="space-y-2" aria-label={tr("Animation clips")}>
               <p>
-                {tr(RIG_KIND_LABELS[rig.kind])} ·{" "}
-                {tr("{n} bones").replace("{n}", String(rig.bones))}
+                {rig
+                  ? `${tr(RIG_KIND_LABELS[rig.kind])} · ${tr("{n} bones").replace("{n}", String(rig.bones))}`
+                  : `${tr(MOTION_LABELS[props!.motion])} · ${tr("{n} parts").replace("{n}", String(props!.parts))}`}
               </p>
               <div className="grid grid-cols-2 gap-2">
-                {rig.clips.map((clip) => (
+                {shownClips.map((clip) => (
                   <figure key={clip.name} className="space-y-1">
                     <img
                       src={gen3dAssetUrl(
@@ -230,6 +239,10 @@ export function AnimationPanel({
               </p>
             </>
           )}
+          <section className="space-y-3 border-t border-border pt-4">
+            <h3 className="font-medium">{tr("Prop animation")}</h3>
+            <PropAnimationPanel version={version} disabled={disabled} act={act} />
+          </section>
         </>
       )}
     </div>

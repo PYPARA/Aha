@@ -51,6 +51,10 @@ export const GEN3D_REPAINT_VIEWS = [
 ] as const;
 /** Procedural clips the fixed rigging script can add; generic skeletons get idle only. */
 export const GEN3D_ANIMATION_CLIPS = ["idle", "walk", "run", "attack"] as const;
+/** Prop motions the fixed animation script can put on chosen parts. */
+export const GEN3D_PROP_MOTIONS = ["lid", "door", "spin", "slide"] as const;
+/** Clips per motion: hinges and slides open and close, spins loop. */
+export const GEN3D_PROP_CLIPS = ["open", "close", "spin"] as const;
 /** Fixed stylizations and the range of their detail value. */
 export const GEN3D_STYLES = {
   /** Cells along the longest side. */
@@ -148,6 +152,8 @@ export const Gen3DProcess = Schema.Struct({
     Schema.isMaxLength(3),
   ),
   collision: Schema.Literals(["none", "box", "convex"]),
+  /** Split the low poly back into the parent's parts (shared UVs and textures) for prop animation. */
+  keepParts: Schema.optional(Schema.Boolean),
   /** Base colour source when baking: the parent's materials, or the three-view reference. */
   texture: Schema.optional(Schema.Literals(["bake", "projection"])),
   /** Procedural presets per parent material, applied before baking. */
@@ -199,6 +205,22 @@ export const Gen3DProcessReport = Schema.Struct({
       attachments: Schema.Finite,
     }),
   ),
+  /** Set on optimized versions that kept their parts. */
+  parts: Schema.optional(Schema.Finite),
+  /** Set on prop-animated versions (and versions derived from them). */
+  props: Schema.optional(
+    Schema.Struct({
+      motion: Schema.Literals(GEN3D_PROP_MOTIONS),
+      parts: Schema.Finite,
+      clips: Schema.Array(
+        Schema.Struct({
+          name: Schema.Literals(GEN3D_PROP_CLIPS),
+          seconds: Schema.Finite,
+          loop: Schema.Boolean,
+        }),
+      ),
+    }),
+  ),
   /** Set on stylized versions. */
   stylize: Schema.optional(
     Schema.Struct({
@@ -219,6 +241,24 @@ export const Gen3DProcessReport = Schema.Struct({
   ),
 });
 export type Gen3DProcessReport = typeof Gen3DProcessReport.Type;
+export const Gen3DPropAnimation = Schema.Struct({
+  /** Part ids from the version's report; children of a chosen group move with it. */
+  parts: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(256),
+  ),
+  motion: Schema.Literals(GEN3D_PROP_MOTIONS),
+  /** Hinge edge of the chosen parts' bounds (lid: any, door: left or right). */
+  edge: Schema.optional(Schema.Literals(["back", "front", "left", "right"])),
+  angle: Schema.optional(Schema.Finite.check(Schema.isBetween({ minimum: 5, maximum: 180 }))),
+  direction: Schema.optional(Schema.Literals(["forward", "up", "left", "right"])),
+  /** Slide distance in metres; defaults to most of the parts' size along the direction. */
+  distance: Schema.optional(
+    Schema.Finite.check(Schema.isBetween({ minimum: 0.001, maximum: 100 })),
+  ),
+  seconds: Schema.Finite.check(Schema.isBetween({ minimum: 0.2, maximum: 10 })),
+});
+export type Gen3DPropAnimation = typeof Gen3DPropAnimation.Type;
 export const Gen3DStylize = Schema.Struct({
   style: Schema.Literals(["voxel", "bricks", "lowpoly"]),
   detail: Schema.Finite.check(Schema.isInt(), Schema.isBetween({ minimum: 6, maximum: 20_000 })),
@@ -254,6 +294,8 @@ export const Gen3DBuild = Schema.Struct({
       ),
     }),
   ),
+  /** Animate chosen parts of the parent (lid, door, spin, slide) around a pivot. */
+  animate: Schema.optional(Gen3DPropAnimation),
   /** Rebuild the parent as voxels, bricks or flat low poly with colours from its surface. */
   stylize: Schema.optional(Gen3DStylize),
   /** Local repaint of a baked parent: a masked drawing edit of one view, projected back. */
@@ -394,6 +436,7 @@ export const Gen3DCommand = Schema.Struct({
     "repaint",
     "rig",
     "stylize",
+    "animate",
     "set-skeleton",
     "propose-skeleton",
     "cancel",
@@ -429,6 +472,7 @@ export const Gen3DCommand = Schema.Struct({
   stylize: Schema.optional(Gen3DStylize),
   instruction: Schema.optional(Schema.String),
   feather: Schema.optional(Schema.Finite),
+  animate: Schema.optional(Gen3DPropAnimation),
   /** set-skeleton / propose-skeleton: the joints (empty removes them). */
   skeleton: Schema.optional(Gen3DSkeleton),
   confirmed: Schema.optional(Schema.Boolean),

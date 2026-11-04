@@ -10,6 +10,7 @@ import {
   Gen3DProject,
   GEN3D_ANIMATION_CLIPS,
   GEN3D_LIMITS,
+  GEN3D_PROP_CLIPS,
   GEN3D_REPAINT_SIZE,
   GEN3D_REPAINT_VIEWS,
   GEN3D_STYLES,
@@ -57,9 +58,12 @@ export const GEN3D_DERIVED_MODELS = [
   "lod3.glb",
   "collision.glb",
   "rigged.glb",
+  "animated.glb",
 ];
-/** Animated previews a rigged version carries, one per clip. */
-export const GEN3D_ANIMATION_PREVIEWS = GEN3D_ANIMATION_CLIPS.map((clip) => `anim-${clip}.webp`);
+/** Animated previews a rigged or prop-animated version carries, one per clip. */
+export const GEN3D_ANIMATION_PREVIEWS = [...GEN3D_ANIMATION_CLIPS, ...GEN3D_PROP_CLIPS].map(
+  (clip) => `anim-${clip}.webp`,
+);
 /** Files a published version carries, besides the optional diff images. */
 export const GEN3D_RENDERS = [
   "render-34.png",
@@ -760,6 +764,55 @@ export class Gen3DEngine {
             void this.execute(p.id, id);
             return { project: p };
           }
+          case "animate": {
+            if (p.archived) throw new Error("Restore this project before animating.");
+            if (p.jobs.some((j) => active(j.status)))
+              throw new Error("A model build is already in progress.");
+            const parent = p.versions.find((v) => v.id === (c.versionId ?? p.previewVersionId));
+            if (!parent || !c.animate) throw new Error("Choose a version and the parts to move.");
+            const known = new Set(parent.report.objects.map((o) => o.id));
+            const missing = c.animate.parts.filter((part) => !known.has(part));
+            if (missing.length)
+              throw new Error(`Part not found: ${missing.slice(0, 3).join(", ")}.`);
+            if (
+              c.animate.parts.length >=
+              parent.report.objects.filter((o) => o.kind !== "group").length
+            )
+              throw new Error("Choose the moving parts only; at least one part has to stay still.");
+            const edge = c.animate.edge;
+            if (c.animate.motion === "door" && edge !== "left" && edge !== "right")
+              throw new Error("A door hinges on its left or right edge.");
+            if (c.animate.motion === "lid" && !edge) throw new Error("Choose the hinge edge.");
+            if (!(await this.environment()).blender?.headless)
+              throw new Error("Animating needs Blender. Set it up in the 3D workshop.");
+            const build = {
+              source: "",
+              prompt: "Animate",
+              parentVersionId: parent.id,
+              mode: "process" as const,
+              animate: c.animate,
+            };
+            const id = randomUUID();
+            p.jobs.push({
+              id,
+              requestId: c.requestId ?? randomUUID(),
+              fingerprint: digest(JSON.stringify(build)),
+              createdAt: now(),
+              status: "queued",
+              build,
+              runId: null,
+              turnId: null,
+              error: null,
+              versionId: null,
+            });
+            await atomicModelFile(
+              await modelPath(this.root, p.id, "jobs", id, "input.json"),
+              JSON.stringify({ build, blueprint: p.blueprint }),
+            );
+            await this.save(p);
+            void this.execute(p.id, id);
+            return { project: p };
+          }
           case "stylize": {
             if (p.archived) throw new Error("Restore this project before stylizing.");
             if (p.jobs.some((j) => active(j.status)))
@@ -855,7 +908,8 @@ export class Gen3DEngine {
               build.process ||
               build.repaint ||
               build.rig ||
-              build.stylize
+              build.stylize ||
+              build.animate
             )
               throw new Error(
                 "Optimization and repaint are workbench operations, not modeling builds.",

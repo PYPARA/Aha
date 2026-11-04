@@ -20,7 +20,10 @@ const report: Model3DValidationReport = {
   vertices: 3,
   bytes: 0,
   dimensions: [1, 1, 0],
-  objects: [{ id: "body", name: "Body", triangles: 1 }],
+  objects: [
+    { id: "body", name: "Body", triangles: 1 },
+    { id: "lid", name: "Lid", triangles: 1 },
+  ],
   materials: [],
   textures: [],
   warnings: [],
@@ -546,6 +549,39 @@ describe("Gen3DEngine", () => {
     await expect(
       engine.command({ operation: "import-texture-asset", projectId: p.id, revision: p.revision }),
     ).rejects.toThrow(/workbench service/);
+  });
+
+  it("animates chosen parts with a valid hinge and keeps one part still", async () => {
+    const engine = new Gen3DEngine(root, makeHost({ blenderReady: true }));
+    let p = await project(engine);
+    await engine.command({
+      operation: "submit",
+      projectId: p.id,
+      revision: p.revision,
+      build: build(),
+      requestId: "a",
+    });
+    p = await settled(engine, p.id);
+    const animate = (animation: Record<string, unknown>) =>
+      engine.command({
+        operation: "animate",
+        projectId: p.id,
+        revision: p.revision,
+        versionId: p.versions[0]!.id,
+        animate: { seconds: 1, ...animation } as never,
+      });
+    await expect(animate({ parts: ["missing"], motion: "spin" })).rejects.toThrow(/Part not found/);
+    await expect(animate({ parts: ["body", "lid"], motion: "spin" })).rejects.toThrow(/stay still/);
+    await expect(animate({ parts: ["lid"], motion: "door", edge: "back" })).rejects.toThrow(
+      /left or right/,
+    );
+    await expect(animate({ parts: ["lid"], motion: "lid" })).rejects.toThrow(/hinge edge/);
+    await animate({ parts: ["lid"], motion: "lid", edge: "back", angle: 100 });
+    p = await settled(engine, p.id);
+    expect(p.versions[1]!.build).toMatchObject({
+      mode: "process",
+      animate: { parts: ["lid"], motion: "lid", edge: "back", angle: 100 },
+    });
   });
 
   it("stylizes within each style's detail range", async () => {

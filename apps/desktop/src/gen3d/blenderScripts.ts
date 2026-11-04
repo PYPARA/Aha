@@ -58,12 +58,12 @@ def decimate(obj, ratio):
     clean(obj)
 
 
-def export(objects, name):
+def export(objects, name, extras=False):
     select_only(objects)
     bpy.ops.export_scene.gltf(
         filepath=os.path.join(out, name), export_format='GLB', use_selection=True,
         export_yup=True, export_apply=True, export_tangents=True, export_animations=False,
-        export_cameras=False, export_lights=False, export_extras=False)
+        export_cameras=False, export_lights=False, export_extras=extras)
 
 
 def project_reference(target):
@@ -395,6 +395,15 @@ bpy.ops.object.parent_clear(type='CLEAR_KEEP_TRANSFORM')
 bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 for o in [o for o in scene.objects if o.type != 'MESH']:
     bpy.data.objects.remove(o)
+# Remember which part every face came from, so the low poly can be split back into parts.
+part_names = []
+for o in meshes:
+    # Parts are identified by their stable ahaId (glTF extras); node names may be generic.
+    name = o.get('ahaId') or (o.name.rsplit('.', 1)[0] if len(o.name) > 4 and o.name[-4] == '.' and o.name[-3:].isdigit() else o.name)
+    if name not in part_names:
+        part_names.append(name)
+    attribute = o.data.attributes.new('aha_part', 'INT', 'FACE')
+    attribute.data.foreach_set('value', [part_names.index(name)] * len(o.data.polygons))
 select_only(meshes, meshes[0])
 if len(meshes) > 1:
     bpy.ops.object.join()
@@ -582,8 +591,35 @@ if params['collision'] != 'none':
     collision = {'file': 'collision.glb', 'triangles': triangles(shape)}
 
 bpy.data.objects.remove(high)
-export([low], 'model.glb')
-report = {'highTriangles': high_tris, 'lowTriangles': triangles(low), 'lods': lods, 'collision': collision,
+final = [low]
+if params.get('keepParts') and len(part_names) > 1 and 'aha_part' in low.data.attributes:
+    # One object per source part, sharing the low poly's UVs and baked material.
+    import numpy as np
+    values = np.empty(len(low.data.polygons), np.int32)
+    low.data.attributes['aha_part'].data.foreach_get('value', values)
+    final = []
+    for index, name in enumerate(part_names):
+        if not (values == index).any():
+            continue  # decimated away
+        part = duplicate(low, name)
+        part.data.name = name
+        part['ahaId'] = name
+        bm = bmesh.new()
+        bm.from_mesh(part.data)
+        layer = bm.faces.layers.int.get('aha_part')
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if f[layer] != index], context='FACES')
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+        bm.to_mesh(part.data)
+        bm.free()
+        final.append(part)
+    bpy.data.objects.remove(low)
+    stats['parts'] = len(final)
+for o in final:
+    if 'aha_part' in o.data.attributes:
+        o.data.attributes.remove(o.data.attributes['aha_part'])
+# Kept parts carry their ahaId so the inspection report and prop animation see the same ids.
+export(final, 'model.glb', extras=len(final) > 1)
+report = {'highTriangles': high_tris, 'lowTriangles': sum(triangles(o) for o in final), 'lods': lods, 'collision': collision,
           'baked': baked, 'textureSize': size, 'seconds': round(time.time() - started, 2), **stats}
 with open(os.path.join(out, 'process.json'), 'w', encoding='utf-8') as handle:
     json.dump(report, handle)
@@ -628,12 +664,15 @@ def load(file, label):
 
 
 def load_rigged(file):
-    """The rigged asset keeps its armature and clips; the importer's bone display shapes go."""
+    """An animated asset keeps its clips. Rigged: the armature and skinned mesh (the importer's
+    bone display shapes go). Props: every part and the animated pivot, as authored."""
     scene.render.fps = 30
     before = set(scene.objects)
     bpy.ops.import_scene.gltf(filepath=file)
     added = [o for o in scene.objects if o not in before]
-    rig = next(o for o in added if o.type == 'ARMATURE')
+    rig = next((o for o in added if o.type == 'ARMATURE'), None)
+    if rig is None:
+        return next(o for o in added if o.type == 'MESH')
     skinned = next(o for o in added if o.type == 'MESH' and any(m.type == 'ARMATURE' for m in o.modifiers))
     for bone in rig.pose.bones:
         bone.custom_shape = None
@@ -757,9 +796,17 @@ def load_model(file):
     before = set(scene.objects)
     bpy.ops.import_scene.gltf(filepath=file)
     meshes = [o for o in scene.objects if o not in before and o.type == 'MESH']
-    if len(meshes) != 1:
-        raise RuntimeError('Expected one baked mesh, found %d.' % len(meshes))
-    obj = meshes[0]
+    if not meshes:
+        raise RuntimeError('The version has no mesh.')
+    # Versions optimized with separate parts share one baked material; join them to render.
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in meshes:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = meshes[0]
+    bpy.ops.object.parent_clear(type='CLEAR_KEEP_TRANSFORM')
+    if len(meshes) > 1:
+        bpy.ops.object.join()
+    obj = bpy.context.view_layer.objects.active
     material = obj.data.materials[0] if obj.data.materials else None
     bsdf = next((n for n in material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None) if material else None
     link = bsdf.inputs['Base Color'].links[0] if bsdf and bsdf.inputs['Base Color'].links else None
@@ -1792,4 +1839,189 @@ bpy.ops.export_scene.gltf(
 report = {'style': style, 'detail': detail, 'triangles': sum(len(p.vertices) - 2 for p in result.data.polygons),
           'sourceTriangles': source_triangles, **stats, 'seconds': round(time.time() - started, 2)}
 print('AHA_STYLIZE=' + json.dumps(report))
+`;
+
+export const GEN3D_PROP_SCRIPT = String.raw`# Aha 3D generation fixed prop animation script (headless Blender). Never runs AI source.
+# Usage: blender -b --factory-startup --disable-autoexec --python prop.py -- config.json
+# Moves the chosen parts around a pivot on their combined bounds: a lid or a door on a hinge,
+# a spin, or a slide; exports animated.glb (one glTF animation per clip) and preview frames.
+import bpy, json, math, os, sys, time
+from mathutils import Matrix, Vector
+
+started = time.time()
+with open(sys.argv[sys.argv.index('--') + 1], encoding='utf-8') as handle:
+    cfg = json.load(handle)
+out, motion = cfg['output'], cfg['motion']
+bpy.ops.wm.read_factory_settings(use_empty=True)
+scene = bpy.context.scene
+FPS = 30
+scene.render.fps = FPS
+bpy.ops.import_scene.gltf(filepath=cfg['input'])
+for o in [o for o in scene.objects if o.type in ('CAMERA', 'LIGHT')]:
+    bpy.data.objects.remove(o)
+
+
+def base(name):
+    """glTF node names come back unique per Blender datablock; Blender may add .001."""
+    return name.rsplit('.', 1)[0] if len(name) > 4 and name[-4] == '.' and name[-3:].isdigit() else name
+
+
+wanted = set(cfg['parts'])
+chosen = [o for o in scene.objects if base(o.name) in wanted or o.get('ahaId') in wanted]
+if not chosen:
+    raise RuntimeError('None of the chosen parts are in the model.')
+def parents(o):
+    while o.parent:
+        o = o.parent
+        yield o
+
+
+# Only move the top-most chosen objects; their children follow.
+movers = [o for o in chosen if not any(p in chosen for p in parents(o))]
+points = []
+for o in movers:
+    for child in [o, *o.children_recursive]:
+        if child.type == 'MESH':
+            points += [child.matrix_world @ Vector(c) for c in child.bound_box]
+if not points:
+    raise RuntimeError('The chosen parts have no geometry.')
+lo, hi = Vector(map(min, *points)), Vector(map(max, *points))
+centre = (lo + hi) / 2
+size = hi - lo
+
+# Work in glTF terms (Y up, +Z front) and convert: glTF (x, y, z) = Blender (x, -z, y).
+gx = (lo.x, hi.x)          # glTF x range (Blender x)
+gy = (lo.z, hi.z)          # glTF y range (Blender z)
+gz = (-hi.y, -lo.y)        # glTF z range (Blender -y)
+angle = math.radians(float(cfg.get('angle', 100)))
+edge = cfg.get('edge', 'back')
+mid = lambda r: (r[0] + r[1]) / 2
+if motion == 'lid':
+    # Hinge along the chosen bottom edge; the far side lifts.
+    pivot_g = {'back': (mid(gx), gy[0], gz[0]), 'front': (mid(gx), gy[0], gz[1]),
+               'left': (gx[1], gy[0], mid(gz)), 'right': (gx[0], gy[0], mid(gz))}[edge]
+    axis_g, sign = {'back': ('x', -1), 'front': ('x', 1), 'left': ('z', -1), 'right': ('z', 1)}[edge]
+elif motion == 'door':
+    # Vertical hinge on the left (+x) or right (-x) edge; the door swings out to the front.
+    pivot_g = {'left': (gx[1], mid(gy), mid(gz)), 'right': (gx[0], mid(gy), mid(gz))}[edge]
+    axis_g, sign = ('y', 1 if edge == 'left' else -1)
+elif motion == 'spin':
+    pivot_g, axis_g, sign = (mid(gx), mid(gy), mid(gz)), 'y', 1
+else:
+    pivot_g = (mid(gx), mid(gy), mid(gz))
+    axis_g, sign = None, 1
+
+
+def blender_point(p):
+    return Vector((p[0], -p[2], p[1]))
+
+
+# Rotation about glTF x / y / z = Blender x / z / -y.
+blender_axis = {'x': (0, 1.0), 'y': (2, 1.0), 'z': (1, -1.0)}
+pivot = bpy.data.objects.new(cfg.get('pivotName', 'Pivot'), None)
+scene.collection.objects.link(pivot)
+pivot.location = blender_point(pivot_g)
+pivot.rotation_mode = 'XYZ'
+bpy.context.view_layer.update()
+for o in movers:
+    world = o.matrix_world.copy()
+    o.parent = pivot
+    o.matrix_parent_inverse = pivot.matrix_world.inverted()
+    o.matrix_world = world
+
+seconds = float(cfg.get('seconds', 1.0))
+direction = {'forward': (0, 0, 1), 'up': (0, 1, 0), 'left': (1, 0, 0), 'right': (-1, 0, 0)}[cfg.get('direction', 'forward')]
+extent_g = {'forward': size.y, 'up': size.z, 'left': size.x, 'right': size.x}[cfg.get('direction', 'forward')]
+distance = float(cfg.get('distance') or 0.8 * extent_g)
+
+
+def ease(t):
+    return t * t * (3 - 2 * t)
+
+
+def pose(amount):
+    """amount 0 = rest, 1 = open (for spin: turns, may exceed 1)."""
+    pivot.rotation_euler = (0, 0, 0)
+    pivot.location = blender_point(pivot_g)
+    if motion == 'slide':
+        offset = Vector(direction) * distance * amount
+        pivot.location = blender_point([pivot_g[i] + offset[i] for i in range(3)])
+    else:
+        index, flip = blender_axis[axis_g]
+        rotation = [0.0, 0.0, 0.0]
+        turn = 2 * math.pi * amount if motion == 'spin' else angle * amount
+        rotation[index] = sign * flip * turn
+        pivot.rotation_euler = rotation
+
+
+clips = [('spin', seconds, True, lambda t: t)] if motion == 'spin' else [
+    ('open', seconds, False, ease), ('close', seconds, False, lambda t: 1 - ease(t))]
+pivot.animation_data_create()
+made = []
+for name, length, loop, curve in clips:
+    frames = max(2, round(length * FPS))
+    action = bpy.data.actions.new(name)
+    pivot.animation_data.action = action
+    step = 2 if frames > 20 else 1
+    for frame in sorted(set(range(0, frames, step)) | {frames}):
+        pose(curve(frame / frames))
+        pivot.keyframe_insert('rotation_euler', frame=frame)
+        pivot.keyframe_insert('location', frame=frame)
+    if motion == 'spin':
+        # Linear turns so the loop has no ease at the seam.
+        for fcurve in action.fcurves if hasattr(action, 'fcurves') else []:
+            for key in fcurve.keyframe_points:
+                key.interpolation = 'LINEAR'
+    track = pivot.animation_data.nla_tracks.new()
+    track.name = name
+    track.strips.new(name, 0, action)
+    pivot.animation_data.action = None
+    made.append({'name': name, 'seconds': length, 'loop': loop, 'frames': frames})
+pose(0)
+
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(
+    filepath=os.path.join(out, 'animated.glb'), export_format='GLB', use_selection=True, export_yup=True,
+    export_apply=False, export_tangents=True, export_animations=True, export_animation_mode='NLA_TRACKS',
+    export_cameras=False, export_lights=False, export_extras=True)
+
+preview = cfg.get('preview', {'size': 256, 'frames': 12})
+size_px, count = int(preview['size']), int(preview['frames'])
+scene.render.engine = 'BLENDER_WORKBENCH'
+scene.display.shading.light = 'STUDIO'
+scene.display.shading.color_type = 'TEXTURE'
+scene.display.shading.show_shadows = False
+scene.render.film_transparent = True
+scene.render.resolution_x = scene.render.resolution_y = size_px
+scene.render.image_settings.file_format = 'PNG'
+meshes = [o for o in scene.objects if o.type == 'MESH']
+everything = [o.matrix_world @ Vector(c) for o in meshes for c in o.bound_box]
+# Frame the opened pose too, so a lifted lid stays in the picture.
+pose(1 if motion != 'spin' else 0)
+bpy.context.view_layer.update()
+everything += [o.matrix_world @ Vector(c) for o in meshes for c in o.bound_box]
+pose(0)
+low, high = Vector(map(min, *everything)), Vector(map(max, *everything))
+camera_data = bpy.data.cameras.new('Preview')
+camera_data.type = 'ORTHO'
+camera_data.ortho_scale = max(high - low) * 1.25
+camera = bpy.data.objects.new('Preview', camera_data)
+scene.collection.objects.link(camera)
+view = Vector((0.7, -1.0, 0.6)).normalized()
+camera.location = (low + high) / 2 + view * (max(high - low) * 4 + 1)
+camera.rotation_euler = (-view).to_track_quat('-Z', 'Y').to_euler()
+scene.camera = camera
+for clip in made:
+    track = pivot.animation_data.nla_tracks[clip['name']]
+    track.is_solo = True
+    for index in range(count):
+        frame = round(index * clip['frames'] / (count if clip['loop'] else count - 1))
+        scene.frame_set(frame)
+        scene.render.filepath = os.path.join(out, 'preview-%s-%02d.png' % (clip['name'], index))
+        bpy.ops.render.render(write_still=True)
+    track.is_solo = False
+
+report = {'motion': motion, 'parts': len(movers), 'clips': [{k: c[k] for k in ('name', 'seconds', 'loop')} for c in made],
+          'pivot': [round(v, 4) for v in pivot_g], 'seconds': round(time.time() - started, 2)}
+print('AHA_PROP=' + json.dumps(report))
 `;

@@ -43,6 +43,7 @@ import { DrawingModelPicker } from "../drawing/DrawingPickers";
 import { drawingApi, useImageProviders } from "../drawing/useDrawing";
 import { ensureGen3DThread } from "./Gen3DChat";
 import { AnimationPanel, CLIP_LABELS, RIG_KIND_LABELS } from "./AnimationPanel";
+import { MOTION_LABELS } from "./PropAnimationPanel";
 import { REPAINT_VIEW_LABELS, RepaintPanel } from "./RepaintPanel";
 import { STYLE_LABELS, StylizePanel } from "./StylizePanel";
 import { TiledTextureField, validTileSize, type TileChoice } from "./TiledTextureField";
@@ -1194,6 +1195,7 @@ function OptimizePanel({
     [repair, setRepair] = useState(true),
     [bake, setBake] = useState(true),
     [lods, setLods] = useState(true),
+    [keepParts, setKeepParts] = useState(false),
     [collision, setCollision] = useState<Gen3DProcess["collision"]>("convex"),
     [texture, setTexture] = useState<"bake" | "projection">(canProject ? "projection" : "bake"),
     [presets, setPresets] = useState<Record<string, MaterialChoice>>({}),
@@ -1274,6 +1276,12 @@ function OptimizePanel({
           tr("New UVs and baked textures (color, roughness, metalness, normal, AO)"),
         )}
         {option(lods, setLods, tr("Levels of detail at 50% and 25%"))}
+        {(version?.report.objects.filter((o) => o.kind !== "group").length ?? 0) > 1 &&
+          option(
+            keepParts,
+            setKeepParts,
+            tr("Keep parts separate (for prop animation; they share one texture)"),
+          )}
       </div>
       {bake && (
         <>
@@ -1375,6 +1383,7 @@ function OptimizePanel({
             bake,
             lods: lods ? [0.5, 0.25] : [],
             collision,
+            ...(keepParts ? { keepParts: true } : {}),
             ...(bake ? { texture: source } : {}),
             ...(bake && Object.keys(presets).length
               ? {
@@ -1626,6 +1635,22 @@ function VersionReport({ version }: { version: Gen3DVersion }) {
                 {version.process.stylize.detail.toLocaleString()} ·{" "}
                 {tr("{n} colours").replace("{n}", String(version.process.stylize.colors))}
               </dd>
+            </>
+          )}
+          {version.process.props && (
+            <>
+              <dt className="text-muted-foreground">{tr("Prop animation")}</dt>
+              <dd className="break-words">
+                {tr(MOTION_LABELS[version.process.props.motion])} ·{" "}
+                {tr("{n} parts").replace("{n}", String(version.process.props.parts))} ·{" "}
+                {version.process.props.clips.map((c) => tr(CLIP_LABELS[c.name])).join(" / ")}
+              </dd>
+            </>
+          )}
+          {version.process.parts !== undefined && (
+            <>
+              <dt className="text-muted-foreground">{tr("Parts kept")}</dt>
+              <dd>{version.process.parts}</dd>
             </>
           )}
           {version.process.rig && (
