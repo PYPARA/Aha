@@ -1,4 +1,4 @@
-import { Children, isValidElement, type ReactNode } from "react";
+import { Children, isValidElement, type ComponentProps, type ReactNode } from "react";
 import { Select, SelectTrigger, SelectValue, SelectItem } from "./select";
 import { ComposerPickerSelectPopup } from "../chat/ComposerPickerMenuPopup";
 
@@ -8,12 +8,15 @@ export function OptionSelect({
   value,
   onValueChange,
   disabled,
+  size,
   children,
 }: {
   label: string;
   value: string;
   onValueChange: (value: string) => void;
   disabled?: boolean;
+  /** Trigger size; compact toolbars use "xs" like their buttons. */
+  size?: ComponentProps<typeof SelectTrigger>["size"];
   children: ReactNode;
 }) {
   const options = Children.toArray(children).filter(
@@ -32,7 +35,7 @@ export function OptionSelect({
         if (next !== null) onValueChange(String(next));
       }}
     >
-      <SelectTrigger aria-label={label} className="min-w-0">
+      <SelectTrigger aria-label={label} className="min-w-0" {...(size ? { size } : {})}>
         <SelectValue />
       </SelectTrigger>
       <ComposerPickerSelectPopup>

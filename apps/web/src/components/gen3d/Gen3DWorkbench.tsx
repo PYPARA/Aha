@@ -59,7 +59,8 @@ import {
 const Gen3DChat = lazy(() =>
   import("./Gen3DChat").then((module) => ({ default: module.Gen3DChat })),
 );
-const ModelViewer = lazy(() => import("../model3d/ModelViewer"));
+// The 3D generation viewer: its own trusted loader (skins, clips) and inspection modes.
+const Gen3DViewer = lazy(() => import("./Gen3DViewer").then((m) => ({ default: m.Gen3DViewer })));
 const running = (status: string) => ["queued", "running", "validating"].includes(status);
 const VIEWS = ["front", "side", "back"] as const;
 const VIEW_LABELS = { front: "Front", side: "Side", back: "Back" } as const;
@@ -635,7 +636,7 @@ function ProjectWorkspace({
                 </div>
               }
             >
-              <ModelViewer url={gen3dAssetUrl(project.id, "versions", version.id, "model.glb")} />
+              <Gen3DViewer project={project} version={version} />
             </Suspense>
           ) : (
             <div className="flex min-h-40 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">

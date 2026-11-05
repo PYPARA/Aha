@@ -1,6 +1,6 @@
 # 3D 生成维护约束
 
-使用方式见 [3D 生成](../guides/GEN3D.md)，方案与里程碑见 [3D 生成方案](../design/3d-generation/PRODUCT_SPEC.md)。3D 生成和 3D 工坊相互独立，两者只通过 GLB 和资源中心衔接。复用工坊模块时只引用、不修改（查看器 `ModelViewer`、`model3dScene` 的校验、加载和导出函数，`model3dFiles` 路径工具，以及 Blender 运行环境 `BlenderRuntime`）。为了共用 Blender 锁，`Model3DHost.blender` 改为只读公开，这是工坊唯一的改动。
+使用方式见 [3D 生成](../guides/GEN3D.md)，方案与里程碑见 [3D 生成方案](../design/3d-generation/PRODUCT_SPEC.md)。3D 生成和 3D 工坊相互独立，两者只通过 GLB 和资源中心衔接。复用工坊模块时只引用、不修改（`model3dScene` 的校验、加载和导出函数，`model3dFiles` 路径工具，以及 Blender 运行环境 `BlenderRuntime`）；3D 生成使用自己的查看器。为了共用 Blender 锁，`Model3DHost.blender` 改为只读公开，这是工坊唯一的改动。
 
 ## 数据与接口
 
@@ -83,6 +83,11 @@
   - `prop`：按 `ahaId`（或去掉 `.001` 后缀的对象名）找到部件，只移动最上层的选中对象；在它们的整体包围盒上放一个 `Pivot` 空物体，把部件挂到它下面（保持世界变换），只给支点打关键帧。旋转方向在 glTF 坐标里推导：后边合页绕 +X 取负角、前边取正角，左边（+x 端）绕 Z 取负角、右边取正角；门在左边绕 Y 取正角、右边取负角，使远端向上或向前。导出时开启 extras，保留部件的 `ahaId`。
   - `convert` 的动画模式（`rigged: true`，用于绑定版本和道具动画版本的 GLB 和 FBX）：有骨架时保留骨架和蒙皮网格、删除导入器生成的骨骼显示形状；道具动画保留全部部件和支点；不带 LOD；FBX 用 `bake_anim_use_all_actions` 导出所有动作（Unity 里名为 `Pivot|open`）。
   - `convert`：FBX 对所有引擎都写同一套坐标系（`-Z` 前、`Y` 上、`FBX_SCALE_UNITS`），Unreal 导入器会自己换算；把数据改成 Z 轴向上会和文件头矛盾，Godot 导入时会躺倒（已实测）。FBX 里的 LOD 改用 LOD0 的材质，避免每级都带一份贴图。STL 先按距离焊接再统计开放边，因为 glTF 在 UV 接缝处拆开了顶点。
+- **查看器**（`Gen3DViewer.tsx`、`gen3dViewerScene.ts`）：3D 生成自己的查看器，不再使用工坊的 `ModelViewer`。
+  - 自己的加载函数接受蒙皮和动画（工坊的加载器和 Worker 限制不变），只允许 `data:`/`blob:` 资源，检查大小和贴图解码；它只加载 Aha 已发布、通过 glTF Validator 的文件。版本有 `rigged.glb` 或 `animated.glb` 时加载它（静止姿态与 `model.glb` 相同）。
+  - 整个查看器只有一个 WebGL 上下文：版本对比用同一个渲染器左右分屏（剪裁区域），参考叠加时渲染到居中的正方形视口。按需渲染，只有播放动画或转台时才连续出帧；`orbit.update()` 会通过 change 事件排下一帧，循环里必须先判断是否已排帧，否则每帧回调翻倍（实测会卡死页面）。
+  - 通道显示用 `MeshBasicMaterial` 的 `onBeforeCompile` 只取一个通道并抵消输出的 sRGB 转换，从而保留蒙皮；权重显示克隆几何体写入顶点色，切换模式时恢复原几何体和材质。
+  - 参考叠加的正交取景由 `overlayFrame` 计算，与评分的配准一致（同一 px/m、地面线、按模型 u 范围居中、`shiftPx`，镜像时翻转剪影），单元测试逐点比对评分公式。蓝图剪影作为场景里的平面绘制（轮廓加淡填充，颜色取主题的 `--primary`），不用 HTML 叠加，以适配明暗主题。
 - **可信层**（`gen3dRuntime.ts`）：
   - 检查 Worker 输出：沿用工坊的 `validateSceneJSON`，不接受灯光、相机、纹理、动画和骨骼。
   - 归一化到底部居中，导出 GLB 和报告。
