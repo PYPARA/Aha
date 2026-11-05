@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import sharp from "sharp";
 import type { Gen3DBuild, Model3DValidationReport } from "@synara/contracts";
+import { createPaintGrid, encodePaintGrid, paintSphere } from "@synara/shared/gen3dPaintMask";
 import { Gen3DEngine } from "./engine";
 import type { gen3dHostCall } from "./hostClient";
 
@@ -110,7 +111,26 @@ function makeHost(options: { offset?: number; blenderReady?: boolean } = {}): ty
           .png()
           .toBuffer(),
       );
-      return { file };
+      if (input.view !== "custom") return { file };
+      // The painted grid comes through a file next to the renders, not the request.
+      JSON.parse(
+        await fs.readFile(path.join(root, path.dirname(file), "custom-paint.json"), "utf8"),
+      );
+      // Custom views also write the mask as seen from the view and the camera with its framing.
+      const maskFile = file.replace(/\.png$/, "-mask.png");
+      const rgba = Buffer.alloc(32 * 32 * 4, 255);
+      for (let i = 0; i < 64; i++) rgba[i * 4 + 3] = 0;
+      await fs.writeFile(
+        path.join(root, maskFile),
+        await sharp(rgba, { raw: { width: 32, height: 32, channels: 4 } })
+          .png()
+          .toBuffer(),
+      );
+      await fs.writeFile(
+        path.join(root, file.replace(/\.png$/, ".json")),
+        JSON.stringify({ ...(input.camera as object), frame: { u: 0, v: 0.3, size: 0.4 } }),
+      );
+      return { file, maskFile };
     }
     if (method !== "build") return {};
     const dir = path.join(root, String(input.projectId), "jobs", String(input.jobId));
@@ -432,6 +452,28 @@ describe("Gen3DEngine", () => {
       mode: "process",
       parentVersionId: optimized.id,
       repaint: { view: "front-left", instruction: "paint the lid red", feather: 12 },
+    });
+    // A mask painted in 3D: rendered from the viewer's direction, projected with its framing.
+    const grid = createPaintGrid([-0.3, 0, -0.2], [0.3, 0.6, 0.2]);
+    const camera = { direction: [0.6, 0.3, 0.7] as const, up: [0, 1, 0] as const };
+    await expect(
+      engine.renderCustomView(p.id, optimized.id, camera, encodePaintGrid(grid)),
+    ).rejects.toThrow(/Paint an area on the model/);
+    await expect(
+      engine.repaintBytes(p.id, p.revision, await input({ view: "custom" })),
+    ).rejects.toThrow(/Render the view again/);
+    paintSphere(grid, [0, 0.35, 0.2], 0.05);
+    const custom = await engine.renderCustomView(p.id, optimized.id, camera, encodePaintGrid(grid));
+    expect(custom.mask.length).toBeGreaterThan(50);
+    await engine.repaintBytes(
+      p.id,
+      p.revision,
+      await input({ view: "custom", viewImage: custom.image, mask: custom.mask }),
+    );
+    p = await settled(engine, p.id);
+    expect(p.versions[3]!.build.repaint).toMatchObject({
+      view: "custom",
+      camera: { direction: [0.6, 0.3, 0.7], up: [0, 1, 0], frame: { u: 0, v: 0.3, size: 0.4 } },
     });
     const dir = path.join(root, p.id, "versions", repainted.id);
     const edited = await sharp(path.join(dir, "repaint-image.png")).metadata();

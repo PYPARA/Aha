@@ -480,6 +480,10 @@
       "types": "./src/model3dFiles.ts",
       "import": "./src/model3dFiles.ts"
     },
+    "./gen3dPaintMask": {
+      "types": "./src/gen3dPaintMask.ts",
+      "import": "./src/gen3dPaintMask.ts"
+    },
     "./gen3dScore": {
       "types": "./src/gen3dScore.ts",
       "import": "./src/gen3dScore.ts"

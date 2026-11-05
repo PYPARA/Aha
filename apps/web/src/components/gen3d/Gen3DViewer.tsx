@@ -22,6 +22,49 @@ import {
   type DisplayMode,
 } from "./gen3dViewerScene";
 import { gen3dAssetUrl } from "./useGen3D";
+import type { Gen3DPaintSession } from "./gen3dPaint";
+
+type Vec3 = [number, number, number];
+/** Shows painted cells (value at least one half) on the surface, as the texture script reads them. */
+function paintOverlayMaterial(
+  color: THREE.Color,
+  uniforms: {
+    ahaMask: { value: THREE.Data3DTexture | null };
+    ahaMin: { value: THREE.Vector3 };
+    ahaSize: { value: THREE.Vector3 };
+  },
+) {
+  const material = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -4,
+    side: THREE.DoubleSide,
+  });
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vAhaWorld;")
+      .replace(
+        "#include <project_vertex>",
+        "#include <project_vertex>\nvAhaWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;",
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nprecision highp sampler3D;\nuniform sampler3D ahaMask;\nuniform vec3 ahaMin;\nuniform vec3 ahaSize;\nvarying vec3 vAhaWorld;",
+      )
+      .replace(
+        "#include <dithering_fragment>",
+        "#include <dithering_fragment>\nif (texture(ahaMask, (vAhaWorld - ahaMin) / ahaSize).r < 0.5) discard;",
+      );
+  };
+  material.customProgramCacheKey = () => "aha-paint-mask";
+  return material;
+}
 
 const MODE_LABELS: Record<DisplayMode, string> = {
   material: "Materials (PBR)",
@@ -47,12 +90,12 @@ async function fetchModel(url: string, signal: AbortSignal): Promise<Loaded> {
   const { scene, animations } = await loadGen3DModel(new Uint8Array(await response.arrayBuffer()));
   return { root: scene, animations };
 }
-/** The theme's primary colour as three.js can read it (tokens may be oklch). */
-function themeColor(element: HTMLElement) {
+/** A theme colour token as three.js can read it (tokens may be oklch). */
+function themeColor(element: HTMLElement, token = "--primary") {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
   const context = canvas.getContext("2d")!;
-  context.fillStyle = getComputedStyle(element).getPropertyValue("--primary").trim() || "#3b82f6";
+  context.fillStyle = getComputedStyle(element).getPropertyValue(token).trim() || "#3b82f6";
   context.fillRect(0, 0, 1, 1);
   const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
   return new THREE.Color(r! / 255, g! / 255, b! / 255);
@@ -91,6 +134,8 @@ interface Settings {
 }
 interface Controls {
   highlight: (ids: readonly string[]) => void;
+  setPaint: (session: Gen3DPaintSession | null) => void;
+  paintChanged: () => void;
   reset: () => void;
   apply: (settings: Settings) => void;
   play: (clip: string, loop: boolean) => void;
@@ -107,9 +152,12 @@ export function Gen3DViewer({
   version,
   selected = [],
   onSelect,
+  paint = null,
 }: {
   project: Gen3DProject;
   version: Gen3DVersion;
+  /** While set, dragging on the model paints this repaint mask instead of picking parts. */
+  paint?: Gen3DPaintSession | null;
   /** Part ids (ahaId) highlighted in the view; shared with the part lists in the panels. */
   selected?: readonly string[];
   /** A click on a part (additive with Cmd, Ctrl or Shift), or null for empty space. */
@@ -151,7 +199,19 @@ export function Gen3DViewer({
     onSelectRef = useRef(onSelect);
   selection.current = selected;
   onSelectRef.current = onSelect;
+  const paintRef = useRef(paint);
+  paintRef.current = paint;
   useEffect(() => controls.current?.highlight(selected), [selected.join("\n")]);
+  // Painting works on the still, unscaled model: no clip, turntable, overlay or comparison.
+  useEffect(() => {
+    controls.current?.setPaint(paint);
+    if (!paint) return;
+    setClip("");
+    setTurntable(false);
+    setOverlay("off");
+    setCompareId("");
+    return paint.subscribe(() => controls.current?.paintChanged());
+  }, [paint]);
   // Reset per-version choices when another version is shown.
   useEffect(() => {
     setClip("");
@@ -276,6 +336,187 @@ export function Gen3DViewer({
         };
         const raycaster = new THREE.Raycaster(),
           pointer = new THREE.Vector2();
+        const mainMeshes = [...originals.keys()].filter((m) => {
+          let o: THREE.Object3D | null = m;
+          while (o && o !== main.root) o = o.parent;
+          return !!o;
+        });
+        const setPointer = (event: PointerEvent) => {
+          const rect = renderer!.domElement.getBoundingClientRect();
+          pointer.set(
+            ((event.clientX - rect.left) / rect.width) * 2 - 1,
+            (-(event.clientY - rect.top) / rect.height) * 2 + 1,
+          );
+          raycaster.setFromCamera(pointer, camera);
+        };
+        // Mask painting: soft spheres into the session's voxel grid, shown by an overlay copy of
+        // each mesh that only draws painted cells. The model's world space is its glTF space.
+        let paintSession: Gen3DPaintSession | null = null,
+          paintTexture: THREE.Data3DTexture | null = null,
+          stroke: { last: THREE.Vector3; erase: boolean; pointer: number } | null = null;
+        const paintUniforms = {
+          ahaMask: { value: null as THREE.Data3DTexture | null },
+          ahaMin: { value: new THREE.Vector3() },
+          ahaSize: { value: new THREE.Vector3(1, 1, 1) },
+        };
+        // The accent (info) colour stays visible on any texture, unlike a near-black primary.
+        const paintColor = themeColor(element, "--info");
+        const paintMaterial = paintOverlayMaterial(paintColor, paintUniforms);
+        const overlays = mainMeshes.map((mesh) => {
+          const geometry = geometries.get(mesh)!;
+          const overlay =
+            mesh instanceof THREE.SkinnedMesh
+              ? new THREE.SkinnedMesh(geometry, paintMaterial)
+              : new THREE.Mesh(geometry, paintMaterial);
+          if (overlay instanceof THREE.SkinnedMesh && mesh instanceof THREE.SkinnedMesh) {
+            overlay.bindMode = mesh.bindMode;
+            overlay.bind(mesh.skeleton, mesh.bindMatrix);
+          }
+          overlay.raycast = () => {};
+          overlay.renderOrder = 5;
+          overlay.visible = false;
+          mesh.add(overlay);
+          return overlay;
+        });
+        const eraseColor = new THREE.Color(0x9aa0a6);
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.9, 1, 48),
+          new THREE.MeshBasicMaterial({
+            color: paintColor,
+            side: THREE.DoubleSide,
+            depthTest: false,
+            transparent: true,
+          }),
+        );
+        ring.renderOrder = 20;
+        ring.visible = false;
+        scene.add(ring);
+        const defaultButtons = { ...orbit.mouseButtons };
+        const surfaceHit = (event: PointerEvent) => {
+          setPointer(event);
+          return raycaster.intersectObjects(mainMeshes, false)[0] ?? null;
+        };
+        const showRing = (hit: THREE.Intersection | null, erase: boolean) => {
+          if (!hit || !paintSession) {
+            ring.visible = false;
+            return;
+          }
+          const normal = hit.face
+            ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+            : camera.position.clone().sub(hit.point).normalize();
+          ring.position.copy(hit.point);
+          ring.lookAt(hit.point.clone().add(normal));
+          // The visible edge of a dab (value one half) sits at about 85 % of its radius.
+          ring.scale.setScalar(paintSession.radiusMetres * 0.85);
+          (ring.material as THREE.MeshBasicMaterial).color.copy(erase ? eraseColor : paintColor);
+          ring.visible = true;
+        };
+        const dabTo = (point: THREE.Vector3) => {
+          if (!paintSession || !stroke) return;
+          const r = paintSession.radiusMetres,
+            distance = stroke.last.distanceTo(point);
+          // Fill between pointer samples, but do not bridge a jump across a gap in the model.
+          const steps = distance < r * 6 ? Math.ceil(distance / (r * 0.3)) : 1;
+          let changed = false;
+          for (let i = 1; i <= steps; i++) {
+            const p = steps > 1 ? stroke.last.clone().lerp(point, i / steps) : point;
+            changed = paintSession.dab(p.toArray() as Vec3, stroke.erase) || changed;
+          }
+          stroke.last = point.clone();
+          if (changed && paintTexture) paintTexture.needsUpdate = true;
+        };
+        const paintDown = (event: PointerEvent) => {
+          if (!paintSession || other || frameState || event.button !== 0) return;
+          const hit = surfaceHit(event);
+          // Off the model a drag still orbits.
+          if (!hit) return;
+          event.stopPropagation();
+          event.preventDefault();
+          element.focus({ preventScroll: true });
+          element.setPointerCapture(event.pointerId);
+          paintSession.beginStroke();
+          stroke = {
+            last: hit.point.clone(),
+            erase: paintSession.erase !== event.altKey,
+            pointer: event.pointerId,
+          };
+          if (paintSession.dab(hit.point.toArray() as Vec3, stroke.erase) && paintTexture)
+            paintTexture.needsUpdate = true;
+          showRing(hit, stroke.erase);
+          render();
+        };
+        const paintMove = (event: PointerEvent) => {
+          if (!paintSession || other || frameState) return;
+          if (!stroke && event.buttons) {
+            ring.visible = false;
+            return;
+          }
+          const hit = surfaceHit(event);
+          if (stroke && hit) dabTo(hit.point);
+          showRing(hit, stroke ? stroke.erase : paintSession.erase !== event.altKey);
+          render();
+        };
+        const paintUp = (event: PointerEvent) => {
+          if (!stroke || event.pointerId !== stroke.pointer) return;
+          stroke = null;
+          if (element.hasPointerCapture(event.pointerId))
+            element.releasePointerCapture(event.pointerId);
+          paintSession?.endStroke();
+        };
+        const paintLeave = () => {
+          if (stroke || !ring.visible) return;
+          ring.visible = false;
+          render();
+        };
+        element.addEventListener("pointerdown", paintDown, true);
+        element.addEventListener("pointermove", paintMove);
+        element.addEventListener("pointerup", paintUp);
+        element.addEventListener("pointercancel", paintUp);
+        element.addEventListener("pointerleave", paintLeave);
+        const setPaint = (session: Gen3DPaintSession | null) => {
+          paintSession = other ? null : session;
+          stroke = null;
+          if (paintSession) {
+            const grid = paintSession.ensureGrid(
+              boxA.min.toArray() as Vec3,
+              boxA.max.toArray() as Vec3,
+            );
+            if (paintTexture?.image.data !== grid.data) {
+              paintTexture?.dispose();
+              paintTexture = new THREE.Data3DTexture(grid.data, ...grid.dims);
+              paintTexture.format = THREE.RedFormat;
+              paintTexture.type = THREE.UnsignedByteType;
+              paintTexture.minFilter = paintTexture.magFilter = THREE.LinearFilter;
+              paintTexture.unpackAlignment = 1;
+            }
+            paintTexture.needsUpdate = true;
+            paintUniforms.ahaMask.value = paintTexture;
+            paintUniforms.ahaMin.value.set(...grid.min);
+            paintUniforms.ahaSize.value.set(
+              grid.max[0] - grid.min[0],
+              grid.max[1] - grid.min[1],
+              grid.max[2] - grid.min[2],
+            );
+            // The left button paints on the model; the right one orbits (Shift pans).
+            orbit.mouseButtons = {
+              LEFT: THREE.MOUSE.ROTATE,
+              MIDDLE: THREE.MOUSE.DOLLY,
+              RIGHT: THREE.MOUSE.ROTATE,
+            };
+            renderer!.domElement.style.cursor = "crosshair";
+          } else {
+            orbit.mouseButtons = { ...defaultButtons };
+            ring.visible = false;
+            renderer!.domElement.style.cursor = "";
+          }
+          for (const overlay of overlays) overlay.visible = !!paintSession;
+          render();
+        };
+        const paintChanged = () => {
+          if (paintTexture) paintTexture.needsUpdate = true;
+          if (ring.visible && paintSession) ring.scale.setScalar(paintSession.radiusMetres * 0.85);
+          render();
+        };
         let pressed = { x: 0, y: 0 };
         const down = (event: PointerEvent) => {
           pressed = { x: event.clientX, y: event.clientY };
@@ -283,19 +524,14 @@ export function Gen3DViewer({
         const up = (event: PointerEvent) => {
           // A drag orbits; only a click picks. Picking is off while overlaying or comparing.
           if (Math.hypot(pressed.x - event.clientX, pressed.y - event.clientY) > 4) return;
-          if (frameState || other || !onSelectRef.current) return;
+          if (frameState || other || paintSession || !onSelectRef.current) return;
           const rect = renderer!.domElement.getBoundingClientRect();
           pointer.set(
             ((event.clientX - rect.left) / rect.width) * 2 - 1,
             (-(event.clientY - rect.top) / rect.height) * 2 + 1,
           );
           raycaster.setFromCamera(pointer, camera);
-          const meshes = [...originals.keys()].filter((m) => {
-            let o: THREE.Object3D | null = m;
-            while (o && o !== main.root) o = o.parent;
-            return !!o;
-          });
-          const hit = raycaster.intersectObjects(meshes, false)[0];
+          const hit = raycaster.intersectObjects(mainMeshes, false)[0];
           let object: THREE.Object3D | null = hit?.object ?? null;
           while (object && typeof object.userData.ahaId !== "string") object = object.parent;
           onSelectRef.current(
@@ -382,6 +618,13 @@ export function Gen3DViewer({
           renderer!.setViewport(0, 0, width, height);
           renderer!.render(scene, camera);
           placeLabels(camera, width, height);
+          if (paintSession) {
+            // A custom repaint view looks along the viewer's camera (orthographic in Blender).
+            paintSession.camera = {
+              direction: camera.position.clone().sub(orbit.target).normalize().toArray() as Vec3,
+              up: new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).toArray() as Vec3,
+            };
+          }
         };
         const loop = () => {
           frameId = 0;
@@ -595,7 +838,7 @@ export function Gen3DViewer({
           paused = next;
           render();
         };
-        controls.current = { highlight, reset, apply, play, pause };
+        controls.current = { highlight, setPaint, paintChanged, reset, apply, play, pause };
         const observer = new ResizeObserver(resize);
         observer.observe(element);
         const visibility = new IntersectionObserver((entries) => {
@@ -610,12 +853,23 @@ export function Gen3DViewer({
         resize();
         apply(latest.current);
         highlight(selection.current);
+        setPaint(paintRef.current);
         setLoading(false);
         cleanup = () => {
           controls.current = null;
           cancelAnimationFrame(frameId);
           renderer!.domElement.removeEventListener("pointerdown", down);
           renderer!.domElement.removeEventListener("pointerup", up);
+          element.removeEventListener("pointerdown", paintDown, true);
+          element.removeEventListener("pointermove", paintMove);
+          element.removeEventListener("pointerup", paintUp);
+          element.removeEventListener("pointercancel", paintUp);
+          element.removeEventListener("pointerleave", paintLeave);
+          overlays.forEach((o) => o.removeFromParent());
+          paintMaterial.dispose();
+          paintTexture?.dispose();
+          ring.geometry.dispose();
+          (ring.material as THREE.Material).dispose();
           highlights.forEach((h) => h.dispose());
           observer.disconnect();
           visibility.disconnect();
@@ -661,9 +915,22 @@ export function Gen3DViewer({
 
   const modes: DisplayMode[] = [...DISPLAY_MODES, ...(bones.length ? (["weights"] as const) : [])];
   const onKey = (event: KeyboardEvent) => {
-    if (event.target !== container.current || event.metaKey || event.ctrlKey || event.altKey)
-      return;
+    if (event.target !== container.current) return;
     const key = event.key.toLowerCase();
+    if (paint && key === "z" && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
+      event.preventDefault();
+      paint.undo();
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (paint && (key === "[" || key === "]")) {
+      paint.setBrush({ radius: paint.radius * (key === "]" ? 1.25 : 0.8) });
+      return;
+    }
+    if (paint && (key === "e" || key === "b")) {
+      paint.setBrush({ erase: key === "e" });
+      return;
+    }
     if (key === "r") controls.current?.reset();
     else if (key === "t") setTurntable((v) => !v);
     else if (key === " " && clip) {
@@ -710,7 +977,7 @@ export function Gen3DViewer({
             </OptionSelect>
           </div>
         )}
-        {canOverlay && !compare && (
+        {canOverlay && !compare && !paint && (
           <div className="w-36">
             <OptionSelect
               size="xs"
@@ -727,7 +994,7 @@ export function Gen3DViewer({
             </OptionSelect>
           </div>
         )}
-        {project.versions.length > 1 && (
+        {project.versions.length > 1 && !paint && (
           <div className="w-36">
             <OptionSelect
               size="xs"
@@ -805,7 +1072,9 @@ export function Gen3DViewer({
           tabIndex={0}
           role="application"
           aria-label={tr(
-            "3D model. Drag to orbit, right-drag or arrow keys to pan, scroll to zoom; click a part to select it, with Cmd or Ctrl to add. R resets the view, 1–9 switch the display, T toggles the turntable, Space pauses the animation.",
+            paint
+              ? "3D model, painting the repaint mask. Drag on the model to paint, Alt-drag to erase, right-drag or drag beside the model to orbit, scroll to zoom. [ and ] change the brush size, E and B switch eraser and brush, Cmd or Ctrl+Z undoes, R resets the view."
+              : "3D model. Drag to orbit, right-drag or arrow keys to pan, scroll to zoom; click a part to select it, with Cmd or Ctrl to add. R resets the view, 1–9 switch the display, T toggles the turntable, Space pauses the animation.",
           )}
           onKeyDown={onKey}
           className="absolute inset-0 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
@@ -818,7 +1087,17 @@ export function Gen3DViewer({
             />
           ))}
         </div>
-        {selected.length > 0 && !compare && (
+        {paint && !loading && !error && (
+          <div
+            className="pointer-events-none absolute bottom-2 start-2 max-w-[calc(100%-1rem)] rounded-md bg-background/85 px-2 py-1 text-ui-xs"
+            role="status"
+          >
+            {tr(
+              "Painting the mask: drag on the model, Alt-drag to erase, right-drag to orbit, [ ] brush size.",
+            )}
+          </div>
+        )}
+        {selected.length > 0 && !compare && !paint && (
           <div
             className="absolute bottom-2 start-2 flex max-w-[calc(100%-1rem)] items-center gap-2 rounded-md bg-background/85 px-2 py-1 text-ui-xs"
             role="status"

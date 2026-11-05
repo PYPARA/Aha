@@ -16,6 +16,7 @@
 - **平铺贴图**：网页端创建绘图任务，完成后用 `import-texture-asset` 提交资产 ID，由 `wsRpc` 读字节、交给 `addTextureBytes`：裁成不超过 1024 的正方形，用 `makeSeamless`（`@synara/shared/gen3dTexture`，按轴分别与半偏移副本交叉淡化，边界取自图内部）处理成无缝，按内容哈希存到 `textures/<id>.png`，记在 `Gen3DProject.textures`（可选字段，最多 64 张，旧工程没有）。`optimize` 的材质项 `preset: "tiled"` 必须带 `tile`（贴图 id、每次重复的米数、粗糙度），其余预设不能带；宿主把 id 换成工程内文件路径再交给脚本。
 - **局部重绘**：只能由工作台发起，`submit` 拒绝带 `repaint` 的构建。
   - `render-view`：`wsRpc` 调 `engine.renderView`，宿主用固定脚本渲染 `views/<versionId>/<view>.png`（1024 正交，渲染结果可重复），再存成绘图资产交给遮罩编辑器。
+  - 自由视角（`repaintView: "custom"`）：遮罩在查看器里画在模型表面，存成覆盖模型包围盒的体素网格（`@synara/shared/gen3dPaintMask`：最长边 128 格的立方格子，0–255，按 0.5 阈值三线性采样；行程编码后随 `paintMask` 提交，`repaintCamera` 是查看器相机的方向和上方向，glTF 坐标）。`engine.renderCustomView` 把网格写到 `views/<versionId>/custom-paint.json`（宿主请求体限 16 KB，网格从这个固定位置读），宿主渲染 `custom.png` 和 `custom-mask.png`，并把相机连同取景写进 `custom.json`；`wsRpc` 把两张图都存成绘图资产。`repaintBytes` 对自由视角从 `custom.json` 读相机和取景放进 `build.repaint.camera`，没有取景就拒绝。查看器的显示和脚本用同一个阈值，看到的蓝色区域就是渲染出的遮罩。
   - 网页端用这张图和 `MaskCanvasEditor` 的遮罩（透明 = 重绘区域）创建绘图编辑任务；完成后 `repaint` 只提交任务 ID。`wsRpc` 从绘图服务读出任务的输入图、遮罩和输出，`repaintBytes` 先确认输入图与该版本该视角的渲染逐字节一致（否则投影会错位），再把输出和遮罩缩放到 1024（只接受接近正方形的图）写入任务目录，创建 `mode: "process"`、带 `repaint` 的任务。
   - 只接受带烘焙颜色贴图（`process.baked` 含 `baseColor`）的版本，可以在重绘版本上继续重绘。Agent 工具的 `get.current` 沿父版本链跳过所有优化和重绘版本，回到最近的建模版本。
 - **附加关节**：版本不可修改，后补的关节存在 `Gen3DProject.skeletons`（按 versionId，最多 64 组；`origin` 为 ai / template / user，`confirmed`）。工作台用 `set-skeleton`（空数组删除），Agent 工具的 `skeleton` 操作走 `propose-skeleton`，引擎强制记为 `origin: "ai"`、未确认，不消耗轮次。两者都要通过 `validateSkeleton`，且每个关节都在版本包围盒外扩 25% 以内。`rigSkeleton`（`@synara/shared/gen3dVersions`）沿版本链从近到远查找：某个版本的附加关节（默认只认已确认的）优先于它构建时带的骨架。导出时附加关节写成 `skeleton.json`。
@@ -71,6 +72,7 @@
   - **平铺贴图材质**：贴图节点用物体坐标乘 1/重复米数、`BOX` 投影（混合 0.25）铺满；明暗同时驱动凹凸（距离为重复尺寸的 1%）和粗糙度（所选值 ±0.12），烘焙后得到颜色、法线和粗糙度。
   - `texture`（`view` / `repaint` 两种模式）：
     - 视图：七个正交方向（Blender 小键盘命名，glTF +Z 为正面），按模型投影范围的 1.1 倍取景。Cycles 1 采样、极小像素滤波渲染位置和法线（不做抗锯齿，像素中心可精确换算），16 采样渲染发射的基础色；输出的视图图片是基础色乘一个固定的明暗系数（来自法线和固定光向），让绘图模型看得出形体。渲染设置固定，同一版本同一视角的输出逐字节相同，引擎靠这一点核对编辑来源。
+    - 自由视角：方向和上方向来自查看器（上方向与方向近乎平行时改用 -Z）。带遮罩网格时，取景对准网格里已涂的格子（跨度 × 1.8 加 6 格，不小于整体取景的 40%，尽量不超出整体画面），每个命中像素按渲染出的位置采样网格得到 2D 遮罩；一个像素都没有时报错「cannot be seen from this angle」，宿主换成给用户的提示。重绘模式直接用 `camera.frame` 复现同一取景。
     - 重绘：EMIT 烘焙每个贴图像素的世界坐标和法线（超过 2048 的贴图按 2048 计算后放大），换算到视图像素；只接受落在画面内、朝向相机、并且就是该像素渲染到的那个表面（与位置图比较，代替光线检测）的像素。权重 = 向内柔化后的遮罩 × 掠射角衰减；编辑图先除以同一明暗系数还原成基础色再混合。权重为 0 的像素保持原值，只向 UV 岛外扩 4 像素。脚本报告改动的纹素数，和 8 位量化后的实际差异一致。
     - 宿主用 `replaceBaseColor`（`glbTexture.ts`）只替换 GLB 里基础色图片的数据，其余 bufferView 按原字节复制；父版本的 LOD 也换上同一张图，碰撞体原样复制。
   - `rig`：

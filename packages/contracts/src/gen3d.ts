@@ -49,6 +49,8 @@ export const GEN3D_REPAINT_VIEWS = [
   "front-left",
   "top",
 ] as const;
+/** Fixed views plus "custom": a direction the user painted a mask from in the 3D viewer. */
+export const GEN3D_REPAINT_ALL_VIEWS = [...GEN3D_REPAINT_VIEWS, "custom"] as const;
 /** Procedural clips the fixed rigging script can add; generic skeletons get idle only. */
 export const GEN3D_ANIMATION_CLIPS = ["idle", "walk", "run", "attack"] as const;
 /** Prop motions the fixed animation script can put on chosen parts. */
@@ -234,7 +236,7 @@ export const Gen3DProcessReport = Schema.Struct({
   /** Set on repainted versions: what the local repaint changed in the base colour texture. */
   repaint: Schema.optional(
     Schema.Struct({
-      view: Schema.Literals(GEN3D_REPAINT_VIEWS),
+      view: Schema.Literals(GEN3D_REPAINT_ALL_VIEWS),
       maskPixels: Schema.Finite,
       changedTexels: Schema.Finite,
     }),
@@ -264,10 +266,37 @@ export const Gen3DStylize = Schema.Struct({
   detail: Schema.Finite.check(Schema.isInt(), Schema.isBetween({ minimum: 6, maximum: 20_000 })),
 });
 export type Gen3DStylize = typeof Gen3DStylize.Type;
-export const Gen3DRepaintView = Schema.Literals(GEN3D_REPAINT_VIEWS);
+export const Gen3DRepaintView = Schema.Literals(GEN3D_REPAINT_ALL_VIEWS);
 export type Gen3DRepaintView = typeof Gen3DRepaintView.Type;
+const Vec3 = Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite]);
+/** The orthographic camera of a custom repaint view, in glTF axes (Y up, +Z front). */
+export const Gen3DRepaintCamera = Schema.Struct({
+  /** From the model towards the camera. */
+  direction: Vec3,
+  /** The image's up direction (made perpendicular to the direction). */
+  up: Vec3,
+  /** Set by the view render: the framed square's centre along the image axes and its side, in metres. */
+  frame: Schema.optional(
+    Schema.Struct({ u: Schema.Finite, v: Schema.Finite, size: Schema.Finite }),
+  ),
+});
+export type Gen3DRepaintCamera = typeof Gen3DRepaintCamera.Type;
+const GridSide = Schema.Finite.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 1, maximum: 160 }),
+);
+/** A mask painted on the model in 3D: run-length encoded voxel grid (see shared gen3dPaintMask). */
+export const Gen3DPaintMask = Schema.Struct({
+  min: Vec3,
+  max: Vec3,
+  dims: Schema.Tuple([GridSide, GridSide, GridSide]),
+  data: Schema.String.check(Schema.isMaxLength(8_000_000)),
+});
+export type Gen3DPaintMask = typeof Gen3DPaintMask.Type;
 export const Gen3DRepaint = Schema.Struct({
   view: Gen3DRepaintView,
+  /** Custom views: the camera the view was rendered with. */
+  camera: Schema.optional(Gen3DRepaintCamera),
   /** Drawing job whose first output is the edit; its input is the view render and its mask the area. */
   imageJobId: Schema.String.check(Schema.isMaxLength(128)),
   imageAssetId: Schema.String.check(Schema.isMaxLength(128)),
@@ -468,6 +497,9 @@ export const Gen3DCommand = Schema.Struct({
   exportPreset: Schema.optional(Schema.Literals(["generic", "godot", "unity", "unreal"])),
   exportFormat: Schema.optional(Schema.Literals(["glb", "fbx", "obj", "usdz", "stl"])),
   repaintView: Schema.optional(Gen3DRepaintView),
+  /** render-view with the custom view: the viewer's camera direction and the painted mask. */
+  repaintCamera: Schema.optional(Gen3DRepaintCamera),
+  paintMask: Schema.optional(Gen3DPaintMask),
   clips: Schema.optional(Schema.Array(Schema.Literals(GEN3D_ANIMATION_CLIPS))),
   stylize: Schema.optional(Gen3DStylize),
   instruction: Schema.optional(Schema.String),
@@ -486,6 +518,8 @@ export const Gen3DCommandResult = Schema.Struct({
   exportPath: Schema.optional(Schema.String),
   /** render-view: the view render saved as a drawing asset, ready for mask painting. */
   viewAsset: Schema.optional(ImageAsset),
+  /** render-view of a custom view: the 3D-painted mask as seen from it (transparent = repaint). */
+  maskAsset: Schema.optional(ImageAsset),
 });
 export type Gen3DCommandResult = typeof Gen3DCommandResult.Type;
 export const Gen3DList = Schema.Array(

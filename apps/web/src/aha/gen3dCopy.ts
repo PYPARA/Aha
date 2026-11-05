@@ -1,4 +1,23 @@
 export const gen3dCopy: Record<string, string> = {
+  "Free angle": "自由视角",
+  "Paint on the model (free angle)": "在模型上画（自由视角）",
+  "Rendered from the viewer's angle, framed on the painted area. The mask follows the model.":
+    "按查看器的角度渲染，画面对准画过的区域；遮罩来自模型上画的部分。",
+  "Render again": "重新渲染",
+  "Render this angle": "渲染当前角度",
+  "Adjust in 2D": "在 2D 中调整",
+  "Brush (B)": "画笔（B）",
+  "Eraser (E)": "橡皮（E）",
+  "Undo stroke": "撤销一笔",
+  "Undo stroke (Cmd/Ctrl+Z in the viewer)": "撤销一笔（在查看器中按 Cmd/Ctrl+Z）",
+  "Turn the model so the painted area faces you, then render this angle. Only surfaces the angle can see change.":
+    "把模型转到画过的区域正对你，再渲染当前角度。只有这个角度看得到的表面会改变。",
+  "Drag on the model in the viewer to paint the area to change. Alt-drag erases, right-drag orbits, [ and ] change the size.":
+    "在查看器里的模型上拖动，画出要改的区域。按住 Option 拖动擦除，右键拖动旋转视角，[ 和 ] 调整笔刷大小。",
+  "3D model, painting the repaint mask. Drag on the model to paint, Alt-drag to erase, right-drag or drag beside the model to orbit, scroll to zoom. [ and ] change the brush size, E and B switch eraser and brush, Cmd or Ctrl+Z undoes, R resets the view.":
+    "3D 模型，正在画重绘遮罩。在模型上拖动绘制，按住 Option 拖动擦除，右键拖动或在模型旁边拖动旋转视角，滚轮缩放。[ 和 ] 调整笔刷大小，E 和 B 切换橡皮和画笔，Cmd 或 Ctrl+Z 撤销，R 重置视角。",
+  "Painting the mask: drag on the model, Alt-drag to erase, right-drag to orbit, [ ] brush size.":
+    "正在画遮罩：在模型上拖动绘制，Option 拖动擦除，右键拖动旋转，[ ] 调整笔刷。",
   "Materials (PBR)": "材质（PBR）",
   "Base colour": "基础色",
   Normal: "法线",

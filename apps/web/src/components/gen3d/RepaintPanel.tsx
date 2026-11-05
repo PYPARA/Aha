@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   GEN3D_REPAINT_SIZE,
@@ -11,14 +11,18 @@ import {
   type ImageJob,
 } from "@synara/contracts";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
+import { EraserIcon, PencilIcon, Undo2Icon } from "~/lib/icons";
 import { Button } from "../ui/button";
+import { Slider } from "../ui/slider";
 import { OptionSelect } from "../ui/option-select";
 import { Textarea } from "../ui/textarea";
 import { DrawingModelPicker } from "../drawing/DrawingPickers";
 import { MaskCanvasEditor } from "../drawing/MaskCanvasEditor";
 import { drawingApi, imageUrl, uploadDrawingImage, useImageProviders } from "../drawing/useDrawing";
+import { BRUSH_MAX, BRUSH_MIN, type Gen3DPaintSession } from "./gen3dPaint";
 
 export const REPAINT_VIEW_LABELS: Record<Gen3DRepaintView, string> = {
+  custom: "Free angle",
   front: "Front",
   "front-right": "Front right",
   right: "Right",
@@ -36,21 +40,26 @@ const FEATHERS = [
 const finished = (status: string) =>
   ["succeeded", "partial", "failed", "cancelled", "interrupted"].includes(status);
 /** Aha's template around the user's instruction; the mask, not the prompt, bounds the change. */
-const repaintPrompt = (instruction: string) =>
-  `Edit only the masked (transparent) area of this image. The image is an orthographic render of a 3D game asset and will be used as its texture. Change: ${instruction}. Keep the object's silhouette, outlines, camera, scale and everything outside the masked area unchanged. Paint surface colour and detail only, as a texture would look: the same soft even lighting as the rest of the object, no new cast shadows or highlights, no perspective change, no background change, no text.`;
+const repaintPrompt = (instruction: string, partial: boolean) =>
+  `Edit only the masked (transparent) area of this image. The image is an orthographic render of ${partial ? "part of " : ""}a 3D game asset and will be used as its texture. Change: ${instruction}. Keep the object's silhouette, outlines, camera, scale and everything outside the masked area unchanged. Paint surface colour and detail only, as a texture would look: the same soft even lighting as the rest of the object, no new cast shadows or highlights, no perspective change, no background change, no text.`;
 
-/** Local repaint: render a view of a baked version, paint a mask, edit it with the drawing
- * channel and project the edit back onto the texture as a new version. */
+/** Local repaint: paint a mask on the model in 3D (or on a fixed view's render), edit that view
+ * with the drawing channel and project the edit back onto the texture as a new version. */
 export function RepaintPanel({
   version,
   disabled,
   blenderMissing,
+  paint,
+  onPaintingChange,
   act,
   onError,
 }: {
   version: Gen3DVersion | undefined;
   disabled: boolean;
   blenderMissing: boolean;
+  /** This version's 3D mask, painted in the viewer while the free angle is chosen. */
+  paint: Gen3DPaintSession | null;
+  onPaintingChange: (painting: boolean) => void;
   act: (input: Omit<Gen3DCommand, "projectId" | "revision">) => Promise<Gen3DCommandResult | null>;
   onError: (e: unknown) => void;
 }) {
@@ -58,7 +67,7 @@ export function RepaintPanel({
     navigate = useNavigate(),
     providers = useImageProviders();
   const enabled = providers.data?.filter((p) => p.enabled && p.models.length) ?? [];
-  const [view, setView] = useState<Gen3DRepaintView>("front"),
+  const [view, setView] = useState<Gen3DRepaintView>("custom"),
     [base, setBase] = useState<ImageAsset | null>(null),
     [mask, setMask] = useState<ImageAsset | null>(null),
     [editing, setEditing] = useState(false),
@@ -71,6 +80,14 @@ export function RepaintPanel({
   const current =
     choice ?? (enabled[0] ? { providerId: enabled[0].id, model: enabled[0].models[0]!.id } : null);
   const baked = version?.process?.baked.includes("baseColor") === true;
+  const custom = view === "custom";
+  // Re-render on brush and mask changes; the mask revision tells a new stroke from a new size.
+  useSyncExternalStore(paint?.subscribe ?? noSubscribe, paint?.snapshot ?? zero);
+  const renderedMask = useRef(-1);
+  useEffect(() => {
+    onPaintingChange(baked && custom && !!paint);
+    return () => onPaintingChange(false);
+  }, [baked, custom, paint]);
   // A render and mask belong to one version and view; switching either starts over.
   useEffect(() => {
     setBase(null);
@@ -78,6 +95,13 @@ export function RepaintPanel({
     setJob(null);
     setFailure(null);
   }, [version?.id, view]);
+  // Painting after a free-angle render makes that render's mask stale.
+  useEffect(() => {
+    if (custom && base && paint && paint.maskRevision !== renderedMask.current) {
+      setBase(null);
+      setMask(null);
+    }
+  }, [paint?.maskRevision]);
   useEffect(() => {
     if (!job || finished(job.status)) return;
     const timer = setInterval(() => {
@@ -123,6 +147,24 @@ export function RepaintPanel({
     setRendering(true);
     setFailure(null);
     try {
+      if (custom) {
+        const paintMask = paint?.encoded();
+        if (!paint?.camera || !paintMask) return;
+        const revision = paint.maskRevision;
+        const result = await act({
+          operation: "render-view",
+          versionId: version.id,
+          repaintView: "custom",
+          repaintCamera: paint.camera,
+          paintMask,
+        });
+        if (result?.viewAsset && result.maskAsset) {
+          renderedMask.current = revision;
+          setBase(result.viewAsset);
+          setMask(result.maskAsset);
+        }
+        return;
+      }
       const result = await act({
         operation: "render-view",
         versionId: version.id,
@@ -145,7 +187,7 @@ export function RepaintPanel({
           clientRequestId: crypto.randomUUID(),
           providerId: current.providerId,
           model: current.model,
-          prompt: repaintPrompt(instruction.trim()),
+          prompt: repaintPrompt(instruction.trim(), custom),
           parameters: {
             n: 1,
             size: `${GEN3D_REPAINT_SIZE}x${GEN3D_REPAINT_SIZE}`,
@@ -189,6 +231,7 @@ export function RepaintPanel({
               disabled={busy}
               onValueChange={(value) => setView(value as Gen3DRepaintView)}
             >
+              <option value="custom">{tr("Paint on the model (free angle)")}</option>
               {GEN3D_REPAINT_VIEWS.map((key) => (
                 <option key={key} value={key}>
                   {tr(REPAINT_VIEW_LABELS[key])}
@@ -196,6 +239,7 @@ export function RepaintPanel({
               ))}
             </OptionSelect>
           </label>
+          {custom && paint && <PaintControls paint={paint} disabled={busy} />}
           {base && (
             <figure className="space-y-1">
               <img
@@ -204,26 +248,50 @@ export function RepaintPanel({
                 className="aspect-square w-full rounded-md border border-border bg-muted/40 object-contain"
               />
               <figcaption className="text-ui-xs text-muted-foreground">
-                {tr(mask ? "Mask painted." : "Paint the area to change.")}
+                {tr(
+                  custom
+                    ? "Rendered from the viewer's angle, framed on the painted area. The mask follows the model."
+                    : mask
+                      ? "Mask painted."
+                      : "Paint the area to change.",
+                )}
               </figcaption>
             </figure>
           )}
-          <Button
-            className="w-full"
-            variant="secondary"
-            disabled={busy}
-            onClick={() => (base ? setEditing(true) : void render())}
-          >
-            {tr(
-              rendering
-                ? "Rendering view…"
-                : base
-                  ? mask
-                    ? "Edit mask"
-                    : "Paint mask"
-                  : "Render view and paint mask",
-            )}
-          </Button>
+          {custom ? (
+            <div className="flex gap-2">
+              <Button
+                className="flex-1"
+                variant="secondary"
+                disabled={busy || !paint?.painted}
+                onClick={() => void render()}
+              >
+                {tr(rendering ? "Rendering view…" : base ? "Render again" : "Render this angle")}
+              </Button>
+              {base && mask && (
+                <Button variant="ghost" disabled={busy} onClick={() => setEditing(true)}>
+                  {tr("Adjust in 2D")}
+                </Button>
+              )}
+            </div>
+          ) : (
+            <Button
+              className="w-full"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => (base ? setEditing(true) : void render())}
+            >
+              {tr(
+                rendering
+                  ? "Rendering view…"
+                  : base
+                    ? mask
+                      ? "Edit mask"
+                      : "Paint mask"
+                    : "Render view and paint mask",
+              )}
+            </Button>
+          )}
           <label className="block space-y-1.5">
             <span className="text-ui-xs text-muted-foreground">{tr("What to paint")}</span>
             <Textarea
@@ -305,6 +373,7 @@ export function RepaintPanel({
           onSave={async (blob) => {
             try {
               setMask(await uploadDrawingImage(blob, `gen3d-mask-${view}.png`));
+              if (custom) renderedMask.current = paint?.maskRevision ?? -1;
             } catch (error) {
               onError(error);
               throw error;
@@ -313,5 +382,83 @@ export function RepaintPanel({
         />
       )}
     </section>
+  );
+}
+
+const noSubscribe = () => () => {},
+  zero = () => 0;
+
+/** Brush, eraser, size, undo and clear for the mask painted in the 3D viewer. */
+function PaintControls({ paint, disabled }: { paint: Gen3DPaintSession; disabled: boolean }) {
+  const tr = useAhaTranslation();
+  const centimetres = paint.radiusMetres * 100;
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center gap-1">
+        {(
+          [
+            [false, "Brush (B)", <PencilIcon key="b" />],
+            [true, "Eraser (E)", <EraserIcon key="e" />],
+          ] as const
+        ).map(([erase, label, icon]) => (
+          <Button
+            key={label}
+            size="icon-sm"
+            variant={paint.erase === erase ? "secondary" : "ghost"}
+            aria-label={tr(label)}
+            aria-pressed={paint.erase === erase}
+            title={tr(label)}
+            disabled={disabled}
+            onClick={() => paint.setBrush({ erase })}
+          >
+            {icon}
+          </Button>
+        ))}
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={tr("Undo stroke")}
+          title={tr("Undo stroke (Cmd/Ctrl+Z in the viewer)")}
+          disabled={disabled || !paint.canUndo}
+          onClick={() => paint.undo()}
+        >
+          <Undo2Icon />
+        </Button>
+        <Button
+          className="ms-auto"
+          size="sm"
+          variant="ghost"
+          disabled={disabled || !paint.painted}
+          onClick={() => paint.clear()}
+        >
+          {tr("Clear")}
+        </Button>
+      </div>
+      <div className="space-y-1.5">
+        <span className="flex justify-between text-ui-xs text-muted-foreground">
+          <span>{tr("Brush size")}</span>
+          <span className="tabular-nums">
+            {centimetres
+              ? `${centimetres < 10 ? centimetres.toFixed(1) : Math.round(centimetres)} cm`
+              : ""}
+          </span>
+        </span>
+        <Slider
+          aria-label={tr("Brush size")}
+          value={Math.round(Math.log(paint.radius / BRUSH_MIN) * 100)}
+          min={0}
+          max={Math.round(Math.log(BRUSH_MAX / BRUSH_MIN) * 100)}
+          disabled={disabled}
+          onValueChange={(value) => paint.setBrush({ radius: BRUSH_MIN * Math.exp(value / 100) })}
+        />
+      </div>
+      <p className="text-ui-xs leading-relaxed text-muted-foreground">
+        {tr(
+          paint.painted
+            ? "Turn the model so the painted area faces you, then render this angle. Only surfaces the angle can see change."
+            : "Drag on the model in the viewer to paint the area to change. Alt-drag erases, right-drag orbits, [ and ] change the size.",
+        )}
+      </p>
+    </div>
   );
 }

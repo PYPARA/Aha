@@ -3473,6 +3473,30 @@ const makeWsRpcHandlersLayer = () =>
                     if (!command.projectId || !command.versionId || !command.repaintView)
                       return yield* Effect.fail(new Error("Choose a version and a view."));
                     const view = command.repaintView;
+                    if (view === "custom") {
+                      if (!command.repaintCamera || !command.paintMask)
+                        return yield* Effect.fail(new Error("Paint an area on the model first."));
+                      const camera = command.repaintCamera,
+                        paintMask = command.paintMask;
+                      const rendered = yield* model3dEffect(async () =>
+                        (await gen3DEngine()).renderCustomView(
+                          command.projectId!,
+                          command.versionId!,
+                          camera,
+                          paintMask,
+                        ),
+                      );
+                      const prefix = `gen3d-${command.versionId.slice(0, 8)}-custom`;
+                      const viewAsset = yield* imageGenerationService.upload(
+                        rendered.image,
+                        `${prefix}.png`,
+                      );
+                      const maskAsset = yield* imageGenerationService.upload(
+                        rendered.mask,
+                        `${prefix}-mask.png`,
+                      );
+                      return { project: null, viewAsset, maskAsset };
+                    }
                     const bytes = yield* model3dEffect(async () =>
                       (await gen3DEngine()).renderView(
                         command.projectId!,

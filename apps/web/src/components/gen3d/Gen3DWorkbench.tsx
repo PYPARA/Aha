@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -45,6 +45,7 @@ import { ensureGen3DThread } from "./Gen3DChat";
 import { AnimationPanel, CLIP_LABELS, RIG_KIND_LABELS } from "./AnimationPanel";
 import { MOTION_LABELS } from "./PropAnimationPanel";
 import { REPAINT_VIEW_LABELS, RepaintPanel } from "./RepaintPanel";
+import { Gen3DPaintSession } from "./gen3dPaint";
 import { STYLE_LABELS, StylizePanel } from "./StylizePanel";
 import { TiledTextureField, validTileSize, type TileChoice } from "./TiledTextureField";
 import {
@@ -317,7 +318,16 @@ function ProjectWorkspace({
     [busy, setBusy] = useState(false),
     [exportPath, setExportPath] = useState<string | null>(null),
     // Parts picked in the viewer or the part lists; ids belong to the selected version.
-    [parts, setParts] = useState<string[]>([]);
+    [parts, setParts] = useState<string[]>([]),
+    // The repaint panel's free-angle mode: the viewer paints this version's 3D mask.
+    [painting, setPainting] = useState(false);
+  const paintSessions = useRef(new Map<string, Gen3DPaintSession>());
+  const paintFor = (versionId: string) => {
+    let session = paintSessions.current.get(versionId);
+    if (!session)
+      paintSessions.current.set(versionId, (session = new Gen3DPaintSession(versionId)));
+    return session;
+  };
   const lastVersion = project.versions.at(-1)?.id ?? null;
   useEffect(
     () => setSelected(project.previewVersionId ?? lastVersion),
@@ -473,6 +483,8 @@ function ProjectWorkspace({
             version={version}
             disabled={locked || !desktop || !blender?.headless}
             blenderMissing={desktop && !blender?.headless}
+            paint={version ? paintFor(version.id) : null}
+            onPaintingChange={setPainting}
             act={act}
             onError={onError}
           />
@@ -661,6 +673,7 @@ function ProjectWorkspace({
                 version={version}
                 selected={parts}
                 onSelect={pickPart}
+                paint={tool === "texture" && painting ? paintFor(version.id) : null}
               />
             </Suspense>
           ) : (

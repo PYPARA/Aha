@@ -766,7 +766,9 @@ print('AHA_CONVERT=' + json.dumps(report))
 
 export const GEN3D_TEXTURE_SCRIPT = String.raw`# Aha 3D generation fixed texture script (headless Blender). Never runs AI source.
 # Usage: blender -b --factory-startup --disable-autoexec --python texture.py -- config.json
-# mode "view": renders one orthographic view of a baked version for mask painting.
+# mode "view": renders one orthographic view of a baked version for mask painting. A "custom" view
+#   comes with a camera direction and, when painted in 3D, a voxel mask grid: the render is framed
+#   on the painted area and the grid becomes the view's 2D mask.
 # mode "repaint": projects an edited view image back onto the base colour texture inside the mask.
 import bpy, json, math, os, sys, time
 import numpy as np
@@ -829,12 +831,64 @@ G = np.array([(v.x, v.z, -v.y) for v in world])  # glTF coordinates
 lo_g, hi_g = G.min(0), G.max(0)
 extent = np.maximum(hi_g - lo_g, 1e-6)
 
-d = np.array(VIEWS[cfg['view']][0], float)
-up = np.array(VIEWS[cfg['view']][1], float)
+camera_cfg = cfg.get('camera') or {}
+if cfg['view'] == 'custom':
+    d = np.array(camera_cfg['direction'], float)
+    d /= max(np.linalg.norm(d), 1e-9)
+    up = np.array(camera_cfg['up'], float)
+    up = up - d * (up @ d)
+    if np.linalg.norm(up) < 1e-3:
+        # Looking straight down or up: keep the model's front at the bottom of the image.
+        up = np.array((0, 0, -1.0)) * np.sign(d[1] or 1)
+        up = up - d * (up @ d)
+    up /= np.linalg.norm(up)
+else:
+    d = np.array(VIEWS[cfg['view']][0], float)
+    up = np.array(VIEWS[cfg['view']][1], float)
 right = np.cross(up, d)
 u, v = G @ right, G @ up
 cu, cv = (u.min() + u.max()) / 2, (v.min() + v.max()) / 2
 frame = max(u.max() - u.min(), v.max() - v.min()) * 1.1
+
+grid = None
+if cfg.get('maskGrid'):
+    mg = cfg['maskGrid']
+    g_dims = np.array(mg['dims'], int)
+    g_min = np.array(mg['min'], float)
+    g_cell = (mg['max'][0] - mg['min'][0]) / g_dims[0]
+    grid = np.fromfile(mg['file'], np.uint8).reshape(g_dims[2], g_dims[1], g_dims[0]).astype(np.float32) / 255
+
+
+def sample_grid(points):
+    """Trilinear grid value at glTF points, cell centres at min + (i + 0.5) * cell."""
+    f = np.clip((points - g_min) / g_cell - 0.5, 0, g_dims - 1)
+    i0 = np.floor(f).astype(int)
+    t = f - i0
+    i1 = np.minimum(i0 + 1, g_dims - 1)
+    value = np.zeros(len(points), np.float32)
+    for cx, wx in ((i0[:, 0], 1 - t[:, 0]), (i1[:, 0], t[:, 0])):
+        for cy, wy in ((i0[:, 1], 1 - t[:, 1]), (i1[:, 1], t[:, 1])):
+            for cz, wz in ((i0[:, 2], 1 - t[:, 2]), (i1[:, 2], t[:, 2])):
+                value += grid[cz, cy, cx] * wx * wy * wz
+    return value
+
+
+if 'frame' in camera_cfg:
+    # The repaint reuses the exact framing its view was rendered with.
+    cu, cv, frame = float(camera_cfg['frame']['u']), float(camera_cfg['frame']['v']), float(camera_cfg['frame']['size'])
+elif grid is not None:
+    # Frame the painted cells (with room around them) so a small area gets more pixels.
+    zs, ys, xs = np.nonzero(grid >= 0.5)
+    if len(xs):
+        cells = g_min + (np.stack([xs, ys, zs], -1) + 0.5) * g_cell
+        pu, pv = cells @ right, cells @ up
+        span = max(pu.max() - pu.min(), pv.max() - pv.min()) * 1.8 + 6 * g_cell
+        size = min(max(span, frame * 0.4), frame)
+        # Stay inside the full frame where possible, so the model is not pushed off one side.
+        half = (frame - size) / 2
+        cu = cu + float(np.clip((pu.min() + pu.max()) / 2 - cu, -half, half))
+        cv = cv + float(np.clip((pv.min() + pv.max()) / 2 - cv, -half, half))
+        frame = size
 depth_mid = (G @ d).mean()
 centre = right * cu + up * cv + d * depth_mid
 # Light from the camera's upper left; the same factor is removed again before projecting back.
@@ -982,6 +1036,7 @@ nor = render_pass('normal', normal_socket, 1, 0.01)
 hit = pos[..., 3] > 0.5
 view_normal = decode_normal(nor[..., :3])
 view_shade = shading(view_normal)
+view_pos_all = decode_position(pos[..., :3])
 
 if cfg['mode'] == 'view':
     color_link = lambda tree: color_node.outputs['Color']
@@ -995,7 +1050,17 @@ if cfg['mode'] == 'view':
     rgb = rgb * alpha[..., None] + background * (1 - alpha[..., None])
     save_png(rgb, None, cfg.get('file') or os.path.join(out, 'view.png'))
     report = {'view': cfg['view'], 'resolution': R, 'coverage': round(float(hit.mean()) * 100, 1),
-              'seconds': round(time.time() - started, 2)}
+              'frame': {'u': cu, 'v': cv, 'size': frame}}
+    if grid is not None:
+        # Image-edit convention: transparent pixels are the area to repaint.
+        value = np.zeros((R, R), np.float32)
+        value[hit] = sample_grid(view_pos_all[hit])
+        painted = hit & (value >= 0.5)
+        report['maskPixels'] = int(painted.sum())
+        if not report['maskPixels']:
+            raise RuntimeError('The painted area cannot be seen from this angle.')
+        save_png(np.ones((R, R, 3), np.float32), np.where(painted, 0.0, 1.0), cfg['maskFile'])
+    report['seconds'] = round(time.time() - started, 2)
     print('AHA_TEXTURE=' + json.dumps(report))
     sys.exit(0)
 

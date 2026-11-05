@@ -12,12 +12,15 @@ import {
   GEN3D_LIMITS,
   GEN3D_PROP_CLIPS,
   GEN3D_REPAINT_SIZE,
+  GEN3D_REPAINT_ALL_VIEWS,
   GEN3D_REPAINT_VIEWS,
   GEN3D_STYLES,
+  Gen3DRepaintCamera,
   GEN3D_VIEWS,
   type Gen3DCommandResult,
   type Gen3DEnvironment,
   type Gen3DList,
+  type Gen3DPaintMask,
   type Gen3DProcessReport,
   type Gen3DReference,
   type Gen3DRepaintView,
@@ -38,6 +41,7 @@ import {
   silhouetteScore,
 } from "@synara/shared/gen3dScore";
 import { validateSkeleton } from "@synara/shared/gen3dSdf";
+import { decodePaintGrid, paintedCells } from "@synara/shared/gen3dPaintMask";
 import { makeSeamless } from "@synara/shared/gen3dTexture";
 import { rigSkeleton } from "@synara/shared/gen3dVersions";
 import { validateBytes } from "gltf-validator";
@@ -347,7 +351,8 @@ export class Gen3DEngine {
     const version = p.versions.find((v) => v.id === versionId);
     if (!version) throw new Error("Model version not found.");
     if (!baked(version)) throw new Error("Repaint needs an optimized version with baked textures.");
-    if (!GEN3D_REPAINT_VIEWS.includes(view)) throw new Error("Unsupported repaint view.");
+    if (!(GEN3D_REPAINT_VIEWS as readonly string[]).includes(view))
+      throw new Error("Unsupported repaint view.");
     const result = await this.host<{ file: string }>(
       "view",
       { projectId, versionId, view },
@@ -359,6 +364,49 @@ export class Gen3DEngine {
     if (path.resolve(this.root, result.file) !== expected)
       throw new Error("Unexpected view render location.");
     return fs.readFile(expected);
+  }
+  /**
+   * Renders a baked version from the viewer's camera direction with a mask painted on the model
+   * in 3D; returns the view and that mask as seen from it (transparent = repaint).
+   */
+  async renderCustomView(
+    projectId: string,
+    versionId: string,
+    camera: Gen3DRepaintCamera,
+    mask: Gen3DPaintMask,
+  ) {
+    const p = await this.get(projectId);
+    const version = p.versions.find((v) => v.id === versionId);
+    if (!version) throw new Error("Model version not found.");
+    if (!baked(version)) throw new Error("Repaint needs an optimized version with baked textures.");
+    const length = Math.hypot(...camera.direction);
+    if (!(length > 1e-6) || !camera.up.every(Number.isFinite))
+      throw new Error("Invalid view direction.");
+    if (!paintedCells(decodePaintGrid(mask))) throw new Error("Paint an area on the model first.");
+    // The grid can be larger than a host request; the host reads it from this fixed location.
+    const expected = (name: string) => modelPath(this.root, projectId, "views", versionId, name);
+    await atomicModelFile(await expected("custom-paint.json"), JSON.stringify(mask));
+    const result = await this.host<{ file: string; maskFile?: string }>(
+      "view",
+      {
+        projectId,
+        versionId,
+        view: "custom",
+        camera: { direction: camera.direction, up: camera.up },
+      },
+      undefined,
+      GEN3D_LIMITS.processMs + 60_000,
+    );
+    if (
+      path.resolve(this.root, result.file) !== (await expected("custom.png")) ||
+      !result.maskFile ||
+      path.resolve(this.root, result.maskFile) !== (await expected("custom-mask.png"))
+    )
+      throw new Error("Unexpected view render location.");
+    return {
+      image: await fs.readFile(await expected("custom.png")),
+      mask: await fs.readFile(await expected("custom-mask.png")),
+    };
   }
   /**
    * Starts a repaint job from a finished drawing edit: the edited view and the mask it was
@@ -380,7 +428,22 @@ export class Gen3DEngine {
       feather: number;
     },
   ) {
-    if (!GEN3D_REPAINT_VIEWS.includes(input.view)) throw new Error("Unsupported repaint view.");
+    if (!GEN3D_REPAINT_ALL_VIEWS.includes(input.view)) throw new Error("Unsupported repaint view.");
+    // A custom view is projected back with the camera and framing it was rendered with.
+    const camera =
+      input.view === "custom"
+        ? await fs
+            .readFile(
+              await modelPath(this.root, projectId, "views", input.versionId, "custom.json"),
+              "utf8",
+            )
+            .then((text) => Schema.decodeUnknownSync(Gen3DRepaintCamera)(JSON.parse(text)))
+            .catch(() => null)
+        : undefined;
+    if (camera === null || (camera && !camera.frame))
+      throw new Error(
+        "The edit was not made from this version's view render. Render the view again.",
+      );
     const rendered = await fs
       .readFile(
         await modelPath(this.root, projectId, "views", input.versionId, input.view + ".png"),
@@ -442,6 +505,7 @@ export class Gen3DEngine {
         ...(parent!.build.process ? { process: parent!.build.process } : {}),
         repaint: {
           view: input.view,
+          ...(camera ? { camera } : {}),
           imageJobId: input.imageJobId,
           imageAssetId: input.imageAssetId,
           instruction: input.instruction.trim().slice(0, 2000),
