@@ -98,4 +98,6 @@ const PARAMETER_LABELS: Record<keyof ImageGenerationParameters, string> = {
   quality: "Quality",
   outputFormat: "Format",
   background: "Background",
+  frameCount: "Frames",
+  frameDurationMs: "Per frame",
 };

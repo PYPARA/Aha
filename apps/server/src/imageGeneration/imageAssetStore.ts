@@ -27,23 +27,35 @@ export class ImageAssetStore {
     await mkdir(path.join(this.root, "assets"), { recursive: true, mode: 0o700 });
     const image = sharp(bytes, { limitInputPixels: 64_000_000, failOn: "error" });
     const metadata = await image.metadata();
+    const gif = metadata.format === "gif";
     if (
       !metadata.format ||
-      !["png", "jpeg", "webp"].includes(metadata.format) ||
-      (metadata.pages ?? 1) > 1
+      !["png", "jpeg", "webp", "gif"].includes(metadata.format) ||
+      (!gif && (metadata.pages ?? 1) > 1)
     )
       throw new ImageApiError(
         "invalid_image",
-        "Only still PNG, JPEG and WebP images are supported.",
+        "Only still PNG, JPEG and WebP images or GIF animations are supported.",
       );
+    // GIF keeps its frames in the original; edit is the first frame as a still PNG so references,
+    // masks and other workbenches keep receiving one ordinary image.
     const { data: normalized, info } = await image
       .rotate()
       .png()
       .toBuffer({ resolveWithObject: true });
-    const thumbnail = await sharp(normalized)
-      .resize({ width: 480, height: 480, fit: "inside", withoutEnlargement: true })
-      .webp({ quality: 80 })
-      .toBuffer();
+    const frames = gif ? (metadata.pages ?? 1) : 1;
+    if (gif && info.width * info.height * frames > 256_000_000)
+      throw new ImageApiError("image_too_large", "GIF animation exceeds the size limit.");
+    const thumbnail =
+      frames > 1
+        ? await sharp(bytes, { animated: true, limitInputPixels: 256_000_000, failOn: "error" })
+            .resize({ width: 480, height: 480, fit: "inside", withoutEnlargement: true })
+            .webp({ quality: 80, loop: 0 })
+            .toBuffer()
+        : await sharp(normalized)
+            .resize({ width: 480, height: 480, fit: "inside", withoutEnlargement: true })
+            .webp({ quality: 80 })
+            .toBuffer();
     for (const [variant, data] of [
       ["original", bytes],
       ["edit", normalized],
@@ -58,8 +70,16 @@ export class ImageAssetStore {
       name.replace(/[\u0000\r\n/\\]/gu, "_").slice(0, 200) || `image.${metadata.format}`;
     const asset: ImageAsset = {
       id: hash,
-      name: cleanName.replace(/\.(png|jpe?g|webp)$/iu, `.${metadata.format}`),
+      name: cleanName.replace(/\.(png|jpe?g|webp|gif)$/iu, `.${metadata.format}`),
       mimeType,
+      ...(frames > 1
+        ? {
+            animation: {
+              frameCount: frames,
+              durationMs: (metadata.delay ?? []).reduce((sum, d) => sum + Math.max(0, d), 0),
+            },
+          }
+        : {}),
       url: `/api/drawing/assets/${hash}`,
       thumbnailUrl: `/api/drawing/assets/${hash}?variant=thumbnail`,
       width: info.width,

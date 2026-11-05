@@ -229,6 +229,9 @@ export function DrawingGallery({
                     {job.outputs[0] ? (
                       <span className="absolute left-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
                         {job.outputs[0].width}×{job.outputs[0].height}
+                        {job.outputs[0].animation
+                          ? ` · GIF ${job.outputs[0].animation.frameCount}`
+                          : ""}
                       </span>
                     ) : null}
                   </button>

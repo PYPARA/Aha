@@ -3,7 +3,7 @@ import {
   drawingResourceSource,
   resourceContextMenu,
 } from "../resources/ResourceCollectionDialog";
-import { drawingParameterLabel } from "./drawingParameters";
+import { drawingFormatLabel, drawingParameterLabel } from "./drawingParameters";
 import { CentralIcon } from "~/lib/central-icons";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -74,13 +74,19 @@ export function DrawingJobDialog({
     [tr("Size"), drawingParameterLabel(job.parameters.size, tr)],
     [tr("Quality"), drawingParameterLabel(job.parameters.quality, tr)],
     [tr("Image count"), String(job.parameters.n)],
-    [
-      tr("Format"),
-      job.parameters.outputFormat === "webp"
-        ? "WebP"
-        : (job.parameters.outputFormat?.toUpperCase() ?? tr("Not specified")),
-    ],
+    [tr("Format"), drawingFormatLabel(job.parameters.outputFormat) ?? tr("Not specified")],
     [tr("Background"), drawingParameterLabel(job.parameters.background, tr)],
+    ...(job.parameters.outputFormat === "gif"
+      ? [
+          [tr("Frames"), String(job.parameters.frameCount ?? tr("Not specified"))],
+          [
+            tr("Per frame"),
+            job.parameters.frameDurationMs === undefined
+              ? tr("Not specified")
+              : `${job.parameters.frameDurationMs} ms`,
+          ],
+        ]
+      : []),
   ];
   return (
     <Dialog
@@ -177,7 +183,11 @@ export function DrawingJobDialog({
             ) : null}
             {asset ? (
               <p className="pt-2 text-center text-ui-xs text-muted-foreground">
-                {asset.width} × {asset.height} · {index + 1}/{job.outputs.length}
+                {asset.width} × {asset.height}
+                {asset.animation
+                  ? ` · GIF ${asset.animation.frameCount} ${tr("frames")} · ${(asset.animation.durationMs / 1000).toFixed(1)} s`
+                  : ""}{" "}
+                · {index + 1}/{job.outputs.length}
               </p>
             ) : null}
             {job.outputs.length > 1 ? (

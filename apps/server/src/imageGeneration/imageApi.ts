@@ -2,7 +2,12 @@ import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
-import type { ImageGenerationParameters, ImageModel } from "@synara/contracts";
+import {
+  IMAGE_GIF_FRAME_COUNT,
+  IMAGE_GIF_FRAME_DURATION_MS,
+  type ImageGenerationParameters,
+  type ImageModel,
+} from "@synara/contracts";
 
 export class ImageApiError extends Error {
   constructor(
@@ -53,12 +58,42 @@ export function imageRequestParameters(
     throw new ImageApiError("invalid_parameters", "Image dimensions must be positive integers.");
   if (p.background === "transparent" && p.outputFormat !== "png" && p.outputFormat !== "webp")
     throw new ImageApiError("invalid_parameters", "Transparent backgrounds require PNG or WebP.");
+  const gif = p.outputFormat === "gif";
+  if (
+    p.frameCount !== undefined &&
+    (!Number.isInteger(p.frameCount) ||
+      p.frameCount < IMAGE_GIF_FRAME_COUNT.min ||
+      p.frameCount > IMAGE_GIF_FRAME_COUNT.max)
+  )
+    throw new ImageApiError(
+      "invalid_parameters",
+      `GIF frame count must be between ${IMAGE_GIF_FRAME_COUNT.min} and ${IMAGE_GIF_FRAME_COUNT.max}.`,
+    );
+  if (
+    p.frameDurationMs !== undefined &&
+    (!Number.isFinite(p.frameDurationMs) ||
+      p.frameDurationMs < IMAGE_GIF_FRAME_DURATION_MS.min ||
+      p.frameDurationMs > IMAGE_GIF_FRAME_DURATION_MS.max)
+  )
+    throw new ImageApiError(
+      "invalid_parameters",
+      `GIF frame duration must be between ${IMAGE_GIF_FRAME_DURATION_MS.min} and ${IMAGE_GIF_FRAME_DURATION_MS.max} ms.`,
+    );
   return {
     n: p.n,
     ...(p.size ? { size: p.size } : {}),
     ...(p.quality ? { quality: p.quality } : {}),
     ...(p.outputFormat ? { output_format: p.outputFormat } : {}),
     ...(p.background ? { background: p.background } : {}),
+    // Frame settings are GIF-only upstream; other formats never send them.
+    ...(gif && p.frameCount !== undefined ? { frame_count: p.frameCount } : {}),
+    ...(gif && p.frameDurationMs !== undefined
+      ? {
+          frame_duration_ms:
+            Math.round(p.frameDurationMs / IMAGE_GIF_FRAME_DURATION_MS.step) *
+            IMAGE_GIF_FRAME_DURATION_MS.step,
+        }
+      : {}),
   };
 }
 export function redactImageError(message: string, key: string): string {

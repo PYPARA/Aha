@@ -10,6 +10,9 @@ const Integer = Schema.Finite.check(Schema.isInt());
 export const IMAGE_INPUT_MAX_BYTES = 20 * 1024 * 1024;
 export const IMAGE_INPUT_MAX_TOTAL_BYTES = 80 * 1024 * 1024;
 export const IMAGE_INPUT_MAX_COUNT = 16;
+/** OpenAI GIF output (gpt-image-2.6): the guide allows 2–64 frames, the API reference still lists 2–16. */
+export const IMAGE_GIF_FRAME_COUNT = { min: 2, max: 64, default: 9, documented: 16 } as const;
+export const IMAGE_GIF_FRAME_DURATION_MS = { min: 20, max: 2000, step: 10, default: 200 } as const;
 export const ImageProviderId = Id;
 export type ImageProviderId = typeof ImageProviderId.Type;
 export const ImageSpriteCapabilities = Schema.Struct({
@@ -85,14 +88,35 @@ export const ImageGenerationParameters = Schema.Struct({
   ),
   quality: Schema.optional(Schema.Literals(["auto", "low", "medium", "high", "xhigh", "max"])),
   n: Integer.check(Schema.isBetween({ minimum: 1, maximum: 10 })),
-  outputFormat: Schema.optional(Schema.Literals(["png", "jpeg", "webp"])),
+  outputFormat: Schema.optional(Schema.Literals(["png", "jpeg", "webp", "gif"])),
   background: Schema.optional(Schema.Literals(["auto", "opaque", "transparent"])),
+  /** Animated GIF only: frames per result and per-frame duration, sent as frame_count / frame_duration_ms. */
+  frameCount: Schema.optional(
+    Integer.check(
+      Schema.isBetween({ minimum: IMAGE_GIF_FRAME_COUNT.min, maximum: IMAGE_GIF_FRAME_COUNT.max }),
+    ),
+  ),
+  frameDurationMs: Schema.optional(
+    Integer.check(
+      Schema.isBetween({
+        minimum: IMAGE_GIF_FRAME_DURATION_MS.min,
+        maximum: IMAGE_GIF_FRAME_DURATION_MS.max,
+      }),
+    ),
+  ),
 });
 export type ImageGenerationParameters = typeof ImageGenerationParameters.Type;
+export const ImageAssetAnimation = Schema.Struct({
+  frameCount: Integer.check(Schema.isGreaterThan(1)),
+  durationMs: Integer.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type ImageAssetAnimation = typeof ImageAssetAnimation.Type;
 export const ImageAsset = Schema.Struct({
   id: Id,
   name: TrimmedNonEmptyString,
-  mimeType: Schema.Literals(["image/png", "image/jpeg", "image/webp"]),
+  mimeType: Schema.Literals(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+  /** Present for animated results; the edit variant holds the first frame as a still PNG. */
+  animation: Schema.optional(ImageAssetAnimation),
   url: TrimmedNonEmptyString,
   thumbnailUrl: TrimmedNonEmptyString,
   width: Integer,

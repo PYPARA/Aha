@@ -1,7 +1,17 @@
-import { drawingParameterLabel } from "./drawingParameters";
+import {
+  drawingFormatLabel,
+  drawingFrameCountOptions,
+  drawingFrameDurationOptions,
+  drawingParameterLabel,
+} from "./drawingParameters";
 import { CentralIcon } from "~/lib/central-icons";
 import { useState, type ReactNode } from "react";
-import type { ImageGenerationParameters, ImageProvider } from "@synara/contracts";
+import {
+  IMAGE_GIF_FRAME_COUNT,
+  IMAGE_GIF_FRAME_DURATION_MS,
+  type ImageGenerationParameters,
+  type ImageProvider,
+} from "@synara/contracts";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { PlusIcon } from "~/lib/icons";
 import { Button } from "../ui/button";
@@ -146,7 +156,7 @@ function ParameterPicker({
 }: {
   label: string;
   value: string;
-  options: readonly { value: string; label: string; note?: string }[];
+  options: readonly { value: string; label: string; note?: string | undefined }[];
   onChange: (value: string) => void;
   children?: ReactNode;
 }) {
@@ -224,12 +234,56 @@ export function DrawingParameters({
       <ParameterPicker
         label={tr("Format")}
         value={p.outputFormat ?? "png"}
-        options={["png", "jpeg", "webp"].map((value) => ({
+        options={(["png", "jpeg", "webp", "gif"] as const).map((value) => ({
           value,
-          label: value === "webp" ? "WebP" : value.toUpperCase(),
+          label: drawingFormatLabel(value)!,
+          note: value === "gif" ? tr("Animated") : undefined,
         }))}
         onChange={(v) => onChange({ outputFormat: v as ImageGenerationParameters["outputFormat"] })}
-      />
+      >
+        {p.outputFormat === "gif" ? (
+          <p className="max-w-64 px-3 py-2 text-ui-xs text-muted-foreground">
+            {tr(
+              "GIF animation requires model support, such as GPT Image 2.6. Size is per frame, and transparent backgrounds are not supported. Some providers decide frames and timing themselves; task details show the actual result.",
+            )}
+          </p>
+        ) : null}
+      </ParameterPicker>
+      {p.outputFormat === "gif" ? (
+        <>
+          <ParameterPicker
+            label={tr("Frames")}
+            value={String(p.frameCount ?? IMAGE_GIF_FRAME_COUNT.default)}
+            options={drawingFrameCountOptions.map((count) => ({
+              value: String(count),
+              label: String(count),
+              note:
+                count > IMAGE_GIF_FRAME_COUNT.documented ? tr("Requires model support") : undefined,
+            }))}
+            onChange={(v) => onChange({ frameCount: Number(v) })}
+          />
+          <ParameterPicker
+            label={tr("Per frame")}
+            value={String(p.frameDurationMs ?? IMAGE_GIF_FRAME_DURATION_MS.default)}
+            options={drawingFrameDurationOptions.map((ms) => ({
+              value: String(ms),
+              label: `${ms} ms`,
+              note: `${Math.round((1000 / ms) * 10) / 10} fps`,
+            }))}
+            onChange={(v) => onChange({ frameDurationMs: Number(v) })}
+          >
+            <p className="max-w-64 px-3 py-2 text-ui-xs text-muted-foreground">
+              {tr("One loop lasts")}{" "}
+              {(
+                ((p.frameCount ?? IMAGE_GIF_FRAME_COUNT.default) *
+                  (p.frameDurationMs ?? IMAGE_GIF_FRAME_DURATION_MS.default)) /
+                1000
+              ).toFixed(1)}{" "}
+              {tr("seconds")}
+            </p>
+          </ParameterPicker>
+        </>
+      ) : null}
       <ParameterPicker
         label={tr("Background")}
         value={p.background ?? "auto"}

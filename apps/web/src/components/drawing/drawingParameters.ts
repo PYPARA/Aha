@@ -1,4 +1,8 @@
-import type { ImageGenerationParameters } from "@synara/contracts";
+import {
+  IMAGE_GIF_FRAME_COUNT,
+  IMAGE_GIF_FRAME_DURATION_MS,
+  type ImageGenerationParameters,
+} from "@synara/contracts";
 
 export const defaultDrawingParameters = {
   size: "auto",
@@ -8,18 +12,32 @@ export const defaultDrawingParameters = {
   background: "auto",
 } satisfies ImageGenerationParameters;
 
+/** Frame settings exist only while GIF is selected; other formats never carry them. */
+function withFrameSettings(parameters: ImageGenerationParameters): ImageGenerationParameters {
+  const { frameCount, frameDurationMs, ...rest } = parameters;
+  if (parameters.outputFormat !== "gif") return rest;
+  return {
+    ...rest,
+    frameCount: frameCount ?? IMAGE_GIF_FRAME_COUNT.default,
+    frameDurationMs: frameDurationMs ?? IMAGE_GIF_FRAME_DURATION_MS.default,
+  };
+}
+
 export function normalizeDrawingParameters(p: ImageGenerationParameters = { n: 1 }) {
-  const parameters = {
+  let outputFormat = p.outputFormat ?? defaultDrawingParameters.outputFormat,
+    background = p.background ?? defaultDrawingParameters.background;
+  if (background === "transparent" && outputFormat === "jpeg") outputFormat = "png";
+  if (background === "transparent" && outputFormat === "gif") background = "opaque";
+  const parameters = withFrameSettings({
     ...p,
     size: p.size ?? defaultDrawingParameters.size,
     quality: p.quality ?? defaultDrawingParameters.quality,
-    outputFormat: p.outputFormat ?? defaultDrawingParameters.outputFormat,
-    background: p.background ?? defaultDrawingParameters.background,
-  };
-  if (parameters.background === "transparent" && parameters.outputFormat === "jpeg")
-    parameters.outputFormat = "png";
-  const adjusted = Object.entries(parameters).some(
-    ([key, value]) => p[key as keyof typeof p] !== value,
+    outputFormat,
+    background,
+  });
+  const keys = new Set([...Object.keys(p), ...Object.keys(parameters)]);
+  const adjusted = [...keys].some(
+    (key) => p[key as keyof typeof p] !== parameters[key as keyof typeof parameters],
   );
   return { parameters, adjusted };
 }
@@ -39,8 +57,23 @@ export function updateDrawingParameters(
       notice = "Output format changed to PNG for transparent background.";
     }
   }
+  if (next.background === "transparent" && next.outputFormat === "gif") {
+    if (patch.outputFormat === "gif") {
+      next.background = "opaque";
+      notice = "GIF animations do not support transparency. Background changed to opaque.";
+    } else {
+      next.outputFormat = "png";
+      notice = "Output format changed to PNG for transparent background.";
+    }
+  }
   return { parameters: normalizeDrawingParameters(next).parameters, notice };
 }
+
+/** Preset choices; GIF frame counts above the API reference's 16 need provider support. */
+export const drawingFrameCountOptions = [2, 4, 6, 8, 9, 12, 16, 24, 32, 48, 64] as const;
+export const drawingFrameDurationOptions = [
+  40, 60, 80, 100, 120, 150, 200, 300, 500, 1000,
+] as const;
 
 export const drawingParameterLabels: Record<string, string> = {
   auto: "Auto",
@@ -54,4 +87,7 @@ export const drawingParameterLabels: Record<string, string> = {
 };
 export function drawingParameterLabel(value: string | undefined, tr: (text: string) => string) {
   return value === undefined ? tr("Not specified") : tr(drawingParameterLabels[value] ?? value);
+}
+export function drawingFormatLabel(format: ImageGenerationParameters["outputFormat"]) {
+  return format === "webp" ? "WebP" : format === "gif" ? "GIF" : format?.toUpperCase();
 }

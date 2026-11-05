@@ -23,6 +23,12 @@
 - 目标未选用 `null`，明确选择库根用空路径；两者不能互换。保留路径防逃逸、不跟随符号链接、独占目标、父子去重及批量预检规则。
 - 导航、树焦点、内容选择、详情草稿和预览对象分别管理。复用公共Tree、WorkAreaPanel、Dialog、Sheet和预览底板，不在业务内建立另一套外壳。
 
+## 绘图 GIF 动图
+
+- `outputFormat: "gif"` 时才发送 `frame_count`（2–64，界面超过16帧标注需模型支持）和 `frame_duration_ms`（20–2000，按10毫秒取整）；其他格式不携带帧参数。GIF 不能与透明背景组合，界面自动切换并提示。
+- GIF 资产的 `original` 保留完整动画，`edit` 为首帧静态 PNG，缩略图为动画 WebP；`ImageAsset.animation` 记录实际帧数与总时长。参考图、蒙版、3D 导入等下游一律读取首帧，不把动图当普通静态图传递。
+- 渠道可能不完全遵循帧数和时长（subrouter 实测按提示词自行决定），任务详情以返回结果的实际帧数为准，不据此判定失败或自动重试。
+
 ## 批量生图与共同调度
 
 - 批次契约在 `packages/contracts/src/imageBatches.ts`，SQLite Repository 与服务在 `apps/server/src/imageBatches/`。迁移 **138_ImageBatches** 追加建立批次、结果、引用与索引，不重排 135/136/137 或上游兼容链。迁移支持已知历史谱系的幂等重放。

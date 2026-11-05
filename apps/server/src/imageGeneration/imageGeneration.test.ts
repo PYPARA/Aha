@@ -172,6 +172,37 @@ describe("image provider and Images API contracts", () => {
       background: "transparent",
     });
   });
+  it("sends GIF frame settings only for GIF output and rounds frame duration to 10 ms", () => {
+    expect(
+      imageRequestParameters({
+        n: 1,
+        size: "auto",
+        outputFormat: "gif",
+        background: "opaque",
+        frameCount: 9,
+        frameDurationMs: 204,
+      }),
+    ).toEqual({
+      n: 1,
+      size: "auto",
+      output_format: "gif",
+      background: "opaque",
+      frame_count: 9,
+      frame_duration_ms: 200,
+    });
+    expect(
+      imageRequestParameters({ n: 1, outputFormat: "png", frameCount: 9, frameDurationMs: 200 }),
+    ).toEqual({ n: 1, output_format: "png" });
+    expect(() =>
+      imageRequestParameters({ n: 1, outputFormat: "gif", background: "transparent" }),
+    ).toThrow("PNG or WebP");
+    expect(() => imageRequestParameters({ n: 1, outputFormat: "gif", frameCount: 1 })).toThrow(
+      "frame count",
+    );
+    expect(() =>
+      imageRequestParameters({ n: 1, outputFormat: "gif", frameDurationMs: 5000 }),
+    ).toThrow("frame duration");
+  });
   it("keeps independent provider secrets out of configuration and preserves selected models", async () => {
     const one = await f.engine.upsertProvider(providerInput()),
       two = await f.engine.upsertProvider({ ...providerInput("Two"), apiKey: "second-secret" });
@@ -523,6 +554,37 @@ describe("durable image generation tasks", () => {
     await expect(
       f.engine.assets.validateMask(mask, await f.engine.upload(f.png, "reference.png")),
     ).rejects.toMatchObject({ code: "invalid_mask" });
+  });
+  it("keeps GIF animations as the original with a still first frame for editing", async () => {
+    const frame = (background: string) =>
+      sharp({ create: { width: 10, height: 6, channels: 3, background } })
+        .png()
+        .toBuffer();
+    const gif = await sharp([await frame("red"), await frame("blue"), await frame("lime")], {
+      join: { animated: true },
+    })
+      .gif({ loop: 0, delay: [120, 120, 160] })
+      .toBuffer();
+    const asset = await f.engine.assets.save(gif, "generated-1.png");
+    expect(asset).toMatchObject({
+      name: "generated-1.gif",
+      mimeType: "image/gif",
+      width: 10,
+      height: 6,
+      animation: { frameCount: 3, durationMs: 400 },
+    });
+    const original = await sharp(await f.engine.assets.read(asset, "original"), {
+      animated: true,
+    }).metadata();
+    expect([original.format, original.pages]).toEqual(["gif", 3]);
+    const edit = await sharp(await f.engine.assets.read(asset, "edit")).metadata();
+    expect([edit.format, edit.pages ?? 1, edit.width, edit.height]).toEqual(["png", 1, 10, 6]);
+    const thumbnail = await sharp(await f.engine.assets.read(asset, "thumbnail"), {
+      animated: true,
+    }).metadata();
+    expect([thumbnail.format, thumbnail.pages]).toEqual(["webp", 3]);
+    const still = await f.engine.assets.save(await frame("red"), "still.png");
+    expect(still.animation).toBeUndefined();
   });
   it("reports timeouts, corrupt images and disk failures without retry", async () => {
     const p = await f.engine.upsertProvider(providerInput());

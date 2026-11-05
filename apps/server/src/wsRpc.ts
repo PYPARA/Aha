@@ -3433,7 +3433,11 @@ const makeWsRpcHandlersLayer = () =>
                     )
                       return yield* Effect.fail(new Error("Choose a drawing result to import."));
                     const asset = yield* imageGenerationService.getAsset(command.imageAssetId);
-                    const bytes = yield* imageGenerationService.readAsset(asset, "original");
+                    // A GIF result contributes its first frame (the still edit variant).
+                    const bytes = yield* imageGenerationService.readAsset(
+                      asset,
+                      asset.animation ? "edit" : "original",
+                    );
                     return yield* model3dEffect(async () =>
                       (await gen3DEngine()).addReferenceBytes(
                         command.projectId!,
@@ -3455,7 +3459,11 @@ const makeWsRpcHandlersLayer = () =>
                     )
                       return yield* Effect.fail(new Error("Choose a drawing result to import."));
                     const asset = yield* imageGenerationService.getAsset(command.imageAssetId);
-                    const bytes = yield* imageGenerationService.readAsset(asset, "original");
+                    // A GIF result contributes its first frame (the still edit variant).
+                    const bytes = yield* imageGenerationService.readAsset(
+                      asset,
+                      asset.animation ? "edit" : "original",
+                    );
                     return yield* model3dEffect(async () =>
                       (await gen3DEngine()).addTextureBytes(
                         command.projectId!,
