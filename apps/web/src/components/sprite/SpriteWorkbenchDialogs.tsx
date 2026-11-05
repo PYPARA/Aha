@@ -114,7 +114,11 @@ export function SpriteWorkbenchDialogs({
           </DialogFooter>
         </DialogPopup>
       </Dialog>
-      <SpriteImageDialog asset={originalImage} onClose={() => setOriginalImage(null)} />
+      <SpriteImageDialog
+        asset={originalImage?.asset ?? null}
+        frames={originalImage?.frames}
+        onClose={() => setOriginalImage(null)}
+      />
       <Dialog
         open={!!draftConflict}
         onOpenChange={(open) => {

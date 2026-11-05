@@ -29,7 +29,7 @@ const failed = {
   },
   frames: [],
   source: null,
-  submissionParameters: { size: "2048x2048" },
+  submissionParameters: { size: "512x512", outputFormat: "gif", frameCount: 8 },
 } as unknown as SpriteRun;
 it("requires explicit confirmation and reuses the request id after a lost response", async () => {
   mocks.retry
@@ -71,4 +71,21 @@ it("omits succeeded tasks and existing retry attempts", async () => {
   await expect
     .element(page.getByRole("button", { name: "Retry failed tasks", exact: true }))
     .not.toBeInTheDocument();
+});
+it("replans failed sprite-sheet tasks as GIF instead of resending them", async () => {
+  const sheet = {
+    ...failed,
+    id: "sheet",
+    submissionParameters: { size: "1152x576", outputFormat: "png" },
+  } as SpriteRun;
+  const onModify = vi.fn();
+  await render(
+    <SpriteRetryButton runs={[sheet]} allRuns={[sheet]} onState={() => {}} onModify={onModify} />,
+  );
+  await expect
+    .element(page.getByRole("button", { name: "Retry failed tasks", exact: true }))
+    .not.toBeInTheDocument();
+  await page.getByRole("button", { name: "Prepare a GIF plan", exact: true }).click();
+  expect(onModify).toHaveBeenCalledExactlyOnceWith(sheet);
+  expect(mocks.retry).not.toHaveBeenCalled();
 });

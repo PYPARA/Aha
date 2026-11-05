@@ -15,16 +15,27 @@ export function spriteRunGroup(run: SpriteRun, runs: readonly SpriteRun[]): stri
   }
   return root.id;
 }
+/** Actions are generated only as GIFs; an earlier sprite-sheet request cannot be resent. */
+export const spriteSheetRequest = (run: SpriteRun) =>
+  run.input.kind === "animation" &&
+  (run.submissionParameters ?? run.configuration?.parameters)?.outputFormat !== "gif";
+function failedWithoutImages(run: SpriteRun, latest: Set<string>) {
+  return (
+    run.status === "failed" &&
+    !!run.context.threadId &&
+    !run.source &&
+    !run.frames.length &&
+    !run.candidates?.length &&
+    !run.removedAt &&
+    latest.has(run.id)
+  );
+}
 export function spriteRetryableRuns(runs: readonly SpriteRun[], all: readonly SpriteRun[]) {
   const latest = new Set(spriteLatestAttempts(all).map((r) => r.id));
-  return runs.filter(
-    (r) =>
-      r.status === "failed" &&
-      !!r.context.threadId &&
-      !r.source &&
-      !r.frames.length &&
-      !r.candidates?.length &&
-      !r.removedAt &&
-      latest.has(r.id),
-  );
+  return runs.filter((r) => failedWithoutImages(r, latest) && !spriteSheetRequest(r));
+}
+/** Failed sprite-sheet tasks: replanning them as GIFs is the only way forward. */
+export function spriteReplanRuns(runs: readonly SpriteRun[], all: readonly SpriteRun[]) {
+  const latest = new Set(spriteLatestAttempts(all).map((r) => r.id));
+  return runs.filter((r) => failedWithoutImages(r, latest) && spriteSheetRequest(r));
 }

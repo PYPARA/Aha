@@ -3,7 +3,7 @@ import { StatusChip } from "../ui/status-chip";
 import { SpriteRetryButton } from "./SpriteRetryButton";
 import { spriteLatestAttempts } from "./spriteGenerationAttempts";
 import { spriteCombinedActionRun } from "./spriteWorkflowModel";
-import { spriteCandidate } from "./spriteCandidate";
+import { spriteCandidate, spriteOriginalImage } from "./spriteCandidate";
 import { spriteAdoption } from "./spriteAdoption";
 import { drawingApi } from "../drawing/useDrawing";
 import type { SpriteRun } from "@synara/contracts";
@@ -83,7 +83,7 @@ export function SpriteTaskQueue({ controller: c }: { controller: SpriteWorkbench
               size="sm"
               variant="outline"
               onClick={() => {
-                c.setOriginalImage(run.source);
+                c.setOriginalImage(spriteOriginalImage(undefined, run.source));
               }}
             >
               {tr("View original image")}
@@ -95,7 +95,11 @@ export function SpriteTaskQueue({ controller: c }: { controller: SpriteWorkbench
             <Button size="sm" variant="ghost" onClick={() => c.openSlicing(run)}>
               {tr("Adjust slicing and alignment")}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => c.setOriginalImage(run.source)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => c.setOriginalImage(spriteOriginalImage(candidate, run.source))}
+            >
               {tr("View original image")}
             </Button>
             {candidate?.status === "failed" && (

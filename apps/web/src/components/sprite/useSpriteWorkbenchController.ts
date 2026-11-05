@@ -14,6 +14,7 @@ import {
   uploadDrawingImage,
 } from "../drawing/useDrawing";
 import { downloadBlob } from "~/lib/browserDownload";
+import { encodeSpriteGifPreview } from "./spriteGif";
 import { copySpriteSourceToClipboard } from "./spriteClipboard";
 import {
   newSpriteProject,
@@ -1343,9 +1344,9 @@ export function useSpriteWorkbenchController({
     setIndex(0);
     return true;
   };
-  const [originalImage, setOriginalImage] = useState<import("@synara/contracts").ImageAsset | null>(
-    null,
-  );
+  const [originalImage, setOriginalImage] = useState<
+    import("./spriteCandidate").SpriteOriginalImage | null
+  >(null);
   const [draftConflict, setDraftConflict] = useState<{
     error: SpriteDraftConflict;
     input: import("@synara/contracts").SpriteCommand;
@@ -1479,6 +1480,36 @@ export function useSpriteWorkbenchController({
         }),
         false,
       );
+    } finally {
+      setProgress("");
+      abort.current = null;
+    }
+  };
+  /** One GIF per exported action (zipped when several); the formal PNG export is unaffected. */
+  const exportGifPreview = async () => {
+    const controller = new AbortController();
+    abort.current = controller;
+    setProgress("Preparing GIF preview…");
+    try {
+      const snapshot = exportProject;
+      const files: Record<string, Uint8Array> = {};
+      for (const action of exportActions) {
+        let name = `${safeFilename(action.name)}.gif`;
+        for (let n = 2; files[name]; n++) name = `${safeFilename(action.name)}-${n}.gif`;
+        files[name] = await encodeSpriteGifPreview(snapshot, action.id, controller.signal);
+      }
+      controller.signal.throwIfAborted();
+      const entries = Object.entries(files);
+      if (entries.length === 1)
+        downloadBlob(
+          new Blob([entries[0]![1] as BlobPart], { type: "image/gif" }),
+          `${safeFilename(project.name)}-${entries[0]![0]}`,
+        );
+      else
+        downloadBlob(
+          await exportSpriteFileArchive(files),
+          `${safeFilename(project.name)}-gif-preview.zip`,
+        );
     } finally {
       setProgress("");
       abort.current = null;
@@ -2138,6 +2169,7 @@ export function useSpriteWorkbenchController({
     openPlanConversation,
     runCommand,
     exportAssets,
+    exportGifPreview,
     undo,
     undoAdoption,
     redo,

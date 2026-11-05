@@ -4,7 +4,7 @@ import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogHeader, DialogTitle } from "../ui/dialog";
 import { drawingApi } from "../drawing/useDrawing";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
-import { spriteRetryableRuns } from "./spriteGenerationAttempts";
+import { spriteReplanRuns, spriteRetryableRuns } from "./spriteGenerationAttempts";
 export function SpriteRetryButton({
   runs,
   allRuns,
@@ -18,12 +18,18 @@ export function SpriteRetryButton({
 }) {
   const tr = useAhaTranslation();
   const eligible = spriteRetryableRuns(runs, allRuns);
+  const replan = onModify ? spriteReplanRuns(runs, allRuns) : [];
   const [selection, setSelection] = useState<readonly SpriteRun[] | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const requestId = useRef(""),
     submitting = useRef(false);
-  if (!eligible.length && !selection) return null;
+  if (!eligible.length && !selection)
+    return replan[0] ? (
+      <Button size="sm" variant="outline" onClick={() => onModify?.(replan[0]!)}>
+        {tr("Prepare a GIF plan")}
+      </Button>
+    ) : null;
   return (
     <>
       <Button

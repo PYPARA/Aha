@@ -112,7 +112,7 @@ it("routes static images to character preparation and original view", async () =
   await page.getByRole("button", { name: "Use as character reference", exact: true }).click();
   expect(mocks.reference).toHaveBeenCalledWith(character);
   await page.getByRole("button", { name: "View original image", exact: true }).click();
-  expect(mocks.original).toHaveBeenCalledWith(character.source);
+  expect(mocks.original).toHaveBeenCalledWith({ asset: character.source });
   expect(mocks.slicing).not.toHaveBeenCalled();
 });
 it("keeps failures visible and opens candidates and slicing without a task modal", async () => {

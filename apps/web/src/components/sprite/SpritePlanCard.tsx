@@ -878,6 +878,13 @@ export function SpritePlanCard({ projectId, planId, threadId }: SpritePlanPointe
                       />
                     )}
                   </div>
+                  {c.kind === "animation" && c.background === "chroma" && (
+                    <p className="text-ui-sm text-muted-foreground">
+                      {tr(
+                        "GIF palettes blur the key color, so chroma edges can show fringes. A transparent background usually gives cleaner edges.",
+                      )}
+                    </p>
+                  )}
                   <DrawingModelPicker
                     providers={providers.data ?? []}
                     providerId={c.providerId}

@@ -13,7 +13,7 @@ import { SpriteSelect } from "./SpriteSelect";
 import { SpriteThumbnail } from "./SpritePreview";
 import { DrawingModelPicker } from "../drawing/DrawingPickers";
 import { drawingApi } from "../drawing/useDrawing";
-import { spriteCandidate } from "./spriteCandidate";
+import { spriteCandidate, spriteOriginalImage } from "./spriteCandidate";
 import { spriteCandidateStructuralErrors } from "./spriteWorkbenchModel";
 import { spriteAdoption } from "./spriteAdoption";
 import { uuid, type SpriteFrame } from "./spriteModel";
@@ -609,7 +609,7 @@ export function CandidateProperties({ controller: c }: Props) {
                   {tr("Source image")}
                 </MenuTrigger>
                 <ComposerPickerMenuPopup align="start">
-                  <MenuItem onClick={() => c.setOriginalImage(record.source)}>
+                  <MenuItem onClick={() => c.setOriginalImage(spriteOriginalImage(record))}>
                     {tr("View original image")}
                   </MenuItem>
                   <MenuItem

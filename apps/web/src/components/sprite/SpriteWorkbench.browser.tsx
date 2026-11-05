@@ -490,6 +490,26 @@ it("defaults to a combined atlas of all non-empty actions even when the current 
   await page.getByRole("checkbox", { name: /^idle/ }).click();
   await expect.element(download).toBeDisabled();
 });
+it("downloads a GIF preview of the exported action without recording a formal export", async () => {
+  await mountSheet(false);
+  await page
+    .getByRole("navigation", { name: "Sprite workflow" })
+    .getByRole("button", { name: "Export", exact: true })
+    .click();
+  const saves = mocks.save.mock.calls.length,
+    lastExport = mocks.save.mock.calls.at(-1)?.[0].lastExport;
+  await page.getByRole("button", { name: "Export GIF preview", exact: true }).click();
+  await expect.poll(() => mocks.download.mock.calls.length).toBe(1);
+  const [blob, name] = mocks.download.mock.calls[0]! as [Blob, string];
+  expect(blob.type).toBe("image/gif");
+  expect(name).toMatch(/-idle\.gif$/);
+  expect(new TextDecoder().decode(new Uint8Array(await blob.arrayBuffer()).slice(0, 6))).toBe(
+    "GIF89a",
+  );
+  // A preview is not the formal export, so the last export record stays as it was.
+  for (const [saved] of mocks.save.mock.calls.slice(saves))
+    expect(saved.lastExport).toEqual(lastExport);
+});
 it("disables download when all actions are empty", async () => {
   await mountSheet(false, (p) => {
     p.actions[0]!.frames = [];
@@ -500,6 +520,9 @@ it("disables download when all actions are empty", async () => {
     .click();
   await expect
     .element(page.getByRole("button", { name: "Export animation resources", exact: true }))
+    .toBeDisabled();
+  await expect
+    .element(page.getByRole("button", { name: "Export GIF preview", exact: true }))
     .toBeDisabled();
 });
 it("renames, copies, deletes and undoes grouped imported actions from the sidebar", async () => {

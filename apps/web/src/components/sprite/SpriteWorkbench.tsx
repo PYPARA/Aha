@@ -668,6 +668,16 @@ export default function SpriteWorkbench({
                   </Button>
                 )}
                 <Button
+                  variant="outline"
+                  disabled={!c.exportActions.length || !!c.progress}
+                  title={tr(
+                    "A shareable GIF of each action. Game engines should use the exported PNG frames and atlases.",
+                  )}
+                  onClick={() => c.safe(() => c.exportGifPreview())}
+                >
+                  {tr("Export GIF preview")}
+                </Button>
+                <Button
                   disabled={!c.exportActions.length || !!c.progress}
                   onClick={() => c.safe(() => c.exportAssets("download"))}
                 >

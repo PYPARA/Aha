@@ -215,6 +215,10 @@ it("sends an explicit per-frame GIF size without changing the output frame or ot
   await mount();
   await page.getByText("Drawing settings", { exact: true }).click();
   await expect.element(page.getByText("Format: GIF", { exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "Generated background", exact: true }).click();
+  await page.getByRole("option", { name: "Chroma background", exact: true }).click();
+  await expect.element(page.getByText(/GIF palettes blur the key color/)).toBeVisible();
+  await expect.element(page.getByRole("button", { name: /^Start generation/ })).toBeEnabled();
   await page.getByRole("combobox", { name: "GIF frame size", exact: true }).click();
   await page.getByRole("option", { name: "Specify frame size", exact: true }).click();
   await page.getByRole("button", { name: "Frame size", exact: true }).click();
@@ -481,6 +485,7 @@ it.each([true, false])(
       planId: plan.id,
       planVersion: plan.version,
       configuration: config,
+      submissionParameters: { n: 1, size: "512x512", outputFormat: "gif", frameCount: 8 },
       input: { kind: config.kind, prompt: config.prompt, requestId: "original" },
       context: {
         projectId: "project",

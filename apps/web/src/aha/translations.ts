@@ -624,6 +624,15 @@ export const copy: Record<string, string> = {
   "Reload plan": "重新加载方案",
   "Combined sprite sheet": "多动作精灵图",
   "Generated as GIF animations": "以 GIF 动图生成",
+  "GIF animation": "GIF 动画",
+  "Expanded frames": "展开帧",
+  "Prepare a GIF plan": "重新准备 GIF 方案",
+  "Export GIF preview": "导出 GIF 预览",
+  "Preparing GIF preview…": "正在生成 GIF 预览…",
+  "A shareable GIF of each action. Game engines should use the exported PNG frames and atlases.":
+    "每个动作导出一个便于分享的 GIF。游戏引擎请使用导出的 PNG 帧和图集。",
+  "GIF palettes blur the key color, so chroma edges can show fringes. A transparent background usually gives cleaner edges.":
+    "GIF 调色板会把色键色混进角色边缘，色键边缘容易出现杂边；透明背景通常更干净。",
   Combined: "合成",
   "Adopt recommended frame size": "采用推荐帧尺寸",
   "GIF frame size": "GIF 每帧尺寸",

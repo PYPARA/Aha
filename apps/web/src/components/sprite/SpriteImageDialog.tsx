@@ -4,21 +4,29 @@ import { Dialog, DialogPopup, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { imageUrl } from "../drawing/useDrawing";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
+/** `frames` is the expanded still sheet of a GIF `asset`; the dialog plays the GIF first. */
 export function SpriteImageDialog({
   asset,
+  frames,
   onClose,
 }: {
   asset: ImageAsset | null;
+  frames?: ImageAsset | undefined;
   onClose: () => void;
 }) {
   const tr = useAhaTranslation();
   const [zoom, setZoom] = useState(100);
   const [background, setBackground] = useState("checker");
+  const [showFrames, setShowFrames] = useState(false);
+  const shown = showFrames && frames ? frames : asset;
   return (
     <Dialog
       open={!!asset}
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) {
+          setShowFrames(false);
+          onClose();
+        }
       }}
     >
       <DialogPopup className="max-w-4xl">
@@ -26,6 +34,26 @@ export function SpriteImageDialog({
           <DialogTitle>{tr("View image")}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-wrap items-center gap-2 p-3">
+          {asset?.animation && frames && (
+            <>
+              <Button
+                size="sm"
+                variant={!showFrames ? "secondary" : "ghost"}
+                aria-pressed={!showFrames}
+                onClick={() => setShowFrames(false)}
+              >
+                {tr("GIF animation")}
+              </Button>
+              <Button
+                size="sm"
+                variant={showFrames ? "secondary" : "ghost"}
+                aria-pressed={showFrames}
+                onClick={() => setShowFrames(true)}
+              >
+                {tr("Expanded frames")}
+              </Button>
+            </>
+          )}
           <Button size="sm" variant="outline" onClick={() => setZoom((v) => Math.max(25, v - 25))}>
             −
           </Button>
@@ -44,7 +72,13 @@ export function SpriteImageDialog({
             <option value="dark">{tr("Dark")}</option>
           </select>
           <span className="text-xs text-muted-foreground">
-            {asset?.width} × {asset?.height}
+            {shown?.width} × {shown?.height}
+            {asset?.animation && !showFrames && (
+              <>
+                {" "}
+                · {asset.animation.frameCount} {tr("frames")} · {asset.animation.durationMs}ms
+              </>
+            )}
           </span>
         </div>
         <div
@@ -58,10 +92,10 @@ export function SpriteImageDialog({
             backgroundSize: "20px 20px",
           }}
         >
-          {asset && (
+          {shown && (
             <img
-              src={imageUrl(asset)}
-              alt={asset.name}
+              src={imageUrl(shown)}
+              alt={shown.name}
               className="mx-auto object-contain [image-rendering:pixelated]"
               style={{ width: `${zoom}%`, maxWidth: "none" }}
             />
