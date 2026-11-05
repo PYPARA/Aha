@@ -244,7 +244,7 @@ export function DrawingParameters({
         {p.outputFormat === "gif" ? (
           <p className="max-w-64 px-3 py-2 text-ui-xs text-muted-foreground">
             {tr(
-              "GIF animation requires model support, such as GPT Image 2.6. Size is per frame, and transparent backgrounds are not supported. Some providers decide frames and timing themselves; task details show the actual result.",
+              "GIF animation requires model support, such as GPT Image 2.6, with up to 16 frames. Size is per frame. Transparent GIF edges are fully opaque or fully clear. Some providers decide frames and timing themselves; task details show the actual result.",
             )}
           </p>
         ) : null}
@@ -257,8 +257,6 @@ export function DrawingParameters({
             options={drawingFrameCountOptions.map((count) => ({
               value: String(count),
               label: String(count),
-              note:
-                count > IMAGE_GIF_FRAME_COUNT.documented ? tr("Requires model support") : undefined,
             }))}
             onChange={(v) => onChange({ frameCount: Number(v) })}
           />

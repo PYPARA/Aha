@@ -232,7 +232,7 @@ describe("staged sprite engine", () => {
     await f.confirm(plan);
     const request = f.images.createJob.mock.calls[0]![0];
     expect(request.inputAssetIds[0]).toBe(state.canonical!.generationReference!.id);
-    expect(request.parameters.size).toBe("1024x512");
+    expect(request.parameters.size).toBe("1152x576");
     f.finish();
     await f.engine.tick();
     const finished = await f.engine.command({ operation: "get", projectId: "project" });

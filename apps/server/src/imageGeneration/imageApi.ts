@@ -56,8 +56,16 @@ export function imageRequestParameters(
     throw new ImageApiError("invalid_parameters", "Image count must be between 1 and 10.");
   if (p.size && p.size !== "auto" && !/^[1-9]\d{0,4}x[1-9]\d{0,4}$/u.test(p.size))
     throw new ImageApiError("invalid_parameters", "Image dimensions must be positive integers.");
-  if (p.background === "transparent" && p.outputFormat !== "png" && p.outputFormat !== "webp")
-    throw new ImageApiError("invalid_parameters", "Transparent backgrounds require PNG or WebP.");
+  if (
+    p.background === "transparent" &&
+    p.outputFormat !== "png" &&
+    p.outputFormat !== "webp" &&
+    p.outputFormat !== "gif"
+  )
+    throw new ImageApiError(
+      "invalid_parameters",
+      "Transparent backgrounds require PNG, WebP or GIF.",
+    );
   const gif = p.outputFormat === "gif";
   if (
     p.frameCount !== undefined &&
@@ -166,6 +174,22 @@ async function jsonResponse(
       response.headers.get("x-request-id") ?? undefined,
     );
   }
+  // Some relays answer 200 with only an error object (e.g. an invalid frame_count); keep its reason.
+  const embedded = body.error;
+  if (embedded && typeof embedded === "object" && !Array.isArray(body.data)) {
+    const e = embedded as { message?: unknown; type?: unknown; code?: unknown };
+    throw new ImageApiError(
+      /user_error|invalid/iu.test(`${String(e.type ?? "")} ${String(e.code ?? "")}`)
+        ? "invalid_parameters"
+        : "upstream_error",
+      redactImageError(
+        typeof e.message === "string" ? e.message : "Image provider returned an error.",
+        key,
+      ),
+      response.status,
+      response.headers.get("x-request-id") ?? undefined,
+    );
+  }
   return body;
 }
 const headers = (key: string) => (key ? { Authorization: `Bearer ${key}` } : {});
@@ -210,6 +234,8 @@ export async function discoverImageModels(base: string, key: string): Promise<Im
     (a, b) => Number(b.imageHint) - Number(a.imageHint) || a.id.localeCompare(b.id),
   );
 }
+const pngDataUrl = (bytes: Uint8Array) =>
+  `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`;
 export async function requestImages(input: {
   baseUrl: string;
   key: string;
@@ -224,7 +250,18 @@ export async function requestImages(input: {
   let body: string | FormData;
   let requestHeaders: Record<string, string> = headers(input.key);
   const edit = input.images.length > 0;
-  if (edit) {
+  if (edit && params.output_format === "gif") {
+    // Multipart fields are strings and some relays then ignore frame_count / frame_duration_ms;
+    // GIF edits use the JSON form of the edits API so frame settings arrive as numbers.
+    body = JSON.stringify({
+      model: input.model,
+      prompt: input.prompt,
+      ...params,
+      images: input.images.map((bytes) => ({ image_url: pngDataUrl(bytes) })),
+      ...(input.mask ? { mask: { image_url: pngDataUrl(input.mask) } } : {}),
+    });
+    requestHeaders = { ...requestHeaders, "Content-Type": "application/json" };
+  } else if (edit) {
     const form = new FormData();
     form.set("model", input.model);
     form.set("prompt", input.prompt);

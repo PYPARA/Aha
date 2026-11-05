@@ -27,7 +27,6 @@ export function normalizeDrawingParameters(p: ImageGenerationParameters = { n: 1
   let outputFormat = p.outputFormat ?? defaultDrawingParameters.outputFormat,
     background = p.background ?? defaultDrawingParameters.background;
   if (background === "transparent" && outputFormat === "jpeg") outputFormat = "png";
-  if (background === "transparent" && outputFormat === "gif") background = "opaque";
   const parameters = withFrameSettings({
     ...p,
     size: p.size ?? defaultDrawingParameters.size,
@@ -57,20 +56,11 @@ export function updateDrawingParameters(
       notice = "Output format changed to PNG for transparent background.";
     }
   }
-  if (next.background === "transparent" && next.outputFormat === "gif") {
-    if (patch.outputFormat === "gif") {
-      next.background = "opaque";
-      notice = "GIF animations do not support transparency. Background changed to opaque.";
-    } else {
-      next.outputFormat = "png";
-      notice = "Output format changed to PNG for transparent background.";
-    }
-  }
   return { parameters: normalizeDrawingParameters(next).parameters, notice };
 }
 
-/** Preset choices; GIF frame counts above the API reference's 16 need provider support. */
-export const drawingFrameCountOptions = [2, 4, 6, 8, 9, 12, 16, 24, 32, 48, 64] as const;
+/** Preset choices up to the 16 frames gpt-image-2.6 accepts. */
+export const drawingFrameCountOptions = [2, 4, 6, 8, 9, 12, 16] as const;
 export const drawingFrameDurationOptions = [
   40, 60, 80, 100, 120, 150, 200, 300, 500, 1000,
 ] as const;

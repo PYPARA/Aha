@@ -993,11 +993,9 @@ export const copy: Record<string, string> = {
   "Extra high and Maximum are supported by GPT Image 2.5 Sunburst / Flare. Other models depend on provider support.":
     "GPT Image 2.5 Sunburst／Flare 支持超高和最高质量，其他模型以供应商支持情况为准。",
   "Output format changed to PNG for transparent background.": "透明背景已切换为 PNG",
-  "GIF animations do not support transparency. Background changed to opaque.":
-    "GIF 动图不支持透明背景，已切换为不透明",
   Animated: "动图",
-  "GIF animation requires model support, such as GPT Image 2.6. Size is per frame, and transparent backgrounds are not supported. Some providers decide frames and timing themselves; task details show the actual result.":
-    "GIF 动图需模型支持（如 GPT Image 2.6）。尺寸指每一帧的尺寸，不支持透明背景。部分渠道会自行决定帧数和时长，以任务详情中的实际结果为准。",
+  "GIF animation requires model support, such as GPT Image 2.6, with up to 16 frames. Size is per frame. Transparent GIF edges are fully opaque or fully clear. Some providers decide frames and timing themselves; task details show the actual result.":
+    "GIF 动图需模型支持（如 GPT Image 2.6），最多 16 帧。尺寸指每一帧的尺寸。透明 GIF 的边缘只有全透明和不透明两档。部分渠道会自行决定帧数和时长，以任务详情中的实际结果为准。",
   "Per frame": "每帧",
   "One loop lasts": "一轮约",
   seconds: "秒",
@@ -1132,7 +1130,7 @@ export const copy: Record<string, string> = {
     "参考图超过限制（最多 16 张、合计 80 MiB）。",
   "Choose PNG, JPEG or WebP images up to 20 MiB each.":
     "请选择 PNG、JPEG 或 WebP 图片，每张不超过 20 MiB。",
-  "Transparent background requires PNG or WebP.": "透明背景需要选择 PNG 或 WebP 格式。",
+  "Transparent background requires PNG, WebP or GIF.": "透明背景需要选择 PNG、WebP 或 GIF 格式。",
   "The base image changed. Create a new mask.": "底图已更换，请重新绘制遮罩。",
   "Mask editor": "遮罩编辑器",
   "Annotation canvas": "标注画板",

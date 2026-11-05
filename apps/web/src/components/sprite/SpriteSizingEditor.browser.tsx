@@ -65,13 +65,13 @@ function Host({ legacy = false }: { legacy?: boolean }) {
 }
 it("shows linked sizes, updates odd counts and preserves the 8-frame request limit", async () => {
   await render(<Host />);
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1024x512");
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1152x576");
   await page.getByRole("spinbutton", { name: "Frames", exact: true }).fill("5");
   await userEvent.keyboard("{Enter}");
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("768x512");
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1008x672");
   await page.getByRole("spinbutton", { name: "Frames", exact: true }).fill("16");
   await userEvent.keyboard("{Enter}");
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1024x512,1024x512");
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1152x576,1152x576");
 });
 it("keeps manual request dimensions when frames change, then allows explicit linked adoption", async () => {
   await render(<Host legacy />);
@@ -80,7 +80,7 @@ it("keeps manual request dimensions when frames change, then allows explicit lin
   await userEvent.keyboard("{Enter}");
   await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1024x1024");
   await page.getByRole("button", { name: "Adopt recommended layout", exact: true }).click();
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("768x512");
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1008x672");
 });
 it("keeps source sampling independent of output scale and never silently increases request count", async () => {
   await render(<Host />);

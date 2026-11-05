@@ -353,12 +353,8 @@ export default function DrawingWorkbench() {
     setSubmitting(true);
     setError(null);
     try {
-      if (
-        parameters.background === "transparent" &&
-        parameters.outputFormat !== "png" &&
-        parameters.outputFormat !== "webp"
-      )
-        throw new Error(tr("Transparent background requires PNG or WebP."));
+      if (parameters.background === "transparent" && parameters.outputFormat === "jpeg")
+        throw new Error(tr("Transparent background requires PNG, WebP or GIF."));
       const body: Omit<ImageJobCreateInput, "clientRequestId"> = {
         providerId: provider.id,
         model,

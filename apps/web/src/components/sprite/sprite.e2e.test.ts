@@ -334,7 +334,7 @@ it.skipIf(!enabled)(
       const generated = (await state(page, projectId)).runs.find(
         (r) => r.input.kind === "animation",
       )!;
-      expect(requests.map((r) => r.size)).toEqual(["1024x1024", "1024x512"]);
+      expect(requests.map((r) => r.size)).toEqual(["1024x1024", "1152x576"]);
       expect(generated.configuration!.layout).toMatchObject({
         columns: 4,
         rows: 2,

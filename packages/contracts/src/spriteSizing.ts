@@ -5,6 +5,7 @@ import type {
   SpriteTaskLayout,
 } from "./spriteAnimation";
 import { spriteOutputSize } from "./spriteWorkflow";
+import { IMAGE_REQUEST_MIN_PIXELS } from "./imageSize";
 export const DEFAULT_SPRITE_SIZING: SpriteSizing = {
   version: 1,
   mode: "linked",
@@ -74,6 +75,38 @@ export function calculateSpriteLayout(
       ch = output.height * sizing.sourceScale;
     let width = columns * cw + (columns - 1) * sizing.gap + 2 * sizing.margin,
       height = rows * ch + (rows - 1) * sizing.gap + 2 * sizing.margin;
+    if (sizing.mode === "linked" && width * height < IMAGE_REQUEST_MIN_PIXELS) {
+      // Below the GPT Image pixel budget the request is rejected (2.6) or resized to another
+      // ratio (2.x), breaking the layout. Enlarge source cells to the smallest size that fits,
+      // keeping the frame ratio, whole logical pixels for pixel art and 16-pixel request edges.
+      const step =
+          c.renderSpec?.mode === "pixel"
+            ? gcd(c.renderSpec.logicalWidth, c.renderSpec.logicalHeight)
+            : 1,
+        base = cw / rw;
+      const sized = (unit: number) => ({
+        w: columns * rw * unit + (columns - 1) * sizing.gap + 2 * sizing.margin,
+        h: rows * rh * unit + (rows - 1) * sizing.gap + 2 * sizing.margin,
+      });
+      let fallback: number | null = null,
+        chosen: number | null = null;
+      for (
+        let unit = Math.ceil(base / step) * step;
+        unit <= base * 4 && chosen === null;
+        unit += step
+      ) {
+        const { w, h } = sized(unit);
+        if (w * h < IMAGE_REQUEST_MIN_PIXELS) continue;
+        fallback ??= unit;
+        if (w % 16 === 0 && h % 16 === 0) chosen = unit;
+      }
+      const unit = chosen ?? fallback;
+      if (unit !== null) {
+        cw = rw * unit;
+        ch = rh * unit;
+        ({ w: width, h: height } = sized(unit));
+      }
+    }
     if (sizing.mode !== "linked") {
       width = match ? Number(match[1]) : 1024;
       height = match ? Number(match[2]) : 1024;

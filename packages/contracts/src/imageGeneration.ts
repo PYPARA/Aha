@@ -10,8 +10,11 @@ const Integer = Schema.Finite.check(Schema.isInt());
 export const IMAGE_INPUT_MAX_BYTES = 20 * 1024 * 1024;
 export const IMAGE_INPUT_MAX_TOTAL_BYTES = 80 * 1024 * 1024;
 export const IMAGE_INPUT_MAX_COUNT = 16;
-/** OpenAI GIF output (gpt-image-2.6): the guide allows 2–64 frames, the API reference still lists 2–16. */
-export const IMAGE_GIF_FRAME_COUNT = { min: 2, max: 64, default: 9, documented: 16 } as const;
+/**
+ * OpenAI GIF output (gpt-image-2.6). The guide mentions 2–64 frames, but the API and real
+ * gpt-image-2.6-flare responses accept 2–16; the schema keeps 64 so stored jobs stay readable.
+ */
+export const IMAGE_GIF_FRAME_COUNT = { min: 2, max: 64, default: 9, supported: 16 } as const;
 export const IMAGE_GIF_FRAME_DURATION_MS = { min: 20, max: 2000, step: 10, default: 200 } as const;
 export const ImageProviderId = Id;
 export type ImageProviderId = typeof ImageProviderId.Type;

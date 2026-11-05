@@ -2,14 +2,16 @@
 import { expect, it } from "vitest";
 import { workflowConfiguration } from "./spriteWorkflow.fixture";
 import { DEFAULT_SPRITE_SIZING } from "./spriteSizing";
+import { IMAGE_REQUEST_MIN_PIXELS } from "./imageSize";
 import { spritePlanTasks } from "./spritePlan";
+// Linked sheets below the GPT Image minimum pixel budget enlarge their cells just enough.
 it.each([
-  [256, 256, 4, 2, 2, 512, 512],
-  [256, 256, 5, 3, 2, 768, 512],
-  [256, 256, 6, 3, 2, 768, 512],
-  [256, 256, 8, 4, 2, 1024, 512],
+  [256, 256, 4, 2, 2, 816, 816],
+  [256, 256, 5, 3, 2, 1008, 672],
+  [256, 256, 6, 3, 2, 1008, 672],
+  [256, 256, 8, 4, 2, 1152, 576],
   [512, 512, 8, 4, 2, 2048, 1024],
-  [128, 256, 8, 4, 2, 512, 512],
+  [128, 256, 8, 4, 2, 816, 816],
 ])("links %ix%i x%i to %ix%i = %ix%i", (w, h, n, cols, rows, iw, ih) => {
   const c = {
     ...workflowConfiguration(n),
@@ -27,6 +29,22 @@ it.each([
   expect(tasks).toHaveLength(1);
   expect(tasks[0]!.layout).toMatchObject({ columns: cols, rows, width: iw, height: ih });
   expect(tasks[0]!.parameters.size).toBe(`${iw}x${ih}`);
+  expect(iw * ih).toBeGreaterThanOrEqual(IMAGE_REQUEST_MIN_PIXELS);
+  const cell = tasks[0]!.layout!.cells[0]!;
+  expect(cell.width / cell.height).toBe(w / h);
+});
+it("enlarges small pixel-art sheets by whole logical pixels", () => {
+  const c = {
+    ...workflowConfiguration(8),
+    renderSpec: { mode: "pixel" as const, logicalWidth: 64, logicalHeight: 64, outputScale: 4 },
+    width: 256,
+    height: 256,
+    sizing: DEFAULT_SPRITE_SIZING,
+  };
+  const task = spritePlanTasks(c)[0]!;
+  expect(task.parameters.size).toBe("1280x640");
+  expect(task.layout!.cells[0]).toMatchObject({ width: 320, height: 320 });
+  expect(task.layout!.cells[0]!.width % 64).toBe(0);
 });
 it("keeps 16 frames in two frozen requests and does not stretch cells for odd counts", () => {
   const tasks = spritePlanTasks({ ...workflowConfiguration(16), sizing: DEFAULT_SPRITE_SIZING });

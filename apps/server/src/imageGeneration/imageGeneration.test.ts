@@ -193,9 +193,12 @@ describe("image provider and Images API contracts", () => {
     expect(
       imageRequestParameters({ n: 1, outputFormat: "png", frameCount: 9, frameDurationMs: 200 }),
     ).toEqual({ n: 1, output_format: "png" });
-    expect(() =>
+    expect(
       imageRequestParameters({ n: 1, outputFormat: "gif", background: "transparent" }),
-    ).toThrow("PNG or WebP");
+    ).toEqual({ n: 1, output_format: "gif", background: "transparent" });
+    expect(() =>
+      imageRequestParameters({ n: 1, outputFormat: "jpeg", background: "transparent" }),
+    ).toThrow("PNG, WebP or GIF");
     expect(() => imageRequestParameters({ n: 1, outputFormat: "gif", frameCount: 1 })).toThrow(
       "frame count",
     );
@@ -355,6 +358,65 @@ describe("image provider and Images API contracts", () => {
     expect(form.get("mask")).toBeInstanceOf(Blob);
     expect(form.get("n")).toBe("2");
     expect(form.get("quality")).toBe("xhigh");
+  });
+  it("sends GIF edits as JSON so frame settings stay numeric", async () => {
+    const fetcher = vi.fn().mockResolvedValue(f.response());
+    vi.stubGlobal("fetch", fetcher);
+    await requestImages({
+      baseUrl: "https://mock.example/v1",
+      key: "test",
+      model: "gpt-image-2.6-flare",
+      prompt: "animate",
+      parameters: { n: 1, outputFormat: "gif", frameCount: 6, frameDurationMs: 120 },
+      images: [f.png],
+      mask: f.png,
+      signal: new AbortController().signal,
+    });
+    const [url, request] = fetcher.mock.calls[0]!;
+    expect(url).toBe("https://mock.example/v1/images/edits");
+    expect(request.headers["Content-Type"]).toBe("application/json");
+    const body = JSON.parse(request.body as string);
+    expect(body).toMatchObject({
+      model: "gpt-image-2.6-flare",
+      output_format: "gif",
+      frame_count: 6,
+      frame_duration_ms: 120,
+    });
+    expect(body.images).toHaveLength(1);
+    expect(body.images[0].image_url).toMatch(/^data:image\/png;base64,/u);
+    expect(body.mask.image_url).toMatch(/^data:image\/png;base64,/u);
+  });
+  it("reports an error object returned with HTTP 200 instead of an empty result", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                "Invalid 'frame_count' for GIF output. Received 24. Use an integer from 2 to 16.",
+              type: "image_generation_user_error",
+              code: "invalid_value",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    await expect(
+      requestImages({
+        baseUrl: "https://mock.example/v1",
+        key: "test",
+        model: "gpt-image-2.6-flare",
+        prompt: "animate",
+        parameters: { n: 1, outputFormat: "gif", frameCount: 24 },
+        images: [],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_parameters",
+      message: expect.stringContaining("from 2 to 16"),
+    });
   });
   it("rejects local returned URLs while allowing explicit local provider roots", async () => {
     for (const address of [

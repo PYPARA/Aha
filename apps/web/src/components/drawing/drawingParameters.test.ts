@@ -44,7 +44,7 @@ describe("drawing parameter intent", () => {
       normalizeDrawingParameters({ ...jpeg, background: "transparent" }).parameters.outputFormat,
     ).toBe("png");
   });
-  it("adds GIF frame defaults only while GIF is selected and keeps GIF opaque", () => {
+  it("adds GIF frame defaults only while GIF is selected and allows transparent GIF", () => {
     const base = normalizeDrawingParameters().parameters;
     const gif = updateDrawingParameters(base, { outputFormat: "gif" });
     expect(gif.parameters).toMatchObject({
@@ -63,11 +63,15 @@ describe("drawing parameter intent", () => {
       { ...base, background: "transparent" },
       { outputFormat: "gif" },
     );
-    expect(transparent.parameters).toMatchObject({ outputFormat: "gif", background: "opaque" });
-    expect(transparent.notice).toMatch(/GIF/);
+    expect(transparent.parameters).toMatchObject({
+      outputFormat: "gif",
+      background: "transparent",
+      frameCount: 9,
+    });
+    expect(transparent.notice).toBeNull();
     expect(
       updateDrawingParameters(gif.parameters, { background: "transparent" }).parameters,
-    ).toMatchObject({ outputFormat: "png", background: "transparent" });
+    ).toMatchObject({ outputFormat: "gif", background: "transparent" });
     expect(normalizeDrawingParameters(gif.parameters).adjusted).toBe(false);
     expect(normalizeDrawingParameters({ ...base, frameCount: 9 }).adjusted).toBe(true);
   });

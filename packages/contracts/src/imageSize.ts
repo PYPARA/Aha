@@ -5,7 +5,9 @@ const RATIO_PATTERN = /^\s*(\d+(?:\.\d+)?)\s*[:xX×]\s*(\d+(?:\.\d+)?)\s*$/;
 const SIZE_MULTIPLE = 16;
 const MAX_EDGE = 3840;
 const MAX_ASPECT_RATIO = 3;
-const MIN_PIXELS = 655_360;
+/** GPT Image 2.x rejects or silently resizes requests below this pixel budget. */
+export const IMAGE_REQUEST_MIN_PIXELS = 655_360;
+const MIN_PIXELS = IMAGE_REQUEST_MIN_PIXELS;
 const MAX_PIXELS = 8_294_400;
 const MAX_1K_PIXELS = 1_572_864;
 
