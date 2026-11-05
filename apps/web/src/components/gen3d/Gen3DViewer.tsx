@@ -90,6 +90,7 @@ interface Settings {
   turntable: boolean;
 }
 interface Controls {
+  highlight: (ids: readonly string[]) => void;
   reset: () => void;
   apply: (settings: Settings) => void;
   play: (clip: string, loop: boolean) => void;
@@ -104,9 +105,15 @@ interface Controls {
 export function Gen3DViewer({
   project,
   version,
+  selected = [],
+  onSelect,
 }: {
   project: Gen3DProject;
   version: Gen3DVersion;
+  /** Part ids (ahaId) highlighted in the view; shared with the part lists in the panels. */
+  selected?: readonly string[];
+  /** A click on a part (additive with Cmd, Ctrl or Shift), or null for empty space. */
+  onSelect?: (id: string | null, additive: boolean) => void;
 }) {
   const tr = useAhaTranslation(),
     container = useRef<HTMLDivElement>(null),
@@ -140,6 +147,11 @@ export function Gen3DViewer({
   };
   const latest = useRef(settings);
   latest.current = settings;
+  const selection = useRef(selected),
+    onSelectRef = useRef(onSelect);
+  selection.current = selected;
+  onSelectRef.current = onSelect;
+  useEffect(() => controls.current?.highlight(selected), [selected.join("\n")]);
   // Reset per-version choices when another version is shown.
   useEffect(() => {
     setClip("");
@@ -237,6 +249,62 @@ export function Gen3DViewer({
         const skeletonHelper = skinned.length ? new THREE.SkeletonHelper(main.root) : null;
         if (skeletonHelper) scene.add(skeletonHelper);
         const mixer = new THREE.AnimationMixer(main.root);
+        // Parts by stable id, for picking and highlighting.
+        const partsById = new Map<string, THREE.Object3D>();
+        main.root.traverse((o) => {
+          const id = o.userData.ahaId;
+          if (typeof id === "string" && !partsById.has(id)) partsById.set(id, o);
+        });
+        const highlights: THREE.Box3Helper[] = [];
+        const highlightColor = themeColor(element);
+        const highlight = (ids: readonly string[]) => {
+          for (const helper of highlights.splice(0)) {
+            scene.remove(helper);
+            helper.dispose();
+          }
+          for (const id of ids) {
+            const object = partsById.get(id);
+            if (!object) continue;
+            const helper = new THREE.Box3Helper(
+              new THREE.Box3().setFromObject(object),
+              highlightColor,
+            );
+            highlights.push(helper);
+            scene.add(helper);
+          }
+          render();
+        };
+        const raycaster = new THREE.Raycaster(),
+          pointer = new THREE.Vector2();
+        let pressed = { x: 0, y: 0 };
+        const down = (event: PointerEvent) => {
+          pressed = { x: event.clientX, y: event.clientY };
+        };
+        const up = (event: PointerEvent) => {
+          // A drag orbits; only a click picks. Picking is off while overlaying or comparing.
+          if (Math.hypot(pressed.x - event.clientX, pressed.y - event.clientY) > 4) return;
+          if (frameState || other || !onSelectRef.current) return;
+          const rect = renderer!.domElement.getBoundingClientRect();
+          pointer.set(
+            ((event.clientX - rect.left) / rect.width) * 2 - 1,
+            (-(event.clientY - rect.top) / rect.height) * 2 + 1,
+          );
+          raycaster.setFromCamera(pointer, camera);
+          const meshes = [...originals.keys()].filter((m) => {
+            let o: THREE.Object3D | null = m;
+            while (o && o !== main.root) o = o.parent;
+            return !!o;
+          });
+          const hit = raycaster.intersectObjects(meshes, false)[0];
+          let object: THREE.Object3D | null = hit?.object ?? null;
+          while (object && typeof object.userData.ahaId !== "string") object = object.parent;
+          onSelectRef.current(
+            object ? (object.userData.ahaId as string) : null,
+            event.metaKey || event.ctrlKey || event.shiftKey,
+          );
+        };
+        renderer.domElement.addEventListener("pointerdown", down);
+        renderer.domElement.addEventListener("pointerup", up);
         let overrides: THREE.Material[] = [],
           weightGeometries: THREE.BufferGeometry[] = [],
           frameState: ReturnType<typeof overlayFrame> | null = null,
@@ -527,7 +595,7 @@ export function Gen3DViewer({
           paused = next;
           render();
         };
-        controls.current = { reset, apply, play, pause };
+        controls.current = { highlight, reset, apply, play, pause };
         const observer = new ResizeObserver(resize);
         observer.observe(element);
         const visibility = new IntersectionObserver((entries) => {
@@ -541,10 +609,14 @@ export function Gen3DViewer({
         reset();
         resize();
         apply(latest.current);
+        highlight(selection.current);
         setLoading(false);
         cleanup = () => {
           controls.current = null;
           cancelAnimationFrame(frameId);
+          renderer!.domElement.removeEventListener("pointerdown", down);
+          renderer!.domElement.removeEventListener("pointerup", up);
+          highlights.forEach((h) => h.dispose());
           observer.disconnect();
           visibility.disconnect();
           document.removeEventListener("visibilitychange", render);
@@ -733,7 +805,7 @@ export function Gen3DViewer({
           tabIndex={0}
           role="application"
           aria-label={tr(
-            "3D model. Drag to orbit, right-drag or arrow keys to pan, scroll to zoom. R resets the view, 1–9 switch the display, T toggles the turntable, Space pauses the animation.",
+            "3D model. Drag to orbit, right-drag or arrow keys to pan, scroll to zoom; click a part to select it, with Cmd or Ctrl to add. R resets the view, 1–9 switch the display, T toggles the turntable, Space pauses the animation.",
           )}
           onKeyDown={onKey}
           className="absolute inset-0 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
@@ -746,6 +818,21 @@ export function Gen3DViewer({
             />
           ))}
         </div>
+        {selected.length > 0 && !compare && (
+          <div
+            className="absolute bottom-2 start-2 flex max-w-[calc(100%-1rem)] items-center gap-2 rounded-md bg-background/85 px-2 py-1 text-ui-xs"
+            role="status"
+          >
+            <span className="min-w-0 truncate" title={selected.join(", ")}>
+              {tr("Selected: {parts}").replace("{parts}", selected.join(", "))}
+            </span>
+            {onSelect && (
+              <Button size="xs" variant="ghost" onClick={() => onSelect(null, false)}>
+                {tr("Clear")}
+              </Button>
+            )}
+          </div>
+        )}
         {compare && (
           <div className="pointer-events-none absolute inset-x-0 top-2 flex text-ui-xs" aria-hidden>
             <span className="flex-1 text-center">{version.name}</span>

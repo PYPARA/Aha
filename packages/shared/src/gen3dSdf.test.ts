@@ -14,6 +14,9 @@ import {
   subtract,
   torus,
   validateSkeleton,
+  part,
+  splitRegions,
+  union,
 } from "./gen3dSdf";
 
 const robot = () =>
@@ -103,5 +106,45 @@ describe("gen3dSdf", () => {
     expect(() => sphere([0, 0, 0], -1)).toThrow();
     expect(() => meshSdf(robot(), 1000)).toThrow();
     expect(() => smoothUnion(0)).toThrow();
+  });
+});
+
+describe("SDF parts", () => {
+  const body = sphere([0, 0.3, 0], 0.2);
+  const tail = capsule([0, 0.3, -0.15], [0, 0.55, -0.45], 0.06);
+  const centroid = (positions: Float32Array) => {
+    let z = 0;
+    for (let i = 2; i < positions.length; i += 3) z += positions[i]!;
+    return z / (positions.length / 3);
+  };
+  it("labels every triangle by its nearest named part and splits by region", () => {
+    const shape = smoothUnion(0.04, part("body", body), part("tail", tail));
+    const mesh = meshSdf(shape, 64);
+    expect(mesh.regions?.names).toEqual(["body", "tail"]);
+    const pieces = splitRegions(mesh);
+    expect(pieces.map((p) => p.name)).toEqual(["body", "tail"]);
+    // Nothing is lost or duplicated, and the tail piece sits behind the body.
+    expect(pieces.reduce((n, p) => n + p.indices.length, 0)).toBe(mesh.indices.length);
+    const [b, t] = pieces;
+    expect(centroid(t!.positions)).toBeLessThan(centroid(b!.positions) - 0.1);
+  });
+  it("prefers nested names and leaves unnamed surface as a remainder", () => {
+    const hand = sphere([0.3, 0.3, 0], 0.07);
+    const arm = part("arm", union(capsule([0, 0.3, 0], [0.3, 0.3, 0], 0.04), part("hand", hand)));
+    const pieces = splitRegions(meshSdf(union(body, arm), 64));
+    expect(pieces.map((p) => p.name)).toEqual(["arm", "hand", null]);
+    const handPiece = pieces.find((p) => p.name === "hand")!;
+    let x = 0;
+    for (let i = 0; i < handPiece.positions.length; i += 3) x += handPiece.positions[i]!;
+    expect(x / (handPiece.positions.length / 3)).toBeGreaterThan(0.25);
+  });
+  it("keeps the old single mesh without parts and validates names", () => {
+    expect(meshSdf(body, 32).regions).toBeUndefined();
+    expect(splitRegions(meshSdf(body, 32))).toHaveLength(1);
+    expect(() => part("bad name", body)).toThrow(/part names/);
+    // Subtraction keeps the regions of what it carves from.
+    expect(
+      subtract(part("body", body), sphere([0, 0.5, 0], 0.05)).parts?.map((p) => p.name),
+    ).toEqual(["body"]);
   });
 });

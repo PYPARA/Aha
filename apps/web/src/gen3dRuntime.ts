@@ -76,32 +76,42 @@ function worldTriangles(root: THREE.Object3D) {
   let boundaryEdges = 0,
     nonManifoldEdges = 0;
   const point = new THREE.Vector3();
+  // Each mesh is checked on its own, except meshes sharing userData.ahaWeld (the regions of
+  // one SDF body), which are open where they meet and are welded together first.
+  const units = new Map<string, THREE.Mesh[]>();
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
-    const geometry = object.geometry as THREE.BufferGeometry,
-      position = geometry.getAttribute("position");
-    const base = positions.length / 3,
-      welded = new Map<string, number>(),
+    const weld = object.userData.ahaWeld;
+    const key = typeof weld === "string" ? "weld:" + weld : "mesh:" + object.uuid;
+    units.set(key, [...(units.get(key) ?? []), object]);
+  });
+  for (const meshes of units.values()) {
+    const welded = new Map<string, number>(),
       local: number[] = [];
-    const remap = new Int32Array(position.count);
-    for (let i = 0; i < position.count; i++) {
-      point.fromBufferAttribute(position, i).applyMatrix4(object.matrixWorld);
-      positions.push(point.x, point.y, point.z);
-      const key = `${Math.round(point.x * 1e5)},${Math.round(point.y * 1e5)},${Math.round(point.z * 1e5)}`;
-      let id = welded.get(key);
-      if (id === undefined) welded.set(key, (id = i));
-      remap[i] = id;
-    }
-    const count = geometry.index ? geometry.index.count : position.count;
-    for (let i = 0; i < count; i++) {
-      const v = geometry.index ? geometry.index.getX(i) : i;
-      indices.push(base + v);
-      local.push(remap[v]!);
+    for (const object of meshes) {
+      const geometry = object.geometry as THREE.BufferGeometry,
+        position = geometry.getAttribute("position");
+      const base = positions.length / 3;
+      const remap = new Int32Array(position.count);
+      for (let i = 0; i < position.count; i++) {
+        point.fromBufferAttribute(position, i).applyMatrix4(object.matrixWorld);
+        positions.push(point.x, point.y, point.z);
+        const key = `${Math.round(point.x * 1e5)},${Math.round(point.y * 1e5)},${Math.round(point.z * 1e5)}`;
+        let id = welded.get(key);
+        if (id === undefined) welded.set(key, (id = base + i));
+        remap[i] = id;
+      }
+      const count = geometry.index ? geometry.index.count : position.count;
+      for (let i = 0; i < count; i++) {
+        const v = geometry.index ? geometry.index.getX(i) : i;
+        indices.push(base + v);
+        local.push(remap[v]!);
+      }
     }
     const topology = meshTopology(local);
     boundaryEdges += topology.boundaryEdges;
     nonManifoldEdges += topology.nonManifoldEdges;
-  });
+  }
   return { positions, indices, topology: { boundaryEdges, nonManifoldEdges } };
 }
 

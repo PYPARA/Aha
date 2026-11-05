@@ -16,6 +16,8 @@ import ChatView from "../ChatView";
 import { EmbeddedChatAttachments } from "../chat/EmbeddedChatAttachments";
 import { Button } from "../ui/button";
 import { gen3dApi, useGen3DCommand } from "./useGen3D";
+import { strongestEffortSelection } from "./gen3dModelEffort";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 /** Creates (or reuses) the project's conversation and returns its thread. */
 export async function ensureGen3DThread(
@@ -23,6 +25,7 @@ export async function ensureGen3DThread(
   command: ReturnType<typeof useGen3DCommand>,
   settings: ReturnType<typeof useAppSettings>["settings"],
   notReady: string,
+  queryClient: QueryClient,
 ): Promise<ThreadId> {
   const latest = await gen3dApi().get({ id: projectId });
   if (latest.threadId) return ThreadId.makeUnsafe(latest.threadId);
@@ -44,7 +47,8 @@ export async function ensureGen3DThread(
   const threadId = createDraftThread({
     projectId: chatProject,
     prompt: "",
-    modelSelection,
+    // The composer's model, at its strongest reasoning effort (still changeable in the chat).
+    modelSelection: await strongestEffortSelection(modelSelection, queryClient, settings),
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,
     envMode: "local",
@@ -62,7 +66,8 @@ export function Gen3DChat({
 }) {
   const tr = useAhaTranslation(),
     { settings } = useAppSettings(),
-    command = useGen3DCommand();
+    command = useGen3DCommand(),
+    queryClient = useQueryClient();
   const [busy, setBusy] = useState(false),
     [bridge] = useState(() => new EmbeddedChatAttachments());
   const creating = useRef(false);
@@ -78,6 +83,7 @@ export function Gen3DChat({
         command,
         settings,
         tr("Chat workspace is not ready. Try again after connecting."),
+        queryClient,
       );
     } catch (error) {
       onError(error);

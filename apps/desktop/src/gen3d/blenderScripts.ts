@@ -397,11 +397,14 @@ for o in [o for o in scene.objects if o.type != 'MESH']:
     bpy.data.objects.remove(o)
 # Remember which part every face came from, so the low poly can be split back into parts.
 part_names = []
+part_welds = {}
 for o in meshes:
     # Parts are identified by their stable ahaId (glTF extras); node names may be generic.
     name = o.get('ahaId') or (o.name.rsplit('.', 1)[0] if len(o.name) > 4 and o.name[-4] == '.' and o.name[-3:].isdigit() else o.name)
     if name not in part_names:
         part_names.append(name)
+    if o.get('ahaWeld'):
+        part_welds[name] = o['ahaWeld']
     attribute = o.data.attributes.new('aha_part', 'INT', 'FACE')
     attribute.data.foreach_set('value', [part_names.index(name)] * len(o.data.polygons))
 select_only(meshes, meshes[0])
@@ -604,6 +607,9 @@ if params.get('keepParts') and len(part_names) > 1 and 'aha_part' in low.data.at
         part = duplicate(low, name)
         part.data.name = name
         part['ahaId'] = name
+        if name in part_welds:
+            # SDF regions stay welded for topology checks after the split.
+            part['ahaWeld'] = part_welds[name]
         bm = bmesh.new()
         bm.from_mesh(part.data)
         layer = bm.faces.layers.int.get('aha_part')

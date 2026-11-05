@@ -32,22 +32,27 @@ export function PropAnimationPanel({
   version,
   disabled,
   act,
+  chosen,
+  onChosenChange,
 }: {
   version: Gen3DVersion;
   disabled: boolean;
+  /** Shared with the viewer: clicking parts there chooses them here. */
+  chosen: string[];
+  onChosenChange: (parts: string[]) => void;
   act: (input: Omit<Gen3DCommand, "projectId" | "revision">) => Promise<Gen3DCommandResult | null>;
 }) {
   const tr = useAhaTranslation();
   const parts = version.report.objects;
-  const [chosen, setChosen] = useState<string[]>([]),
-    [filter, setFilter] = useState(""),
+  const setChosen = (next: string[] | ((current: string[]) => string[])) =>
+    onChosenChange(typeof next === "function" ? next(chosen) : next);
+  const [filter, setFilter] = useState(""),
     [motion, setMotion] = useState<Motion>("lid"),
     [edge, setEdge] = useState<"back" | "front" | "left" | "right">("back"),
     [angle, setAngle] = useState("100"),
     [direction, setDirection] = useState<"forward" | "up" | "left" | "right">("forward"),
     [distance, setDistance] = useState(""),
     [seconds, setSeconds] = useState("1");
-  useEffect(() => setChosen([]), [version.id]);
   const shown = useMemo(() => {
     const query = filter.trim().toLowerCase();
     return parts.filter((p) => !query || `${p.name} ${p.id}`.toLowerCase().includes(query));

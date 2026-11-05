@@ -21,8 +21,9 @@ export const gen3dCopy: Record<string, string> = {
   Turntable: "转台",
   "Play (Space)": "播放（空格）",
   "Pause (Space)": "暂停（空格）",
-  "3D model. Drag to orbit, right-drag or arrow keys to pan, scroll to zoom. R resets the view, 1–9 switch the display, T toggles the turntable, Space pauses the animation.":
-    "3D 模型。拖动旋转，右键拖动或方向键平移，滚轮缩放。R 重置视角，1–9 切换显示，T 开关转台，空格暂停动画。",
+  "3D model. Drag to orbit, right-drag or arrow keys to pan, scroll to zoom; click a part to select it, with Cmd or Ctrl to add. R resets the view, 1–9 switch the display, T toggles the turntable, Space pauses the animation.":
+    "3D 模型。拖动旋转，右键拖动或方向键平移，滚轮缩放；单击选中部件，按住 Cmd 或 Ctrl 加选。R 重置视角，1–9 切换显示，T 开关转台，空格暂停动画。",
+  "Selected: {parts}": "已选：{parts}",
   "Prop animation": "道具动画",
   "Lid on a hinge": "合页盖子",
   "Door on a hinge": "合页门",

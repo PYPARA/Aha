@@ -36,6 +36,7 @@
   - 停止规则：最大偏差区域低于 `stopMaxRegionPct`（2%），或连续两轮提高不足 `stopMinGain`（1 分），或轮数用完。
   - 重启后，active 的授权会标为 interrupted，不会自动续跑。
 - **Agent 工具** `gen3d`：只开放 get、views（以图片返回蓝图、差异图和渲染图）、submit、status、report，并校验活跃会话和轮次。采用、导出、归档只能在工作台操作。
+- **推理等级**：`ensureGen3DThread` 新建对话时用 `strongestEffortSelection`（`gen3dModelEffort.ts`）把输入框的模型选择提到该模型支持的最高推理等级：优先用运行时发现的 `supportedReasoningEfforts`（4 秒取不到就用静态能力），按 minimal → low → medium → high → xhigh → max 取最高；Codex 写 `options.reasoningEffort`，Claude 写 `options.effort`，其他提供方不变。不显式传等级时，Aha 给 Codex 的轮次默认是 medium（`codexAppServerManager.ts`），会覆盖 `~/.codex/config.toml` 的设置。验收脚本直接建对话时也要在 `modelSelection.options` 里写明等级。
 - **对话注入**：`ProviderCommandReactor` 每轮注入规则和当前授权的剩余轮数。一个会话只能绑定一个创作工作台：批量、精灵、3D 工坊、3D 生成互斥检查。删除会话时解除绑定，并停止授权。
 
 ## 执行边界
@@ -46,6 +47,8 @@
   - 源码只在 Worker 里执行，注入 `THREE` 和 `SDF`，禁止网络、文件和 DOM。
   - 超时 60 秒，源码最多 1 MiB，模型最多 100 万三角面。
   - `toJSON` 前必须调用 `updateMatrixWorld(true)`，否则用代码设置的位置会丢失。
+- **SDF 区域**：`part(name, shape)` 给形状加名字，并集和交集收集子形状的名字，差集保留被减形状的名字，嵌套的名字记录深度。网格化后按每个三角形的中心找最近的命名形状（距离相差不到半个格子时深度大的优先，超过两个格子算未命名）；未命名三角形少于 1% 时并入最近的区域（光滑并集的过渡带）。Worker 的 `SDF.mesh` 有区域时返回一个组，每个区域一个网格（`<id>-<区域>`，剩余部分 `<id>-rest`），可以用 `materials` / `colors` 给区域单独的材质。法线来自 SDF 梯度，区域接缝处没有明暗缝。
+  - 区域网格在接缝处是开放的，所以都带 `userData.ahaWeld = <id>`：运行页统计拓扑时把同一 `ahaWeld` 的网格一起按位置焊接，其余网格仍各自统计；保留部件的优化把 `ahaWeld` 写回拆出的部件（glTF extras）。
 - **SDF**（`@synara/shared/gen3dSdf`）：窄带 Surface Nets，按 4³ 分块；每块用 `prune` 剔除包围盒不相交的基元，分辨率 16–256。`roundCone` 是两端为球、侧面相切的精确距离；`skeleton(nodes)` 为每段骨头生成一个 `roundCone` 再平滑并集，Worker 通过 `params.skeleton` 拿到骨架。
 - **Blender 路线**（`apps/desktop/src/gen3d/host.ts`、`blenderPrelude.ts`）：
   - `main.ts` 把工坊宿主的 `BlenderRuntime` 交给 3D 生成宿主，两个工作台共用一个实例，也就共用一个忙碌锁。工坊宿主没启动时，Blender 路线不可用。
@@ -87,6 +90,7 @@
   - 自己的加载函数接受蒙皮和动画（工坊的加载器和 Worker 限制不变），只允许 `data:`/`blob:` 资源，检查大小和贴图解码；它只加载 Aha 已发布、通过 glTF Validator 的文件。版本有 `rigged.glb` 或 `animated.glb` 时加载它（静止姿态与 `model.glb` 相同）。
   - 整个查看器只有一个 WebGL 上下文：版本对比用同一个渲染器左右分屏（剪裁区域），参考叠加时渲染到居中的正方形视口。按需渲染，只有播放动画或转台时才连续出帧；`orbit.update()` 会通过 change 事件排下一帧，循环里必须先判断是否已排帧，否则每帧回调翻倍（实测会卡死页面）。
   - 通道显示用 `MeshBasicMaterial` 的 `onBeforeCompile` 只取一个通道并抵消输出的 sRGB 转换，从而保留蒙皮；权重显示克隆几何体写入顶点色，切换模式时恢复原几何体和材质。
+  - 部件选择：点击（拖动超过 4 像素算旋转）用射线找到网格，向上找第一个带 `ahaId` 的对象；叠加和对比时不选。选中的 id 由工作台持有，和道具动画面板共用，切换版本时清空；高亮是主题色的包围盒。
   - 参考叠加的正交取景由 `overlayFrame` 计算，与评分的配准一致（同一 px/m、地面线、按模型 u 范围居中、`shiftPx`，镜像时翻转剪影），单元测试逐点比对评分公式。蓝图剪影作为场景里的平面绘制（轮廓加淡填充，颜色取主题的 `--primary`），不用 HTML 叠加，以适配明暗主题。
 - **可信层**（`gen3dRuntime.ts`）：
   - 检查 Worker 输出：沿用工坊的 `validateSceneJSON`，不接受灯光、相机、纹理、动画和骨骼。

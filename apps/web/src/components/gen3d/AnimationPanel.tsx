@@ -39,6 +39,8 @@ export function AnimationPanel({
   blenderMissing,
   act,
   onAskAssistant,
+  parts,
+  onPartsChange,
 }: {
   project: Gen3DProject;
   version: Gen3DVersion | undefined;
@@ -46,6 +48,9 @@ export function AnimationPanel({
   blenderMissing: boolean;
   act: (input: Omit<Gen3DCommand, "projectId" | "revision">) => Promise<Gen3DCommandResult | null>;
   onAskAssistant: (prompt: string) => void;
+  /** Parts chosen here or picked in the viewer. */
+  parts: string[];
+  onPartsChange: (parts: string[]) => void;
 }) {
   const tr = useAhaTranslation();
   const [clips, setClips] = useState<Clip[]>([...GEN3D_ANIMATION_CLIPS]),
@@ -241,7 +246,13 @@ export function AnimationPanel({
           )}
           <section className="space-y-3 border-t border-border pt-4">
             <h3 className="font-medium">{tr("Prop animation")}</h3>
-            <PropAnimationPanel version={version} disabled={disabled} act={act} />
+            <PropAnimationPanel
+              version={version}
+              disabled={disabled}
+              act={act}
+              chosen={parts}
+              onChosenChange={onPartsChange}
+            />
           </section>
         </>
       )}

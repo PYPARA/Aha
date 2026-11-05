@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   GEN3D_EXPORT_PRESETS,
   GEN3D_MATERIAL_PRESETS,
@@ -304,7 +304,8 @@ function ProjectWorkspace({
 }) {
   const tr = useAhaTranslation(),
     command = useGen3DCommand(),
-    { settings } = useAppSettings();
+    { settings } = useAppSettings(),
+    queryClient = useQueryClient();
   const [selected, setSelected] = useState<string | null>(project.previewVersionId),
     [tool, setTool] = useState<
       "generate" | "optimize" | "texture" | "animation" | "stylize" | "export"
@@ -314,12 +315,27 @@ function ProjectWorkspace({
     [drawer, setDrawer] = useState(false),
     [sheetOpen, setSheetOpen] = useState(false),
     [busy, setBusy] = useState(false),
-    [exportPath, setExportPath] = useState<string | null>(null);
+    [exportPath, setExportPath] = useState<string | null>(null),
+    // Parts picked in the viewer or the part lists; ids belong to the selected version.
+    [parts, setParts] = useState<string[]>([]);
   const lastVersion = project.versions.at(-1)?.id ?? null;
   useEffect(
     () => setSelected(project.previewVersionId ?? lastVersion),
     [project.previewVersionId, lastVersion],
   );
+  useEffect(() => setParts([]), [selected]);
+  const pickPart = (id: string | null, additive: boolean) =>
+    setParts((current) =>
+      !id
+        ? additive
+          ? current
+          : []
+        : additive
+          ? current.includes(id)
+            ? current.filter((p) => p !== id)
+            : [...current, id]
+          : [id],
+    );
   const version = project.versions.find((v) => v.id === selected) ?? project.versions.at(-1),
     activeJob = project.jobs.find((j) => running(j.status)),
     lastJob = project.jobs.at(-1),
@@ -351,6 +367,7 @@ function ProjectWorkspace({
         command,
         settings,
         tr("Chat workspace is not ready. Try again after connecting."),
+        queryClient,
       );
       const latest = await gen3dApi().get({ id: project.id });
       await command({
@@ -384,6 +401,7 @@ function ProjectWorkspace({
         command,
         settings,
         tr("Chat workspace is not ready. Try again after connecting."),
+        queryClient,
       );
       useComposerDraftStore.getState().setPrompt(threadId, prompt);
       setPanel("assistant");
@@ -467,6 +485,8 @@ function ProjectWorkspace({
           disabled={locked || !desktop || !blender?.headless}
           blenderMissing={desktop && !blender?.headless}
           act={act}
+          parts={parts}
+          onPartsChange={setParts}
           onAskAssistant={(prompt) => void askAssistant(prompt)}
         />
       )}
@@ -636,7 +656,12 @@ function ProjectWorkspace({
                 </div>
               }
             >
-              <Gen3DViewer project={project} version={version} />
+              <Gen3DViewer
+                project={project}
+                version={version}
+                selected={parts}
+                onSelect={pickPart}
+              />
             </Suspense>
           ) : (
             <div className="flex min-h-40 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">

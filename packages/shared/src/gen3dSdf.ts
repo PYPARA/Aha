@@ -9,6 +9,31 @@ export interface SdfShape {
   readonly box: Bounds;
   /** A simpler shape that is exact inside `region`, or null when the region is entirely outside. */
   readonly prune: (region: Bounds) => SdfShape | null;
+  /** Named regions inside this shape (from `part`), outermost first. */
+  readonly parts?: readonly SdfPart[];
+}
+export interface SdfPart {
+  readonly name: string;
+  readonly shape: SdfShape;
+  /** Nesting depth: a part inside another part wins where both are equally near. */
+  readonly depth: number;
+}
+const PART_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+const partsOf = (...shapes: SdfShape[]) => shapes.flatMap((s) => s.parts ?? []);
+const withParts = (shape: SdfShape, parts: readonly SdfPart[]): SdfShape =>
+  parts.length ? { ...shape, parts } : shape;
+
+/**
+ * Names a region of a fused SDF body. SDF.mesh splits its surface into one mesh per named
+ * region (nearest region wins, nested names are more specific), so regions become parts that
+ * can carry their own material, be highlighted, animated or kept separate when optimizing.
+ */
+export function part(name: string, shape: SdfShape): SdfShape {
+  if (typeof name !== "string" || !PART_NAME.test(name))
+    throw new Error("SDF part names use 1–64 letters, digits, - or _.");
+  const inner = (shape.parts ?? []).map((p) => ({ ...p, depth: p.depth + 1 }));
+  const bare: SdfShape = { f: shape.f, box: shape.box, prune: shape.prune };
+  return { ...bare, parts: [{ name, shape: bare, depth: 0 }, ...inner] };
 }
 
 const { hypot, max, min, abs, sqrt } = Math;
@@ -267,6 +292,7 @@ export function smoothUnion(k: number, ...parts: SdfShape[]): SdfShape {
   if (!Number.isFinite(k) || k < 0) throw new Error("SDF smoothing radius must be non-negative.");
   if (!parts.length) throw new Error("SDF union needs at least one shape.");
   if (parts.length === 1) return parts[0]!;
+  const named = partsOf(...parts);
   const box = parts.reduce<Bounds>(
     (b, p) => [
       min(b[0], p.box[0]),
@@ -278,34 +304,41 @@ export function smoothUnion(k: number, ...parts: SdfShape[]): SdfShape {
     ],
     [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity],
   );
-  return {
-    f: (x, y, z) => {
-      let d = parts[0]!.f(x, y, z);
-      for (let i = 1; i < parts.length; i++)
-        d = k > 0 ? smin(d, parts[i]!.f(x, y, z), k) : min(d, parts[i]!.f(x, y, z));
-      return d;
+  return withParts(
+    {
+      f: (x, y, z) => {
+        let d = parts[0]!.f(x, y, z);
+        for (let i = 1; i < parts.length; i++)
+          d = k > 0 ? smin(d, parts[i]!.f(x, y, z), k) : min(d, parts[i]!.f(x, y, z));
+        return d;
+      },
+      box,
+      // Smoothing only blends shapes closer than k, so children further than k can be dropped.
+      prune: (region) => {
+        const kept = parts.map((p) => p.prune(grow(region, k))).filter((p): p is SdfShape => !!p);
+        return kept.length ? smoothUnion(k, ...kept) : null;
+      },
     },
-    box,
-    // Smoothing only blends shapes closer than k, so children further than k can be dropped.
-    prune: (region) => {
-      const kept = parts.map((p) => p.prune(grow(region, k))).filter((p): p is SdfShape => !!p);
-      return kept.length ? smoothUnion(k, ...kept) : null;
-    },
-  };
+    named,
+  );
 }
 export const union = (...parts: SdfShape[]) => smoothUnion(0, ...parts);
 
 export function subtract(a: SdfShape, b: SdfShape): SdfShape {
-  return {
-    f: (x, y, z) => max(a.f(x, y, z), -b.f(x, y, z)),
-    box: a.box,
-    prune: (region) => {
-      const pa = a.prune(region);
-      if (!pa) return null;
-      const pb = b.prune(region);
-      return pb ? subtract(pa, pb) : pa;
+  // The carved surface still belongs to the regions of `a`.
+  return withParts(
+    {
+      f: (x, y, z) => max(a.f(x, y, z), -b.f(x, y, z)),
+      box: a.box,
+      prune: (region) => {
+        const pa = a.prune(region);
+        if (!pa) return null;
+        const pb = b.prune(region);
+        return pb ? subtract(pa, pb) : pa;
+      },
     },
-  };
+    partsOf(a),
+  );
 }
 
 export function intersect(a: SdfShape, b: SdfShape): SdfShape {
@@ -317,15 +350,18 @@ export function intersect(a: SdfShape, b: SdfShape): SdfShape {
     min(a.box[4], b.box[4]),
     min(a.box[5], b.box[5]),
   ];
-  return {
-    f: (x, y, z) => max(a.f(x, y, z), b.f(x, y, z)),
-    box,
-    prune: (region) => {
-      const pa = a.prune(region),
-        pb = b.prune(region);
-      return pa && pb ? intersect(pa, pb) : null;
+  return withParts(
+    {
+      f: (x, y, z) => max(a.f(x, y, z), b.f(x, y, z)),
+      box,
+      prune: (region) => {
+        const pa = a.prune(region),
+          pb = b.prune(region);
+        return pa && pb ? intersect(pa, pb) : null;
+      },
     },
-  };
+    partsOf(a, b),
+  );
 }
 
 export const SDF_MAX_RESOLUTION = 256;
@@ -335,6 +371,8 @@ export interface SdfMesh {
   indices: Uint32Array;
   grid: [number, number, number];
   cellSize: number;
+  /** With named parts: region index per triangle into `names`, or -1 for unnamed surface. */
+  regions?: { names: string[]; triangle: Int16Array };
 }
 
 /** Narrow-band Surface Nets. `resolution` is the cell count along the longest axis. */
@@ -496,7 +534,109 @@ export function meshSdf(shape: SdfShape, resolution = 128): SdfMesh {
     normals[p + 1] = gy / l;
     normals[p + 2] = gz / l;
   }
-  return { positions, normals, indices: new Uint32Array(idx), grid: [nx, ny, nz], cellSize: h };
+  const indices = new Uint32Array(idx);
+  const named = shape.parts ?? [];
+  if (!named.length) return { positions, normals, indices, grid: [nx, ny, nz], cellSize: h };
+  // Each triangle goes to the nearest named region; nested names win ties; far faces stay unnamed.
+  const names = [...new Set(named.map((p) => p.name))];
+  const triangle = new Int16Array(indices.length / 3),
+    nearest = new Int16Array(indices.length / 3);
+  const tie = h * 0.5,
+    reach = h * 2;
+  for (let t = 0; t < triangle.length; t++) {
+    let x = 0,
+      y = 0,
+      z = 0;
+    for (let k = 0; k < 3; k++) {
+      const v = indices[t * 3 + k]! * 3;
+      x += positions[v]! / 3;
+      y += positions[v + 1]! / 3;
+      z += positions[v + 2]! / 3;
+    }
+    let best = -1,
+      bestDistance = Infinity,
+      bestDepth = -1;
+    for (const p of named) {
+      const local = p.shape.prune([
+        x - reach,
+        y - reach,
+        z - reach,
+        x + reach,
+        y + reach,
+        z + reach,
+      ]);
+      if (!local) continue;
+      const distance = abs(local.f(x, y, z));
+      if (
+        distance < bestDistance - tie ||
+        (distance <= bestDistance + tie && p.depth > bestDepth)
+      ) {
+        best = names.indexOf(p.name);
+        bestDistance = min(distance, bestDistance);
+        bestDepth = p.depth;
+      }
+    }
+    triangle[t] = bestDistance <= reach ? best : -1;
+    nearest[t] = best;
+  }
+  // A sliver of unnamed faces (blend seams between named parts) joins its nearest region;
+  // only real unnamed geometry stays a remainder.
+  let unnamed = 0;
+  for (let t = 0; t < triangle.length; t++) if (triangle[t]! < 0) unnamed++;
+  if (unnamed > 0 && unnamed < 0.01 * triangle.length)
+    for (let t = 0; t < triangle.length; t++) if (triangle[t]! < 0) triangle[t] = nearest[t]!;
+  return {
+    positions,
+    normals,
+    indices,
+    grid: [nx, ny, nz],
+    cellSize: h,
+    regions: { names, triangle },
+  };
+}
+
+/** Splits a meshed SDF into one indexed mesh per region (unnamed surface last, as null). */
+export function splitRegions(mesh: SdfMesh) {
+  if (!mesh.regions)
+    return [
+      { name: null, positions: mesh.positions, normals: mesh.normals, indices: mesh.indices },
+    ];
+  const { names, triangle } = mesh.regions;
+  const out: {
+    name: string | null;
+    positions: Float32Array;
+    normals: Float32Array;
+    indices: Uint32Array;
+  }[] = [];
+  for (let r = -1; r < names.length; r++) {
+    const remap = new Map<number, number>();
+    const pos: number[] = [],
+      nor: number[] = [],
+      idx: number[] = [];
+    for (let t = 0; t < triangle.length; t++) {
+      if (triangle[t] !== r) continue;
+      for (let k = 0; k < 3; k++) {
+        const v = mesh.indices[t * 3 + k]!;
+        let mapped = remap.get(v);
+        if (mapped === undefined) {
+          mapped = remap.size;
+          remap.set(v, mapped);
+          pos.push(mesh.positions[v * 3]!, mesh.positions[v * 3 + 1]!, mesh.positions[v * 3 + 2]!);
+          nor.push(mesh.normals[v * 3]!, mesh.normals[v * 3 + 1]!, mesh.normals[v * 3 + 2]!);
+        }
+        idx.push(mapped);
+      }
+    }
+    if (idx.length)
+      out.push({
+        name: r < 0 ? null : names[r]!,
+        positions: new Float32Array(pos),
+        normals: new Float32Array(nor),
+        indices: new Uint32Array(idx),
+      });
+  }
+  // Named regions first, the unnamed remainder last.
+  return [...out.filter((o) => o.name !== null), ...out.filter((o) => o.name === null)];
 }
 
 /** Edges used by one face are open, by more than two are non-manifold. */
@@ -529,6 +669,7 @@ export const SDF_LIBRARY = {
   ellipsoid,
   torus,
   skeleton,
+  part,
   smoothUnion,
   union,
   subtract,
