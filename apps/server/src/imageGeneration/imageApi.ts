@@ -93,6 +93,7 @@ export function imageRequestParameters(
     ...(p.quality ? { quality: p.quality } : {}),
     ...(p.outputFormat ? { output_format: p.outputFormat } : {}),
     ...(p.background ? { background: p.background } : {}),
+    ...(p.complexity ? { complexity: p.complexity } : {}),
     // Frame settings are GIF-only upstream; other formats never send them.
     ...(gif && p.frameCount !== undefined ? { frame_count: p.frameCount } : {}),
     ...(gif && p.frameDurationMs !== undefined
@@ -234,8 +235,17 @@ export async function discoverImageModels(base: string, key: string): Promise<Im
     (a, b) => Number(b.imageHint) - Number(a.imageHint) || a.id.localeCompare(b.id),
   );
 }
-const pngDataUrl = (bytes: Uint8Array) =>
-  `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`;
+/** The edits API caps each JSON image_url at 20,971,520 characters (about 15.7 MB of image data). */
+export const IMAGE_URL_MAX_LENGTH = 20_971_520;
+const pngDataUrl = (bytes: Uint8Array) => {
+  const url = `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`;
+  if (url.length > IMAGE_URL_MAX_LENGTH)
+    throw new ImageApiError(
+      "input_limit",
+      "GIF edits send references as data URLs; each reference image must be smaller than about 15 MB.",
+    );
+  return url;
+};
 export async function requestImages(input: {
   baseUrl: string;
   key: string;

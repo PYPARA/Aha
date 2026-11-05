@@ -11,10 +11,11 @@ export const IMAGE_INPUT_MAX_BYTES = 20 * 1024 * 1024;
 export const IMAGE_INPUT_MAX_TOTAL_BYTES = 80 * 1024 * 1024;
 export const IMAGE_INPUT_MAX_COUNT = 16;
 /**
- * OpenAI GIF output (gpt-image-2.6). The guide mentions 2–64 frames, but the API and real
- * gpt-image-2.6-flare responses accept 2–16; the schema keeps 64 so stored jobs stay readable.
+ * OpenAI GIF output (gpt-image-2.6), per the image generation guide: 2–64 frames, 20–2000 ms per
+ * frame rounded to 10 ms. Some providers accept only 16 frames (the API reference still says so);
+ * Aha follows the official range and shows the provider's error instead of narrowing it.
  */
-export const IMAGE_GIF_FRAME_COUNT = { min: 2, max: 64, default: 9, supported: 16 } as const;
+export const IMAGE_GIF_FRAME_COUNT = { min: 2, max: 64, default: 9, commonMax: 16 } as const;
 export const IMAGE_GIF_FRAME_DURATION_MS = { min: 20, max: 2000, step: 10, default: 200 } as const;
 export const ImageProviderId = Id;
 export type ImageProviderId = typeof ImageProviderId.Type;
@@ -93,6 +94,8 @@ export const ImageGenerationParameters = Schema.Struct({
   n: Integer.check(Schema.isBetween({ minimum: 1, maximum: 10 })),
   outputFormat: Schema.optional(Schema.Literals(["png", "jpeg", "webp", "gif"])),
   background: Schema.optional(Schema.Literals(["auto", "opaque", "transparent"])),
+  /** GPT Image 2.6 planning depth before rendering; omitted means the model default (high). */
+  complexity: Schema.optional(Schema.Literals(["low", "medium", "high"])),
   /** Animated GIF only: frames per result and per-frame duration, sent as frame_count / frame_duration_ms. */
   frameCount: Schema.optional(
     Integer.check(

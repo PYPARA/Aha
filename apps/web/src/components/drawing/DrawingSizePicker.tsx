@@ -13,23 +13,47 @@ import {
   DialogFooter,
 } from "../ui/dialog";
 import { PickerTriggerButton } from "../chat/PickerTriggerButton";
-import { calculateImageSize, normalizeImageSize, parseRatio, type SizeTier } from "./imageSize";
+import {
+  calculateImageSize,
+  IMAGE_FRAME_MIN_PIXELS,
+  IMAGE_REQUEST_MIN_PIXELS,
+  normalizeImageSize,
+  parseRatio,
+  type ImageSizeOptions,
+  type SizeTier,
+} from "./imageSize";
 
-const tiers: SizeTier[] = ["1K", "2K", "4K"];
+const stillTiers: SizeTier[] = ["1K", "2K", "4K"];
+const frameTiers: SizeTier[] = ["512", "1K", "2K", "4K"];
 const ratios = ["1:1", "3:2", "2:3", "16:9", "9:16", "4:3", "3:4", "21:9"];
-function preset(size?: string) {
+const SHEET_MAX_PIXELS = 8_294_400;
+function preset(size: string | undefined, tiers: SizeTier[], options: ImageSizeOptions) {
   for (const tier of tiers)
     for (const ratio of ratios)
-      if (calculateImageSize(tier, ratio) === size) return { tier, ratio };
+      if (calculateImageSize(tier, ratio, options) === size) return { tier, ratio };
+  return null;
+}
+/** GIF sizes are per frame; the model renders every frame on one sheet that must fit its limits. */
+export function gifSheetNotice(size: string | undefined, frameCount: number) {
+  const match = size?.match(/^(\d+)x(\d+)$/);
+  if (!match) return null;
+  const pixels = Number(match[1]) * Number(match[2]) * frameCount;
+  if (pixels < IMAGE_REQUEST_MIN_PIXELS)
+    return "Frames combined are below the minimum pixel budget; some providers reject this. Use more frames or a larger frame size.";
+  if (pixels > SHEET_MAX_PIXELS)
+    return "Frames combined exceed the pixel or 3840 edge limit; some providers reject this. Use fewer frames or a smaller frame size.";
   return null;
 }
 export function DrawingSizePicker({
   value,
   onChange,
   exact = false,
+  animated,
 }: {
   value?: string | undefined;
   exact?: boolean;
+  /** GIF output: the value is the size of each frame. */
+  animated?: { frameCount: number } | undefined;
   onChange: (value?: string) => void;
 }) {
   const tr = useAhaTranslation();
@@ -41,14 +65,15 @@ export function DrawingSizePicker({
         ref={trigger}
         className="max-w-none shrink-0 rounded-full px-2"
         icon={null}
-        label={`${tr("Size")} ${drawingParameterLabel(value ?? "auto", tr).replace("x", "×")}`}
-        aria-label={tr("Size")}
+        label={`${tr(animated ? "Frame size" : "Size")} ${drawingParameterLabel(value ?? "auto", tr).replace("x", "×")}`}
+        aria-label={tr(animated ? "Frame size" : "Size")}
         onClick={() => setOpen(true)}
       />
       {open ? (
         <SizeDialog
           value={value}
           exact={exact}
+          animated={animated}
           onClose={() => setOpen(false)}
           onApply={(size) => {
             onChange(size);
@@ -69,15 +94,19 @@ function SizeDialog({
   onApply,
   returnFocus,
   exact,
+  animated,
 }: {
   value?: string | undefined;
   onClose: () => void;
   onApply: (size?: string) => void;
   returnFocus: React.RefObject<HTMLButtonElement | null>;
   exact: boolean;
+  animated?: { frameCount: number } | undefined;
 }) {
   const tr = useAhaTranslation();
-  const current = preset(value);
+  const tiers = animated ? frameTiers : stillTiers;
+  const sizeOptions: ImageSizeOptions = animated ? { minPixels: IMAGE_FRAME_MIN_PIXELS } : {};
+  const current = preset(value, tiers, sizeOptions);
   const parsed = value?.match(/^(\d+)x(\d+)$/);
   const [mode, setMode] = useState<"auto" | "ratio" | "resolution">(
     !value || value === "auto" ? "auto" : current ? "ratio" : "resolution",
@@ -98,11 +127,11 @@ function SizeDialog({
     mode === "auto"
       ? "auto"
       : mode === "ratio"
-        ? (calculateImageSize(tier, ratio === "custom" ? customRatio : ratio) ?? "")
+        ? (calculateImageSize(tier, ratio === "custom" ? customRatio : ratio, sizeOptions) ?? "")
         : validDimensions
           ? exact
             ? `${Number(width)}x${Number(height)}`
-            : normalizeImageSize(`${Number(width)}x${Number(height)}`)
+            : normalizeImageSize(`${Number(width)}x${Number(height)}`, sizeOptions)
           : "";
   const sizeParts = size.match(/^(\d+)x(\d+)$/);
   const valid =
@@ -115,6 +144,7 @@ function SizeDialog({
           Number(sizeParts[1]) * Number(sizeParts[2]) <= 8294400)));
   const adjusted =
     mode === "resolution" && validDimensions && size !== `${Number(width)}x${Number(height)}`;
+  const sheetNotice = animated ? gifSheetNotice(size, animated.frameCount) : null;
   return (
     <Dialog
       open
@@ -135,7 +165,9 @@ function SizeDialog({
         }}
       >
         <DialogHeader className="px-5 pt-5 pb-4">
-          <DialogTitle>{tr("Set image dimensions")}</DialogTitle>
+          <DialogTitle>
+            {tr(animated ? "Set frame dimensions" : "Set image dimensions")}
+          </DialogTitle>
           <DialogDescription>
             {tr("Current")}: {drawingParameterLabel(value ?? "auto", tr).replace("x", "×")}
           </DialogDescription>
@@ -293,7 +325,9 @@ function SizeDialog({
               {tr(
                 exact
                   ? "Custom request dimensions are sent as entered. Provider support may differ; returned dimensions are shown after generation."
-                  : "Size presets use multiples of 16, a maximum edge of 3840, a maximum ratio of 3:1, and 655,360–8,294,400 pixels. Provider support may differ.",
+                  : animated
+                    ? "GIF size is per frame: multiples of 16, a maximum edge of 3840 and a maximum ratio of 3:1. The model renders all frames on one sheet, which must also fit its pixel limits. Provider support may differ."
+                    : "Size presets use multiples of 16, a maximum edge of 3840, a maximum ratio of 3:1, and 655,360–8,294,400 pixels. Provider support may differ.",
               )}
             </p>
           ) : null}
@@ -306,7 +340,17 @@ function SizeDialog({
                 ? tr("Auto")
                 : size?.replace("x", "×") || tr("Enter valid dimensions or ratio.")}
             </p>
+            {animated && sizeParts ? (
+              <p className="mt-1 text-ui-xs text-muted-foreground">
+                {tr("Frames combined")}: {animated.frameCount} × {sizeParts[1]}×{sizeParts[2]}
+              </p>
+            ) : null}
           </div>
+          {sheetNotice ? (
+            <p role="status" className="text-ui-xs leading-relaxed text-warning">
+              {tr(sheetNotice)}
+            </p>
+          ) : null}
         </DialogPanel>
         <DialogFooter className="px-5 pb-5">
           <Button variant="secondary" onClick={onClose}>

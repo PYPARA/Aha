@@ -3,6 +3,12 @@ import {
   IMAGE_GIF_FRAME_DURATION_MS,
   type ImageGenerationParameters,
 } from "@synara/contracts";
+import { normalizeImageSize } from "./imageSize";
+
+/** A field set to undefined is cleared (e.g. complexity back to automatic). */
+export type DrawingParameterPatch = {
+  [K in keyof ImageGenerationParameters]?: ImageGenerationParameters[K] | undefined;
+};
 
 export const defaultDrawingParameters = {
   size: "auto",
@@ -41,11 +47,22 @@ export function normalizeDrawingParameters(p: ImageGenerationParameters = { n: 1
   return { parameters, adjusted };
 }
 
+/** Merges a parameter patch; fields patched to undefined are removed. */
+export function applyDrawingParameterPatch<T extends Partial<ImageGenerationParameters>>(
+  base: T,
+  patch: DrawingParameterPatch,
+): T {
+  const merged: Record<string, unknown> = { ...base, ...patch };
+  for (const key of Object.keys(merged)) if (merged[key] === undefined) delete merged[key];
+  return merged as T;
+}
 export function updateDrawingParameters(
   p: ImageGenerationParameters,
-  patch: Partial<ImageGenerationParameters>,
+  patch: DrawingParameterPatch,
 ) {
-  const next = { ...p, ...patch };
+  const next = applyDrawingParameterPatch(p, patch) as {
+    -readonly [K in keyof ImageGenerationParameters]: ImageGenerationParameters[K];
+  };
   let notice: string | null = null;
   if (next.background === "transparent" && next.outputFormat === "jpeg") {
     if (patch.outputFormat === "jpeg") {
@@ -56,13 +73,26 @@ export function updateDrawingParameters(
       notice = "Output format changed to PNG for transparent background.";
     }
   }
+  // GIF sizes are per frame and may sit below the still-image pixel minimum.
+  if (
+    p.outputFormat === "gif" &&
+    next.outputFormat !== "gif" &&
+    next.size &&
+    next.size !== "auto"
+  ) {
+    const still = normalizeImageSize(next.size);
+    if (still !== next.size) {
+      next.size = still;
+      notice = "Frame size was enlarged to fit still-image limits.";
+    }
+  }
   return { parameters: normalizeDrawingParameters(next).parameters, notice };
 }
 
-/** Preset choices up to the 16 frames gpt-image-2.6 accepts. */
-export const drawingFrameCountOptions = [2, 4, 6, 8, 9, 12, 16] as const;
+/** Shortcuts within the official 2–64 frames and 20–2000 ms; any value in range can be typed. */
+export const drawingFrameCountOptions = [2, 4, 6, 8, 9, 12, 16, 24, 32, 48, 64] as const;
 export const drawingFrameDurationOptions = [
-  40, 60, 80, 100, 120, 150, 200, 300, 500, 1000,
+  20, 40, 60, 80, 100, 120, 150, 200, 300, 500, 1000, 2000,
 ] as const;
 
 export const drawingParameterLabels: Record<string, string> = {

@@ -1,6 +1,10 @@
 import { useResourceAttachments, type ResourceReceiveResult } from "../resources/resourceLibrary";
 import { drawingResourceError, DRAWING_RESOURCE_LIMITS } from "@synara/contracts/resourceLibrary";
-import { normalizeDrawingParameters, updateDrawingParameters } from "./drawingParameters";
+import {
+  normalizeDrawingParameters,
+  updateDrawingParameters,
+  type DrawingParameterPatch,
+} from "./drawingParameters";
 import { RouteInsetSurface } from "../RouteInsetSurface";
 import { ChatSurfaceHeader } from "../chat/ChatSurfaceHeader";
 import {
@@ -480,7 +484,7 @@ export default function DrawingWorkbench() {
     setDetails(null);
   };
   const settings = () => void navigate({ to: "/settings", search: { section: "imageProviders" } });
-  const updateParameters = (patch: Partial<ImageGenerationParameters>) => {
+  const updateParameters = (patch: DrawingParameterPatch) => {
     const updated = updateDrawingParameters(parameters, patch);
     setParameters(updated.parameters);
     setParameterNotice(updated.notice);

@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { DrawingParameters } from "../drawing/DrawingPickers";
+import { applyDrawingParameterPatch } from "../drawing/drawingParameters";
 
 /** Sets only the parameters the user touched on every selected task; others keep their values. */
 export function BatchBulkParameters({
@@ -54,7 +55,7 @@ export function BatchBulkParameters({
         <div className="space-y-3 p-4 text-ui">
           <DrawingParameters
             parameters={{ ...base, ...patch }}
-            onChange={(next) => setPatch((current) => ({ ...current, ...next }))}
+            onChange={(next) => setPatch((current) => applyDrawingParameterPatch(current, next))}
           />
           <p className="text-ui-sm text-muted-foreground">
             {changed.length
@@ -98,6 +99,7 @@ const PARAMETER_LABELS: Record<keyof ImageGenerationParameters, string> = {
   quality: "Quality",
   outputFormat: "Format",
   background: "Background",
+  complexity: "Complexity",
   frameCount: "Frames",
   frameDurationMs: "Per frame",
 };

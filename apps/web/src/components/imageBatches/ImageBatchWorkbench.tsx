@@ -25,6 +25,7 @@ import { Dialog, DialogPopup, DialogHeader, DialogTitle, DialogDescription } fro
 import { RouteSurfaceHeader } from "../RouteSurface";
 import { confirmDialog } from "../ui/confirm-dialog";
 import { DrawingModelPicker, DrawingParameters } from "../drawing/DrawingPickers";
+import { applyDrawingParameterPatch } from "../drawing/drawingParameters";
 import { imageUrl, useImageProviders, useDrawingEvents } from "../drawing/useDrawing";
 import { Switch } from "../ui/switch";
 import { Menu, MenuItem, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -1251,7 +1252,7 @@ function BatchConfiguration({
                 ...draft,
                 defaults: {
                   ...draft.defaults,
-                  parameters: { ...draft.defaults.parameters, ...patch },
+                  parameters: applyDrawingParameterPatch(draft.defaults.parameters, patch),
                 },
               })
             }

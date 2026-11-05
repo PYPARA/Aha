@@ -990,12 +990,26 @@ export const copy: Record<string, string> = {
   Opaque: "不透明",
   Transparent: "透明",
   "Dimensions are chosen automatically by the model.": "由模型自动选择尺寸",
-  "Extra high and Maximum are supported by GPT Image 2.5 Sunburst / Flare. Other models depend on provider support.":
-    "GPT Image 2.5 Sunburst／Flare 支持超高和最高质量，其他模型以供应商支持情况为准。",
+  "Extra high and Maximum are supported by GPT Image 2.5 and 2.6 Sunburst / Flare. Other models depend on provider support.":
+    "GPT Image 2.5 和 2.6 的 Sunburst／Flare 支持超高和最高质量，其他模型以供应商支持情况为准。",
   "Output format changed to PNG for transparent background.": "透明背景已切换为 PNG",
   Animated: "动图",
-  "GIF animation requires model support, such as GPT Image 2.6, with up to 16 frames. Size is per frame. Transparent GIF edges are fully opaque or fully clear. Some providers decide frames and timing themselves; task details show the actual result.":
-    "GIF 动图需模型支持（如 GPT Image 2.6），最多 16 帧。尺寸指每一帧的尺寸。透明 GIF 的边缘只有全透明和不透明两档。部分渠道会自行决定帧数和时长，以任务详情中的实际结果为准。",
+  "GIF animation requires model support, such as GPT Image 2.6. Size is per frame. Transparent GIF edges are fully opaque or fully clear. Some providers decide frames and timing themselves; task details show the actual result.":
+    "GIF 动图需模型支持（如 GPT Image 2.6）。尺寸指每一帧的尺寸。透明 GIF 的边缘只有全透明和不透明两档。部分渠道会自行决定帧数和时长，以任务详情中的实际结果为准。",
+  Complexity: "复杂度",
+  "Complexity sets how much the model plans before rendering. Auto is not sent; GPT Image 2.6 then uses High. Other models may not support it.":
+    "复杂度控制模型渲染前的规划程度。选“自动”时不发送该参数，GPT Image 2.6 按“高”处理；其他模型可能不支持。",
+  "Some providers allow 16": "部分渠道仅支持 16 帧",
+  "Frame size": "每帧尺寸",
+  "Set frame dimensions": "设置每帧尺寸",
+  "Frames combined": "合成",
+  "GIF size is per frame: multiples of 16, a maximum edge of 3840 and a maximum ratio of 3:1. The model renders all frames on one sheet, which must also fit its pixel limits. Provider support may differ.":
+    "GIF 尺寸指每一帧：边长为 16 的倍数，长边不超过 3840，宽高比不超过 3:1。模型会把所有帧合成一张图来生成，这张图也要满足像素限制。各供应商的支持情况可能不同。",
+  "Frames combined are below the minimum pixel budget; some providers reject this. Use more frames or a larger frame size.":
+    "帧数 × 每帧尺寸低于最小像素预算，部分渠道会拒绝。请增加帧数或调大每帧尺寸。",
+  "Frames combined exceed the pixel or 3840 edge limit; some providers reject this. Use fewer frames or a smaller frame size.":
+    "帧数 × 每帧尺寸超出像素上限或 3840 长边限制，部分渠道会拒绝。请减少帧数或调小每帧尺寸。",
+  "Frame size was enlarged to fit still-image limits.": "每帧尺寸已按静态图规则放大",
   "Per frame": "每帧",
   "One loop lasts": "一轮约",
   seconds: "秒",

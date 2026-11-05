@@ -3,7 +3,11 @@ import {
   normalizeDrawingParameters,
   updateDrawingParameters,
   drawingParameterLabel,
+  drawingFrameCountOptions,
+  drawingFrameDurationOptions,
 } from "./drawingParameters";
+import { calculateImageSize, IMAGE_FRAME_MIN_PIXELS, normalizeImageSize } from "./imageSize";
+import { gifSheetNotice } from "./DrawingSizePicker";
 describe("drawing parameter intent", () => {
   it("fills missing legacy fields without changing explicit sizes or the source snapshot", () => {
     const old = { n: 3, size: "1234x567", quality: "max" as const };
@@ -74,6 +78,35 @@ describe("drawing parameter intent", () => {
     ).toMatchObject({ outputFormat: "gif", background: "transparent" });
     expect(normalizeDrawingParameters(gif.parameters).adjusted).toBe(false);
     expect(normalizeDrawingParameters({ ...base, frameCount: 9 }).adjusted).toBe(true);
+  });
+  it("clears complexity back to automatic and keeps GIF frame sizes below the still minimum", () => {
+    const base = normalizeDrawingParameters().parameters;
+    const low = updateDrawingParameters(base, { complexity: "low" }).parameters;
+    expect(low.complexity).toBe("low");
+    expect(updateDrawingParameters(low, { complexity: undefined }).parameters).not.toHaveProperty(
+      "complexity",
+    );
+    const gif = updateDrawingParameters(base, { outputFormat: "gif", size: "512x512" });
+    expect(gif.parameters.size).toBe("512x512");
+    const still = updateDrawingParameters(gif.parameters, { outputFormat: "png" });
+    expect(still.parameters.size).toBe("816x816");
+    expect(still.notice).toMatch(/still-image/);
+    expect(drawingFrameCountOptions.at(-1)).toBe(64);
+    expect(drawingFrameDurationOptions[0]).toBe(20);
+    expect(drawingFrameDurationOptions.at(-1)).toBe(2000);
+  });
+  it("sizes GIF frames by the frame rules and warns about the combined sheet", () => {
+    expect(normalizeImageSize("512x512")).toBe("816x816");
+    expect(normalizeImageSize("512x512", { minPixels: IMAGE_FRAME_MIN_PIXELS })).toBe("512x512");
+    expect(normalizeImageSize("500x300", { minPixels: IMAGE_FRAME_MIN_PIXELS })).toBe("496x304");
+    expect(calculateImageSize("512", "16:9", { minPixels: IMAGE_FRAME_MIN_PIXELS })).toBe(
+      "640x352",
+    );
+    expect(calculateImageSize("1K", "1:1")).toBe("1024x1024");
+    expect(gifSheetNotice("256x256", 4)).toMatch(/below the minimum/);
+    expect(gifSheetNotice("512x512", 4)).toBeNull();
+    expect(gifSheetNotice("1024x1024", 9)).toMatch(/exceed/);
+    expect(gifSheetNotice("auto", 9)).toBeNull();
   });
   it("distinguishes omitted historical values from automatic values", () => {
     expect(drawingParameterLabel(undefined, (v) => v)).toBe("Not specified");

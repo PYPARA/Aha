@@ -3,9 +3,10 @@ import {
   drawingFrameCountOptions,
   drawingFrameDurationOptions,
   drawingParameterLabel,
+  type DrawingParameterPatch,
 } from "./drawingParameters";
 import { CentralIcon } from "~/lib/central-icons";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   IMAGE_GIF_FRAME_COUNT,
   IMAGE_GIF_FRAME_DURATION_MS,
@@ -15,6 +16,7 @@ import {
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { PlusIcon } from "~/lib/icons";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { DrawingSizePicker as SizePicker } from "./DrawingSizePicker";
 import {
   Menu,
@@ -190,14 +192,91 @@ function ParameterPicker({
   );
 }
 
+const clampFrameValue = (
+  text: string,
+  fallback: number,
+  range: { min: number; max: number; step: number },
+) => {
+  const parsed = Number(text);
+  if (!text.trim() || !Number.isFinite(parsed)) return fallback;
+  return Math.min(range.max, Math.max(range.min, Math.round(parsed / range.step) * range.step));
+};
+/** Free entry beside the shortcut list: out-of-range values snap to the limit, empty input keeps the value. */
+function FrameNumberField({
+  label,
+  unit,
+  value,
+  range,
+  onCommit,
+}: {
+  label: string;
+  unit?: string;
+  value: number;
+  range: { min: number; max: number; step: number };
+  onCommit: (value: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  const latest = useRef({ text, value, range, onCommit });
+  latest.current = { text, value, range, onCommit };
+  useEffect(() => setText(String(value)), [value]);
+  // Closing the menu unmounts the field without a blur; commit what was typed.
+  useEffect(
+    () => () => {
+      const l = latest.current;
+      const next = clampFrameValue(l.text, l.value, l.range);
+      if (next !== l.value) l.onCommit(next);
+    },
+    [],
+  );
+  const commit = () => {
+    const next = clampFrameValue(text, value, range);
+    setText(String(next));
+    if (next !== value) onCommit(next);
+  };
+  return (
+    <label className="flex items-center gap-2 px-3 py-2 text-ui-xs text-muted-foreground">
+      <span className="shrink-0">{label}</span>
+      <Input
+        nativeInput
+        size="sm"
+        type="number"
+        inputMode="numeric"
+        min={range.min}
+        max={range.max}
+        step={range.step}
+        className="w-24"
+        aria-label={label}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDownCapture={(e) => {
+          if (e.key === "Tab" || e.key === "Escape") return;
+          // Keep typing and arrow keys out of the menu's typeahead and navigation.
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          }
+        }}
+      />
+      <span className="shrink-0">
+        {unit ?? ""} {range.min}–{range.max}
+      </span>
+    </label>
+  );
+}
+
 export function DrawingParameters({
   parameters: p,
   onChange,
 }: {
   parameters: ImageGenerationParameters;
-  onChange: (patch: Partial<ImageGenerationParameters>) => void;
+  onChange: (patch: DrawingParameterPatch) => void;
 }) {
   const tr = useAhaTranslation();
+  const gif = p.outputFormat === "gif";
+  const frameCount = p.frameCount ?? IMAGE_GIF_FRAME_COUNT.default;
+  const frameDuration = p.frameDurationMs ?? IMAGE_GIF_FRAME_DURATION_MS.default;
   const options = (values: string[]) =>
     values.map((value) => ({
       value,
@@ -209,7 +288,11 @@ export function DrawingParameters({
       className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5"
       aria-label={tr("Image parameters")}
     >
-      <SizePicker value={p.size} onChange={(size) => onChange({ size })} />
+      <SizePicker
+        value={p.size}
+        animated={gif ? { frameCount } : undefined}
+        onChange={(size) => onChange({ size })}
+      />
       <ParameterPicker
         label={tr("Quality")}
         value={p.quality ?? "auto"}
@@ -218,7 +301,23 @@ export function DrawingParameters({
       >
         <p className="max-w-64 px-3 py-2 text-ui-xs text-muted-foreground">
           {tr(
-            "Extra high and Maximum are supported by GPT Image 2.5 Sunburst / Flare. Other models depend on provider support.",
+            "Extra high and Maximum are supported by GPT Image 2.5 and 2.6 Sunburst / Flare. Other models depend on provider support.",
+          )}
+        </p>
+      </ParameterPicker>
+      <ParameterPicker
+        label={tr("Complexity")}
+        value={p.complexity ?? "auto"}
+        options={options(["auto", "low", "medium", "high"])}
+        onChange={(v) =>
+          onChange({
+            complexity: v === "auto" ? undefined : (v as ImageGenerationParameters["complexity"]),
+          })
+        }
+      >
+        <p className="max-w-64 px-3 py-2 text-ui-xs text-muted-foreground">
+          {tr(
+            "Complexity sets how much the model plans before rendering. Auto is not sent; GPT Image 2.6 then uses High. Other models may not support it.",
           )}
         </p>
       </ParameterPicker>
@@ -241,28 +340,37 @@ export function DrawingParameters({
         }))}
         onChange={(v) => onChange({ outputFormat: v as ImageGenerationParameters["outputFormat"] })}
       >
-        {p.outputFormat === "gif" ? (
+        {gif ? (
           <p className="max-w-64 px-3 py-2 text-ui-xs text-muted-foreground">
             {tr(
-              "GIF animation requires model support, such as GPT Image 2.6, with up to 16 frames. Size is per frame. Transparent GIF edges are fully opaque or fully clear. Some providers decide frames and timing themselves; task details show the actual result.",
+              "GIF animation requires model support, such as GPT Image 2.6. Size is per frame. Transparent GIF edges are fully opaque or fully clear. Some providers decide frames and timing themselves; task details show the actual result.",
             )}
           </p>
         ) : null}
       </ParameterPicker>
-      {p.outputFormat === "gif" ? (
+      {gif ? (
         <>
           <ParameterPicker
             label={tr("Frames")}
-            value={String(p.frameCount ?? IMAGE_GIF_FRAME_COUNT.default)}
+            value={String(frameCount)}
             options={drawingFrameCountOptions.map((count) => ({
               value: String(count),
               label: String(count),
+              note:
+                count > IMAGE_GIF_FRAME_COUNT.commonMax ? tr("Some providers allow 16") : undefined,
             }))}
             onChange={(v) => onChange({ frameCount: Number(v) })}
-          />
+          >
+            <FrameNumberField
+              label={tr("Custom")}
+              value={frameCount}
+              range={{ min: IMAGE_GIF_FRAME_COUNT.min, max: IMAGE_GIF_FRAME_COUNT.max, step: 1 }}
+              onCommit={(next) => onChange({ frameCount: next })}
+            />
+          </ParameterPicker>
           <ParameterPicker
             label={tr("Per frame")}
-            value={String(p.frameDurationMs ?? IMAGE_GIF_FRAME_DURATION_MS.default)}
+            value={String(frameDuration)}
             options={drawingFrameDurationOptions.map((ms) => ({
               value: String(ms),
               label: `${ms} ms`,
@@ -270,13 +378,15 @@ export function DrawingParameters({
             }))}
             onChange={(v) => onChange({ frameDurationMs: Number(v) })}
           >
-            <p className="max-w-64 px-3 py-2 text-ui-xs text-muted-foreground">
-              {tr("One loop lasts")}{" "}
-              {(
-                ((p.frameCount ?? IMAGE_GIF_FRAME_COUNT.default) *
-                  (p.frameDurationMs ?? IMAGE_GIF_FRAME_DURATION_MS.default)) /
-                1000
-              ).toFixed(1)}{" "}
+            <FrameNumberField
+              label={tr("Custom")}
+              unit="ms"
+              value={frameDuration}
+              range={IMAGE_GIF_FRAME_DURATION_MS}
+              onCommit={(next) => onChange({ frameDurationMs: next })}
+            />
+            <p className="max-w-64 px-3 pb-2 text-ui-xs text-muted-foreground">
+              {tr("One loop lasts")} {((frameCount * frameDuration) / 1000).toFixed(1)}{" "}
               {tr("seconds")}
             </p>
           </ParameterPicker>

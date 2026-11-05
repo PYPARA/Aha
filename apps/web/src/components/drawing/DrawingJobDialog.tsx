@@ -73,6 +73,7 @@ export function DrawingJobDialog({
   const requested = [
     [tr("Size"), drawingParameterLabel(job.parameters.size, tr)],
     [tr("Quality"), drawingParameterLabel(job.parameters.quality, tr)],
+    [tr("Complexity"), drawingParameterLabel(job.parameters.complexity ?? "auto", tr)],
     [tr("Image count"), String(job.parameters.n)],
     [tr("Format"), drawingFormatLabel(job.parameters.outputFormat) ?? tr("Not specified")],
     [tr("Background"), drawingParameterLabel(job.parameters.background, tr)],

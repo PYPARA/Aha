@@ -172,6 +172,22 @@ describe("image provider and Images API contracts", () => {
       background: "transparent",
     });
   });
+  it("sends complexity only when chosen and accepts the official 2–64 GIF frames", () => {
+    expect(imageRequestParameters({ n: 1, complexity: "low" })).toEqual({
+      n: 1,
+      complexity: "low",
+    });
+    expect(imageRequestParameters({ n: 1 })).not.toHaveProperty("complexity");
+    expect(
+      imageRequestParameters({ n: 1, outputFormat: "gif", frameCount: 64, frameDurationMs: 2000 }),
+    ).toMatchObject({ frame_count: 64, frame_duration_ms: 2000 });
+    expect(() => imageRequestParameters({ n: 1, outputFormat: "gif", frameCount: 65 })).toThrow(
+      "frame count",
+    );
+    expect(() =>
+      imageRequestParameters({ n: 1, outputFormat: "gif", frameDurationMs: 10 }),
+    ).toThrow("frame duration");
+  });
   it("sends GIF frame settings only for GIF output and rounds frame duration to 10 ms", () => {
     expect(
       imageRequestParameters({
@@ -383,8 +399,34 @@ describe("image provider and Images API contracts", () => {
       frame_duration_ms: 120,
     });
     expect(body.images).toHaveLength(1);
+    expect(body).not.toHaveProperty("complexity");
     expect(body.images[0].image_url).toMatch(/^data:image\/png;base64,/u);
     expect(body.mask.image_url).toMatch(/^data:image\/png;base64,/u);
+  });
+  it("sends complexity in multipart edits and rejects GIF references above the JSON image_url limit", async () => {
+    const fetcher = vi.fn().mockResolvedValue(f.response());
+    vi.stubGlobal("fetch", fetcher);
+    const base = {
+      baseUrl: "https://mock.example/v1",
+      key: "test",
+      model: "gpt-image-2.6-flare",
+      prompt: "edit",
+      signal: new AbortController().signal,
+    };
+    await requestImages({
+      ...base,
+      parameters: { n: 1, outputFormat: "png", complexity: "medium" },
+      images: [f.png],
+    });
+    expect((fetcher.mock.calls[0]![1].body as FormData).get("complexity")).toBe("medium");
+    await expect(
+      requestImages({
+        ...base,
+        parameters: { n: 1, outputFormat: "gif", complexity: "high" },
+        images: [new Uint8Array(16 * 1024 * 1024)],
+      }),
+    ).rejects.toMatchObject({ code: "input_limit" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
   it("reports an error object returned with HTTP 200 instead of an empty result", async () => {
     vi.stubGlobal(

@@ -11,7 +11,13 @@ const MIN_PIXELS = IMAGE_REQUEST_MIN_PIXELS;
 const MAX_PIXELS = 8_294_400;
 const MAX_1K_PIXELS = 1_572_864;
 
-export type SizeTier = "1K" | "2K" | "4K";
+export type SizeTier = "512" | "1K" | "2K" | "4K";
+/** Size rule options; GIF frame sizes have no per-frame minimum (the frame sheet does). */
+export interface ImageSizeOptions {
+  readonly minPixels?: number;
+}
+/** Smallest frame a 16-pixel grid allows; used for GIF frames. */
+export const IMAGE_FRAME_MIN_PIXELS = 256;
 type PresetRatio = "1:1" | "3:2" | "2:3" | "16:9" | "9:16" | "4:3" | "3:4" | "21:9";
 
 function roundToMultiple(value: number, multiple: number) {
@@ -26,7 +32,7 @@ function ceilToMultiple(value: number, multiple: number) {
   return Math.max(multiple, Math.ceil(value / multiple) * multiple);
 }
 
-function normalizeDimensions(width: number, height: number) {
+function normalizeDimensions(width: number, height: number, minPixels = MIN_PIXELS) {
   let normalizedWidth = roundToMultiple(width, SIZE_MULTIPLE);
   let normalizedHeight = roundToMultiple(height, SIZE_MULTIPLE);
 
@@ -55,20 +61,24 @@ function normalizeDimensions(width: number, height: number) {
     const pixels = normalizedWidth * normalizedHeight;
     if (pixels > MAX_PIXELS) {
       scaleToFit(Math.sqrt(MAX_PIXELS / pixels));
-    } else if (pixels < MIN_PIXELS) {
-      scaleToFill(Math.sqrt(MIN_PIXELS / pixels));
+    } else if (pixels < minPixels) {
+      scaleToFill(Math.sqrt(minPixels / pixels));
     }
   }
 
   return { width: normalizedWidth, height: normalizedHeight };
 }
 
-export function normalizeImageSize(size: string) {
+export function normalizeImageSize(size: string, options: ImageSizeOptions = {}) {
   const trimmed = size.trim();
   const match = trimmed.match(SIZE_PATTERN);
   if (!match) return trimmed;
 
-  const { width, height } = normalizeDimensions(Number(match[1]), Number(match[2]));
+  const { width, height } = normalizeDimensions(
+    Number(match[1]),
+    Number(match[2]),
+    options.minPixels,
+  );
   return `${width}x${height}`;
 }
 
@@ -201,6 +211,7 @@ export function formatImageRatio(width: number, height: number) {
  * 在该预算内、满足所有 OpenAI 约束的前提下，选取总像素最大的候选尺寸。
  */
 const TIER_PIXEL_BUDGET: Record<SizeTier, number> = {
+  "512": 262_144, // 512 × 512, GIF frames only (below the still-image minimum)
   "1K": MAX_1K_PIXELS, // 1024 × 1536
   "2K": 4_194_304, // 2048 × 2048
   "4K": MAX_PIXELS, // 8_294_400
@@ -211,6 +222,16 @@ const TIER_PIXEL_BUDGET: Record<SizeTier, number> = {
  * 其中 21:9 的常见显示器尺寸会按 16 倍数约束做轻微规整。
  */
 const COMMON_SIZE_PRESETS: Record<SizeTier, Record<PresetRatio, string>> = {
+  "512": {
+    "1:1": "512x512",
+    "3:2": "624x416",
+    "2:3": "416x624",
+    "16:9": "640x352",
+    "9:16": "352x640",
+    "4:3": "576x432",
+    "3:4": "432x576",
+    "21:9": "672x288",
+  },
   "1K": {
     "1:1": "1024x1024",
     "3:2": "1536x1024",
@@ -254,7 +275,7 @@ function getPresetRatioKey(ratioWidth: number, ratioHeight: number): PresetRatio
 
 const MAX_RATIO_ERROR = 0.01;
 
-export function calculateImageSize(tier: SizeTier, ratio: string) {
+export function calculateImageSize(tier: SizeTier, ratio: string, options: ImageSizeOptions = {}) {
   const parsed = parseRatio(ratio);
   if (!parsed) return null;
 
@@ -281,7 +302,7 @@ export function calculateImageSize(tier: SizeTier, ratio: string) {
       if (h < SIZE_MULTIPLE || h > MAX_EDGE) continue;
 
       const pixels = w * h;
-      if (pixels > pixelBudget || pixels < MIN_PIXELS) continue;
+      if (pixels > pixelBudget || pixels < (options.minPixels ?? MIN_PIXELS)) continue;
       if (Math.max(w / h, h / w) > MAX_ASPECT_RATIO) continue;
 
       const actualRatio = w / h;
