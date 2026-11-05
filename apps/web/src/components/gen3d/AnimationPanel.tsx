@@ -11,6 +11,7 @@ import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { MOTION_LABELS, PropAnimationPanel } from "./PropAnimationPanel";
+import type { Gen3DJointSession } from "./gen3dJoints";
 import { SkeletonEditor } from "./SkeletonEditor";
 import { templateSkeleton, type Dimensions } from "./skeletonJoints";
 import { gen3dAssetUrl } from "./useGen3D";
@@ -41,6 +42,7 @@ export function AnimationPanel({
   onAskAssistant,
   parts,
   onPartsChange,
+  onJointSession,
 }: {
   project: Gen3DProject;
   version: Gen3DVersion | undefined;
@@ -51,6 +53,8 @@ export function AnimationPanel({
   /** Parts chosen here or picked in the viewer. */
   parts: string[];
   onPartsChange: (parts: string[]) => void;
+  /** The open joint editor's session, so the viewer can drag the same joints. */
+  onJointSession?: (session: Gen3DJointSession | null) => void;
 }) {
   const tr = useAhaTranslation();
   const [clips, setClips] = useState<Clip[]>([...GEN3D_ANIMATION_CLIPS]),
@@ -169,6 +173,8 @@ export function AnimationPanel({
             </section>
           ) : !confirmed || editing ? (
             <SkeletonEditor
+              key={joints.version.id}
+              onSession={onJointSession}
               project={project}
               version={joints.version}
               initial={joints.nodes as never}

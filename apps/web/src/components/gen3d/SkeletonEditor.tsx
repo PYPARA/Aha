@@ -1,10 +1,18 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react";
 import type { Gen3DProject, Gen3DSkeletonNode, Gen3DVersion } from "@synara/contracts";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { OptionSelect } from "../ui/option-select";
-import { RENDER_SIZE, fromRender, moveJoint, toRender, type Dimensions } from "./skeletonJoints";
+import { Gen3DJointSession } from "./gen3dJoints";
+import { RENDER_SIZE, fromRender, toRender, type Dimensions } from "./skeletonJoints";
 import { gen3dAssetUrl } from "./useGen3D";
 
 const VIEWS = [
@@ -12,7 +20,10 @@ const VIEWS = [
   { view: "side", file: "render-side.png", label: "Side" },
 ] as const;
 
-/** Joints over the version's front and side renders: drag them, or pick one and use arrows. */
+/**
+ * Joints over the version's front and side renders: drag them, or pick one and use arrows. The
+ * same joints can be dragged on the model in the 3D viewer through the shared session.
+ */
 export function SkeletonEditor({
   project,
   version,
@@ -21,6 +32,7 @@ export function SkeletonEditor({
   disabled,
   onConfirm,
   onDiscard,
+  onSession,
 }: {
   project: Gen3DProject;
   version: Gen3DVersion;
@@ -29,32 +41,35 @@ export function SkeletonEditor({
   disabled: boolean;
   onConfirm: (joints: Gen3DSkeletonNode[]) => void;
   onDiscard: () => void;
+  /** The editing session while the editor is open (the viewer drags the same joints). */
+  onSession?: ((session: Gen3DJointSession | null) => void) | undefined;
 }) {
   const tr = useAhaTranslation();
   const dims = version.report.dimensions as unknown as Dimensions;
-  const [joints, setJoints] = useState<Gen3DSkeletonNode[]>([...initial]),
-    [selected, setSelected] = useState<string>(initial[0]?.id ?? ""),
-    [mirror, setMirror] = useState(true),
-    [dragging, setDragging] = useState<{ view: "front" | "side"; id: string } | null>(null);
+  const [session] = useState(() => new Gen3DJointSession(initial));
+  useSyncExternalStore(session.subscribe, session.snapshot);
+  const { joints, selected, mirror } = session;
+  const [dragging, setDragging] = useState<{ view: "front" | "side"; id: string } | null>(null);
   // Project refreshes create new arrays; only a change in the saved joints resets local edits.
   const saved = JSON.stringify(initial);
+  const first = useRef(true);
   useEffect(() => {
-    setJoints(JSON.parse(saved) as Gen3DSkeletonNode[]);
-    setSelected((current) =>
-      (JSON.parse(saved) as Gen3DSkeletonNode[]).some((j) => j.id === current)
-        ? current
-        : ((JSON.parse(saved) as Gen3DSkeletonNode[])[0]?.id ?? ""),
-    );
+    if (first.current) first.current = false;
+    else session.reset(JSON.parse(saved) as Gen3DSkeletonNode[]);
   }, [saved]);
+  const sessionCallback = useRef(onSession);
+  sessionCallback.current = onSession;
+  useEffect(() => {
+    sessionCallback.current?.(session);
+    return () => sessionCallback.current?.(null);
+  }, [session]);
   const changed = JSON.stringify(joints) !== saved;
   const svgs = useRef<Record<string, SVGSVGElement | null>>({});
   const place = (view: "front" | "side", id: string, x: number, y: number) => {
     const joint = joints.find((j) => j.id === id);
     if (!joint) return;
     const clamp = (n: number) => Math.min(RENDER_SIZE, Math.max(0, n));
-    setJoints((all) =>
-      moveJoint(all, id, fromRender(view, dims, joint.position, clamp(x), clamp(y)), mirror),
-    );
+    session.move(id, fromRender(view, dims, joint.position, clamp(x), clamp(y)));
   };
   const pointer = (view: "front" | "side", event: PointerEvent) => {
     const box = svgs.current[view]!.getBoundingClientRect();
@@ -104,8 +119,14 @@ export function SkeletonEditor({
                   const at = pointer(view, event);
                   place(view, dragging.id, at.x, at.y);
                 }}
-                onPointerUp={() => setDragging(null)}
-                onPointerCancel={() => setDragging(null)}
+                onPointerUp={() => {
+                  setDragging(null);
+                  session.endDrag();
+                }}
+                onPointerCancel={() => {
+                  setDragging(null);
+                  session.endDrag();
+                }}
               >
                 {joints.map((joint) => {
                   const parent = joints.find((j) => j.id === joint.parent);
@@ -145,7 +166,8 @@ export function SkeletonEditor({
                         (event.currentTarget.ownerSVGElement as SVGSVGElement).setPointerCapture(
                           event.pointerId,
                         );
-                        setSelected(joint.id);
+                        session.select(joint.id);
+                        session.beginDrag();
                         setDragging({ view, id: joint.id });
                       }}
                     >
@@ -161,7 +183,11 @@ export function SkeletonEditor({
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-40 flex-1">
-          <OptionSelect label={tr("Selected joint")} value={selected} onValueChange={setSelected}>
+          <OptionSelect
+            label={tr("Selected joint")}
+            value={selected}
+            onValueChange={(id) => session.select(id)}
+          >
             {joints.map((joint) => (
               <option key={joint.id} value={joint.id}>
                 {joint.id}
@@ -170,11 +196,28 @@ export function SkeletonEditor({
           </OptionSelect>
         </div>
         <label className="flex items-center gap-2 text-ui-xs">
-          <Checkbox checked={mirror} onCheckedChange={(value) => setMirror(value === true)} />
+          <Checkbox
+            checked={mirror}
+            onCheckedChange={(value) => session.setMirror(value === true)}
+          />
           {tr("Mirror left and right")}
         </label>
       </div>
+      {onSession && (
+        <p className="text-ui-xs leading-relaxed text-muted-foreground">
+          {tr(
+            "You can also drag the joints on the model in the viewer: they stay in front of the model, and turning the view moves them in depth.",
+          )}
+        </p>
+      )}
       <div className="flex gap-2">
+        <Button
+          variant="ghost"
+          disabled={disabled || !session.canUndo}
+          onClick={() => session.undo()}
+        >
+          {tr("Undo")}
+        </Button>
         <Button className="flex-1" disabled={disabled} onClick={() => onConfirm(joints)}>
           {tr(changed ? "Save and confirm joints" : "Confirm joints")}
         </Button>

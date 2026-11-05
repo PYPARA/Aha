@@ -153,7 +153,10 @@ export const Gen3DProcess = Schema.Struct({
   lods: Schema.Array(Schema.Finite.check(Schema.isBetween({ minimum: 0.05, maximum: 0.95 }))).check(
     Schema.isMaxLength(3),
   ),
-  collision: Schema.Literals(["none", "box", "convex"]),
+  /** "decomposition" is several convex hulls (at most 16) that follow concave shapes. */
+  collision: Schema.Literals(["none", "box", "convex", "decomposition"]),
+  /** Low poly faces: decimated triangles (default) or QuadriFlow quads. */
+  topology: Schema.optional(Schema.Literals(["triangles", "quads"])),
   /** Split the low poly back into the parent's parts (shared UVs and textures) for prop animation. */
   keepParts: Schema.optional(Schema.Boolean),
   /** Base colour source when baking: the parent's materials, or the three-view reference. */
@@ -183,7 +186,22 @@ export const Gen3DProcessReport = Schema.Struct({
   highTriangles: Schema.Finite,
   lowTriangles: Schema.Finite,
   lods: Schema.Array(Schema.Struct({ file: Schema.String, triangles: Schema.Finite })),
-  collision: Schema.NullOr(Schema.Struct({ file: Schema.String, triangles: Schema.Finite })),
+  collision: Schema.NullOr(
+    Schema.Struct({
+      file: Schema.String,
+      triangles: Schema.Finite,
+      /** Convex hulls in a decomposition. */
+      hulls: Schema.optional(Schema.Finite),
+    }),
+  ),
+  /** Set when the low poly was remeshed to quads; "decimate" means QuadriFlow failed. */
+  topology: Schema.optional(
+    Schema.Struct({
+      kind: Schema.Literal("quads"),
+      method: Schema.Literals(["quadriflow", "voxel-quadriflow", "decimate"]),
+      quads: Schema.Finite,
+    }),
+  ),
   baked: Schema.Array(Schema.String),
   textureSize: Schema.Finite,
   seconds: Schema.Finite,
@@ -297,9 +315,13 @@ export const Gen3DRepaint = Schema.Struct({
   view: Gen3DRepaintView,
   /** Custom views: the camera the view was rendered with. */
   camera: Schema.optional(Gen3DRepaintCamera),
-  /** Drawing job whose first output is the edit; its input is the view render and its mask the area. */
+  /** Drawing job whose first output is the edit; its input is the view render and its mask the area.
+   * Empty for a decal. */
   imageJobId: Schema.String.check(Schema.isMaxLength(128)),
+  /** The edit output, or the decal image. */
   imageAssetId: Schema.String.check(Schema.isMaxLength(128)),
+  /** Set when an uploaded image was placed in the masked area instead of a drawing edit. */
+  decal: Schema.optional(Schema.Struct({ fit: Schema.Literals(["contain", "cover"]) })),
   /** The user's instruction, without Aha's prompt template. */
   instruction: Schema.String.check(Schema.isMaxLength(2000)),
   /** Inward soft edge of the mask, in view pixels. */
@@ -495,7 +517,7 @@ export const Gen3DCommand = Schema.Struct({
   archived: Schema.optional(Schema.Boolean),
   process: Schema.optional(Gen3DProcess),
   exportPreset: Schema.optional(Schema.Literals(["generic", "godot", "unity", "unreal"])),
-  exportFormat: Schema.optional(Schema.Literals(["glb", "fbx", "obj", "usdz", "stl"])),
+  exportFormat: Schema.optional(Schema.Literals(["glb", "fbx", "obj", "usdz", "stl", "3mf"])),
   repaintView: Schema.optional(Gen3DRepaintView),
   /** render-view with the custom view: the viewer's camera direction and the painted mask. */
   repaintCamera: Schema.optional(Gen3DRepaintCamera),
@@ -509,13 +531,43 @@ export const Gen3DCommand = Schema.Struct({
   skeleton: Schema.optional(Gen3DSkeleton),
   confirmed: Schema.optional(Schema.Boolean),
   skeletonOrigin: Schema.optional(Schema.Literals(["template", "user"])),
+  /** repaint with a decal: an uploaded image placed in the mask's bounds of the view render. */
+  decal: Schema.optional(
+    Schema.Struct({
+      viewAssetId: Schema.String.check(Schema.isMaxLength(128)),
+      maskAssetId: Schema.String.check(Schema.isMaxLength(128)),
+      imageAssetId: Schema.String.check(Schema.isMaxLength(128)),
+      fit: Schema.Literals(["contain", "cover"]),
+    }),
+  ),
 });
 export type Gen3DExportFormat = NonNullable<Gen3DCommand["exportFormat"]>;
 export type Gen3DCommand = typeof Gen3DCommand.Type;
+/** What a print export (STL, 3MF) found: closure and wall thickness at real size. */
+export const Gen3DPrintReport = Schema.Struct({
+  watertight: Schema.Boolean,
+  openEdges: Schema.Finite,
+  sizeMm: Schema.Array(Schema.Finite),
+  thickness: Schema.NullOr(
+    Schema.Struct({
+      samples: Schema.Finite,
+      /** Second percentile of the sampled thickness. */
+      minMm: Schema.Finite,
+      medianMm: Schema.Finite,
+      /** Share of samples thinner than thinMm, percent. */
+      thinPct: Schema.Finite,
+      thinMm: Schema.Finite,
+      areaMm2: Schema.Finite,
+    }),
+  ),
+});
+export type Gen3DPrintReport = typeof Gen3DPrintReport.Type;
 export const Gen3DCommandResult = Schema.Struct({
   project: Schema.NullOr(Gen3DProject),
   environment: Schema.optional(Gen3DEnvironment),
   exportPath: Schema.optional(Schema.String),
+  /** export as STL or 3MF: the printability check. */
+  print: Schema.optional(Gen3DPrintReport),
   /** render-view: the view render saved as a drawing asset, ready for mask painting. */
   viewAsset: Schema.optional(ImageAsset),
   /** render-view of a custom view: the 3D-painted mask as seen from it (transparent = repaint). */

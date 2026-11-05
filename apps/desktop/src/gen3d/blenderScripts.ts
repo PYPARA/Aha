@@ -6,6 +6,8 @@ export const GEN3D_PROCESS_SCRIPT = String.raw`# Aha 3D generation fixed optimiz
 # Usage: blender -b --factory-startup --disable-autoexec --python process.py -- config.json
 import bpy, bmesh, json, math, os, sys, time
 from mathutils import Matrix, Vector
+from mathutils.bvhtree import BVHTree
+import numpy as np
 
 started = time.time()
 with open(sys.argv[sys.argv.index('--') + 1], encoding='utf-8') as handle:
@@ -56,6 +58,239 @@ def decimate(obj, ratio):
         modifier.ratio = max(ratio, 0.0001)
         bpy.ops.object.modifier_apply(modifier=modifier.name)
     clean(obj)
+
+
+def hull_volume(points):
+    bm = bmesh.new()
+    for p in points:
+        bm.verts.new(p)
+    try:
+        result = bmesh.ops.convex_hull(bm, input=bm.verts)
+        bmesh.ops.delete(bm, geom=[g for g in result['geom_interior'] if isinstance(g, bmesh.types.BMVert)], context='VERTS')
+        volume = abs(bm.calc_volume())
+    except Exception:
+        volume = 0.0
+    bm.free()
+    return volume
+
+
+def convex_decomposition(source, max_hulls=16, resolution=40, threshold=0.05, max_vertices=64):
+    """Approximate convex decomposition (in the spirit of V-HACD): voxelize the solid, then
+    split the most concave piece with the best axis-aligned plane until every piece is close to
+    its hull or the hull budget is used. Returns one convex hull mesh (list of points) per piece."""
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    tree = BVHTree.FromObject(source, depsgraph)
+    corners = [source.matrix_world @ Vector(c) for c in source.bound_box]
+    lo = np.array(Vector(map(min, *corners)))
+    hi = np.array(Vector(map(max, *corners)))
+    size = np.maximum(hi - lo, 1e-6)
+    cell = float(size.max()) / resolution
+    dims = np.maximum(1, np.ceil(size / cell).astype(int)) + 2
+    origin = lo - cell - ((dims - 2) * cell - size) / 2
+    reach = cell * 0.87
+    shell = np.zeros(dims, bool)
+    for i in range(dims[0]):
+        for j in range(dims[1]):
+            for k in range(dims[2]):
+                if tree.find_nearest(Vector(origin + (np.array([i, j, k]) + 0.5) * cell), reach)[0] is not None:
+                    shell[i, j, k] = True
+    outside = np.zeros(dims, bool)
+    outside[0, :, :] = outside[-1, :, :] = outside[:, 0, :] = outside[:, -1, :] = True
+    outside[:, :, 0] = outside[:, :, -1] = True
+    outside &= ~shell
+    while True:
+        grown = outside.copy()
+        for axis in range(3):
+            for shift in (1, -1):
+                grown |= np.roll(outside, shift, axis) & ~shell
+        if (grown == outside).all():
+            break
+        outside = grown
+    solid = ~outside
+    offsets = np.array([[x, y, z] for x in (0, 1) for y in (0, 1) for z in (0, 1)], float)
+
+    def boundary(mask):
+        inner = mask.copy()
+        for axis in range(3):
+            for shift in (1, -1):
+                inner &= np.roll(mask, shift, axis)
+        return mask & ~inner
+
+    def corner_points(mask):
+        cells = np.argwhere(boundary(mask)).astype(float)
+        if not len(cells):
+            return np.zeros((0, 3))
+        points = (cells[:, None, :] + offsets[None, :, :]).reshape(-1, 3)
+        return origin + np.unique(points, axis=0) * cell
+
+    def concavity(mask):
+        count = int(mask.sum())
+        if count == 0:
+            return 0.0, 0.0
+        volume = hull_volume(corner_points(mask))
+        solid_volume = count * cell ** 3
+        return max(0.0, 1 - solid_volume / max(volume, 1e-12)), volume
+
+    pieces = [(solid, *concavity(solid))]
+    while len(pieces) < max_hulls:
+        # The piece whose hull wastes the most volume.
+        index = max(range(len(pieces)), key=lambda i: pieces[i][1] * pieces[i][2])
+        mask, c, volume = pieces[index]
+        if c < threshold or mask.sum() < 8:
+            break
+        best = None
+        for axis in range(3):
+            occupied = np.nonzero(mask.any(axis=tuple(a for a in range(3) if a != axis)))[0]
+            if len(occupied) < 2:
+                continue
+            first, last = int(occupied[0]), int(occupied[-1])
+            for fraction in (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8):
+                cut = first + max(1, int(round((last - first + 1) * fraction)))
+                if cut <= first or cut > last:
+                    continue
+                left = mask.copy()
+                right = mask.copy()
+                slicer = [slice(None)] * 3
+                slicer[axis] = slice(cut, None)
+                left[tuple(slicer)] = False
+                slicer[axis] = slice(None, cut)
+                right[tuple(slicer)] = False
+                if not left.any() or not right.any():
+                    continue
+                a, b = concavity(left), concavity(right)
+                # Wasted hull volume after the cut.
+                waste = a[0] * a[1] + b[0] * b[1]
+                if best is None or waste < best[0]:
+                    best = (waste, (left, *a), (right, *b))
+        if best is None or best[0] >= c * volume * 0.95:
+            break
+        pieces[index:index + 1] = [best[1], best[2]]
+
+    # Final hulls: the source vertices inside each piece plus the corners where it meets
+    # another piece, so neighbouring hulls close the cut.
+    vertices = np.array([source.matrix_world @ v.co for v in source.data.vertices])
+    cells = np.clip(np.floor((vertices - origin) / cell).astype(int), 0, dims - 1)
+    owner = np.full(dims, -1, int)
+    for n, (mask, _, _) in enumerate(pieces):
+        owner[mask] = n
+    hulls = []
+    for n, (mask, _, _) in enumerate(pieces):
+        inside = vertices[owner[cells[:, 0], cells[:, 1], cells[:, 2]] == n]
+        touching = mask.copy()
+        touching[:] = False
+        others = (owner >= 0) & (owner != n)
+        for axis in range(3):
+            for shift in (1, -1):
+                touching |= mask & np.roll(others, shift, axis)
+        seam = np.argwhere(touching).astype(float)
+        seam_points = origin + np.unique((seam[:, None, :] + offsets[None]).reshape(-1, 3), axis=0) * cell if len(seam) else np.zeros((0, 3))
+        points = np.concatenate([inside, seam_points]) if len(inside) else corner_points(mask)
+        if len(points) < 4:
+            continue
+        hulls.append(simplified_hull(points, max_vertices))
+    return hulls, len(pieces)
+
+
+def simplified_hull(points, max_vertices):
+    bm = bmesh.new()
+    for p in points:
+        bm.verts.new(Vector(p))
+    result = bmesh.ops.convex_hull(bm, input=bm.verts)
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+    # Fewer vertices: collapse edges, then take the hull again so the shape stays convex.
+    if len(bm.verts) > max_vertices:
+        mesh = bpy.data.meshes.new('HullTmp')
+        bm.to_mesh(mesh)
+        bm.free()
+        obj = bpy.data.objects.new('HullTmp', mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        modifier = obj.modifiers.new('Decimate', 'DECIMATE')
+        modifier.ratio = max(0.01, (max_vertices * 2 - 4) / max(1, len(mesh.polygons) * 1.0))
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated = obj.evaluated_get(depsgraph)
+        reduced = [evaluated.matrix_world @ v.co for v in evaluated.data.vertices]
+        bpy.data.objects.remove(obj)
+        bpy.data.meshes.remove(mesh)
+        bm = bmesh.new()
+        for p in reduced:
+            bm.verts.new(p)
+        bmesh.ops.convex_hull(bm, input=bm.verts)
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+    bmesh.ops.triangulate(bm, faces=bm.faces)
+    verts = [tuple(v.co) for v in bm.verts]
+    index = {v: i for i, v in enumerate(bm.verts)}
+    faces = [[index[v] for v in f.verts] for f in bm.faces]
+    bm.free()
+    return verts, faces
+
+
+def quad_remesh(obj, target_quads):
+    """QuadriFlow to about target_quads quads. Returns how it got there. QuadriFlow rejects edges
+    shorter than 0.1 mm and inconsistent normals, so the mesh is scaled to a 10-unit diagonal and
+    cleaned first; a mesh it still rejects is voxel-remeshed (which makes it manifold) and tried
+    again, and only then decimated instead."""
+    scale = 10 / max(obj.dimensions.length, 1e-6)
+    obj.data.transform(Matrix.Scale(scale, 4))
+
+    def prepare():
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=2e-4)
+        bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=2e-4)
+        bmesh.ops.delete(bm, geom=[e for e in bm.edges if not e.link_faces], context='EDGES')
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(obj.data)
+        bm.free()
+
+    def quadriflow():
+        select_only([obj])
+        before = len(obj.data.polygons)
+        result = bpy.ops.object.quadriflow_remesh(target_faces=max(8, int(target_quads)), use_mesh_symmetry=False,
+                                                  use_preserve_sharp=True, use_preserve_boundary=True, seed=0,
+                                                  mode='FACES')
+        return 'FINISHED' in result and len(obj.data.polygons) != before
+
+    prepare()
+    method = 'quadriflow'
+    if not quadriflow():
+        select_only([obj])
+        obj.data.remesh_voxel_size = 10 / 256
+        bpy.ops.object.voxel_remesh()
+        prepare()
+        method = 'voxel-quadriflow'
+        if not quadriflow():
+            method = 'decimate'
+    obj.data.transform(Matrix.Scale(1 / scale, 4))
+    if method == 'decimate':
+        decimate(obj, target_quads * 2 / max(triangles(obj), 1))
+    else:
+        clean(obj)
+    return method
+
+
+def transfer_faces(target, source):
+    """Material and part of each target face from the nearest source face (a remeshed low poly
+    has new faces that know neither)."""
+    tree = BVHTree.FromObject(source, bpy.context.evaluated_depsgraph_get())
+    materials = [p.material_index for p in source.data.polygons]
+    part = source.data.attributes.get('aha_part')
+    parts = np.empty(len(source.data.polygons), np.int32) if part else None
+    if part:
+        part.data.foreach_get('value', parts)
+    target.data.materials.clear()
+    for m in source.data.materials:
+        target.data.materials.append(m)
+    found = []
+    for polygon in target.data.polygons:
+        hit = tree.find_nearest(polygon.center)
+        found.append(hit[2] if hit[2] is not None else 0)
+    target.data.polygons.foreach_set('material_index', [materials[i] for i in found])
+    if part:
+        if 'aha_part' in target.data.attributes:
+            target.data.attributes.remove(target.data.attributes['aha_part'])
+        attribute = target.data.attributes.new('aha_part', 'INT', 'FACE')
+        attribute.data.foreach_set('value', [int(parts[i]) for i in found])
 
 
 def export(objects, name, extras=False):
@@ -442,9 +677,18 @@ for polygon in high.data.polygons:
     polygon.use_smooth = True
 high_tris = triangles(high)
 
-# 3. Low poly at the target triangle count.
+# 3. Low poly at the target triangle count: decimated triangles, or QuadriFlow quads (two
+# triangles each), whose new faces take material and part from the nearest high poly face.
 low = duplicate(high, 'Model')
-decimate(low, params['targetTriangles'] / max(high_tris, 1))
+if params.get('topology') == 'quads':
+    method = quad_remesh(low, params['targetTriangles'] / 2)
+    transfer_faces(low, high)
+    for polygon in low.data.polygons:
+        polygon.use_smooth = True
+    stats['topology'] = {'kind': 'quads', 'method': method,
+                         'quads': sum(1 for p in low.data.polygons if len(p.vertices) == 4)}
+else:
+    decimate(low, params['targetTriangles'] / max(high_tris, 1))
 size = int(params['textureSize'])
 # Decimation moves the bounds a little; keep the published low poly bottom-centred (Blender Z up).
 lo = Vector(map(min, *[Vector(c) for c in low.bound_box]))
@@ -590,8 +834,23 @@ if params['collision'] != 'none':
     scene.collection.objects.link(shape)
     if params['collision'] == 'convex':
         decimate(shape, 250 / max(triangles(shape), 1))
-    export([shape], 'collision.glb')
-    collision = {'file': 'collision.glb', 'triangles': triangles(shape)}
+    shapes = [shape]
+    if params['collision'] == 'decomposition':
+        # Several convex hulls (at most 16, 64 vertices each) that follow concave shapes.
+        bpy.data.objects.remove(shape)
+        hulls, _ = convex_decomposition(low)
+        shapes = []
+        for n, (verts, faces) in enumerate(hulls):
+            mesh = bpy.data.meshes.new('Collision_%02d' % n)
+            mesh.from_pydata(verts, [], faces)
+            mesh.update()
+            piece = bpy.data.objects.new('Collision_%02d' % n, mesh)
+            scene.collection.objects.link(piece)
+            shapes.append(piece)
+    export(shapes, 'collision.glb')
+    collision = {'file': 'collision.glb', 'triangles': sum(triangles(o) for o in shapes)}
+    if params['collision'] == 'decomposition':
+        collision['hulls'] = len(shapes)
 
 bpy.data.objects.remove(high)
 final = [low]
@@ -634,7 +893,9 @@ print('AHA_PROCESS=' + json.dumps(report))
 
 export const GEN3D_CONVERT_SCRIPT = String.raw`# Aha 3D generation fixed export conversion (headless Blender). Never runs AI source.
 # Usage: blender -b --factory-startup --disable-autoexec --python convert.py -- config.json
-import bpy, bmesh, json, os, sys
+import bpy, bmesh, json, math, os, random, sys, zipfile
+from mathutils import Vector
+from mathutils.bvhtree import BVHTree
 
 with open(sys.argv[sys.argv.index('--') + 1], encoding='utf-8') as handle:
     cfg = json.load(handle)
@@ -704,12 +965,30 @@ for lod in lods:
         lod.data.materials.append(material)
 bpy.ops.outliner.orphans_purge(do_recursive=True)
 # Engine naming conventions turn the hull into a collider on import.
-collider_names = {'unreal': 'UCX_%s_00' % name, 'unity': '%s_Collider' % name,
-                  'godot': '%s-%s' % (name, 'convcolonly' if cfg.get('collisionKind') == 'convex' else 'colonly')}
+# A convex decomposition keeps one collider per hull (numbered), each convex.
+kind = cfg.get('collisionKind')
+convex = kind in ('convex', 'decomposition')
+collider_names = {'unreal': 'UCX_%s_%02d', 'unity': '%s_Collider_%02d' if kind == 'decomposition' else '%s_Collider',
+                  # Godot strips trailing digits before matching the suffix, so the number goes first.
+                  'godot': ('%s_%02d' if kind == 'decomposition' else '%s') + ('-convcolonly' if convex else '-colonly')}
 collision = None
 if cfg.get('collision') and (fmt == 'fbx' or preset == 'godot'):
-    collision = load(cfg['collision'], collider_names.get(preset, name + '_Collision'))
-    collision.data.materials.clear()
+    pattern = collider_names.get(preset, '%s_Collision' + ('_%02d' if kind == 'decomposition' else ''))
+    if kind == 'decomposition':
+        before = set(scene.objects)
+        bpy.ops.import_scene.gltf(filepath=cfg['collision'])
+        added = [o for o in scene.objects if o not in before]
+        for o in [o for o in added if o.type != 'MESH']:
+            bpy.data.objects.remove(o)
+        hulls = sorted((o for o in added if o.type == 'MESH'), key=lambda o: o.name)
+        for n, hull in enumerate(hulls):
+            hull.name = hull.data.name = pattern % (name, n)
+            hull.data.materials.clear()
+        collision = hulls
+    else:
+        label = pattern % (name, 0) if pattern.count('%') == 2 else pattern % name
+        collision = load(cfg['collision'], label)
+        collision.data.materials.clear()
 
 # Formats with external textures get real PNG files next to the model.
 if fmt in ('fbx', 'obj'):
@@ -722,6 +1001,99 @@ if fmt in ('fbx', 'obj'):
             image.save()
             image.unpack(method='REMOVE')
             image.filepath = file
+
+THIN_MM = 0.8  # two perimeters of a 0.4 mm nozzle, a common minimum printable wall
+
+
+def wall_thickness(bm, samples=4000):
+    """Local wall thickness at random surface points (area weighted): the distance along the
+    inward normal to the next surface. Models of intersecting parts measure to the nearest
+    inner surface, so the result errs on the thin side. Points whose ray escapes (open meshes)
+    are skipped."""
+    tree = BVHTree.FromBMesh(bm)
+    faces = [f for f in bm.faces if f.calc_area() > 0]
+    if not faces:
+        return None
+    areas = [f.calc_area() for f in faces]
+    total = sum(areas)
+    rng = random.Random(7)
+    picks = rng.choices(faces, weights=areas, k=samples)
+    diagonal = max((Vector(map(max, *[v.co for v in bm.verts])) - Vector(map(min, *[v.co for v in bm.verts]))).length, 1e-6)
+    values = []
+    for face in picks:
+        a, b, c = (v.co for v in face.verts)
+        r1, r2 = rng.random(), rng.random()
+        if r1 + r2 > 1:
+            r1, r2 = 1 - r1, 1 - r2
+        point = a + (b - a) * r1 + (c - a) * r2
+        normal = face.normal
+        if normal.length < 0.5:
+            continue
+        origin = point - normal * diagonal * 1e-5
+        hit = tree.ray_cast(origin, -normal, diagonal * 2)
+        if hit[0] is not None:
+            values.append((hit[0] - point).length * 1000)
+    if not values:
+        return None
+    values.sort()
+    pick = lambda q: values[min(len(values) - 1, int(q * len(values)))]
+    return {'samples': len(values), 'minMm': round(pick(0.02), 2), 'medianMm': round(pick(0.5), 2),
+            'thinPct': round(100 * sum(1 for v in values if v < THIN_MM) / len(values), 1), 'thinMm': THIN_MM,
+            'areaMm2': round(total * 1e6, 1)}
+
+
+def material_colour(material):
+    """A material's display colour: the base colour texture's mean, or its base colour value."""
+    if material and material.use_nodes:
+        principled = next((n for n in material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        if principled:
+            socket = principled.inputs['Base Color']
+            image_node = next((link.from_node for link in socket.links if link.from_node.type == 'TEX_IMAGE'), None)
+            if image_node and image_node.image and image_node.image.size[0]:
+                pixels = image_node.image.pixels[:]
+                step = max(4, (len(pixels) // 4 // 4096) * 4)
+                rgb = [sum(pixels[i + k] for i in range(0, len(pixels), step)) for k in range(3)]
+                count = len(range(0, len(pixels), step))
+                return [v / count for v in rgb]
+            return list(socket.default_value)[:3]
+    return [0.8, 0.8, 0.8]
+
+
+def srgb_hex(c):
+    encode = lambda v: 12.92 * v if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055
+    return '#%02X%02X%02X' % tuple(max(0, min(255, round(encode(max(0.0, v)) * 255))) for v in c)
+
+
+def write_3mf(bm, file):
+    """A 3MF package (core spec): one mesh object in millimetres, Z up, with one base material
+    per source material so slicers can show or assign colours."""
+    from xml.sax.saxutils import escape
+    materials = list(model.data.materials) or [None]
+    index = {v: i for i, v in enumerate(bm.verts)}
+    vertices = ''.join('<vertex x="%.4f" y="%.4f" z="%.4f"/>' % tuple(c * 1000 for c in v.co) for v in bm.verts)
+    triangles = ''.join('<triangle v1="%d" v2="%d" v3="%d" pid="1" p1="%d"/>' % (
+        index[f.verts[0]], index[f.verts[1]], index[f.verts[2]], min(f.material_index, len(materials) - 1)) for f in bm.faces)
+    bases = ''.join('<base name="%s" displaycolor="%s"/>' % (escape(m.name if m else 'Default', {'"': '&quot;'}),
+                                                              srgb_hex(material_colour(m))) for m in materials)
+    model_xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                 '<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+                 '<metadata name="Application">Aha</metadata><metadata name="Title">%s</metadata>'
+                 '<resources><basematerials id="1">%s</basematerials>'
+                 '<object id="2" type="model" pid="1" pindex="0"><mesh><vertices>%s</vertices><triangles>%s</triangles></mesh></object>'
+                 '</resources><build><item objectid="2"/></build></model>') % (escape(name), bases, vertices, triangles)
+    content_types = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                     '<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>')
+    rels = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+            '</Relationships>')
+    with zipfile.ZipFile(file, 'w', zipfile.ZIP_DEFLATED) as package:
+        package.writestr('[Content_Types].xml', content_types)
+        package.writestr('_rels/.rels', rels)
+        package.writestr('3D/3dmodel.model', model_xml)
+
 
 report = {'format': fmt, 'preset': preset, 'files': []}
 if fmt == 'glb':
@@ -748,17 +1120,27 @@ elif fmt == 'usdz':
     bpy.ops.wm.usd_export(filepath=os.path.join(out, name + '.usdz'), export_materials=True,
                           export_textures_mode='NEW', relative_paths=True)
     report['files'].append(name + '.usdz')
-elif fmt == 'stl':
+elif fmt in ('stl', '3mf'):
     bm = bmesh.new()
     bm.from_mesh(model.data)
+    bm.transform(model.matrix_world)
     # glTF splits vertices along UV and normal seams; weld them before judging closure.
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+    bmesh.ops.triangulate(bm, faces=bm.faces)
     open_edges = sum(1 for e in bm.edges if not e.is_manifold)
-    bm.free()
     report['watertight'] = open_edges == 0
     report['openEdges'] = open_edges
-    bpy.ops.wm.stl_export(filepath=os.path.join(out, name + '.stl'), ascii_format=False, forward_axis='Y', up_axis='Z')
-    report['files'].append(name + '.stl')
+    report['thickness'] = wall_thickness(bm)
+    corners = [v.co for v in bm.verts]
+    lo, hi = Vector(map(min, *corners)), Vector(map(max, *corners))
+    report['sizeMm'] = [round((hi[i] - lo[i]) * 1000, 2) for i in range(3)]
+    if fmt == 'stl':
+        bpy.ops.wm.stl_export(filepath=os.path.join(out, name + '.stl'), ascii_format=False, forward_axis='Y', up_axis='Z')
+        report['files'].append(name + '.stl')
+    else:
+        write_3mf(bm, os.path.join(out, name + '.3mf'))
+        report['files'].append(name + '.3mf')
+    bm.free()
 if os.path.isdir(os.path.join(out, 'textures')):
     report['files'] += ['textures/' + f for f in sorted(os.listdir(os.path.join(out, 'textures')))]
 print('AHA_CONVERT=' + json.dumps(report))
@@ -1128,6 +1510,10 @@ def blur(a, radius):
 feather = int(cfg.get('feather', 6))
 # Feather only inward so nothing outside the painted mask can change.
 weight_map = np.clip(blur(mask, feather) * 2 - 1, 0, 1) * mask if feather else mask
+if cfg.get('decal'):
+    # A decal was fitted into the mask's bounds; the whole image applies, limited only by its
+    # own transparency (it is transparent outside those bounds), not by the stroke's shape.
+    weight_map = np.ones_like(mask)
 
 
 def sample(img, x, y):
@@ -1153,13 +1539,23 @@ tolerance = 0.01 * float(np.linalg.norm(extent)) + 2 * pixel
 visible = inside & hit[yi, xi] & (np.linalg.norm(view_pos[yi, xi] - p, axis=-1) < tolerance) & (facing > 0.05)
 grazing = np.clip((facing - 0.05) / 0.3, 0, 1)
 w = np.where(visible, sample(weight_map, x, y)[:, 0] * grazing ** 2 * (3 - 2 * grazing), 0)
+decal = bool(cfg.get('decal'))
+if decal:
+    # A decal changes only where it is opaque.
+    w = w * sample(edited[..., 3], x, y)[:, 0]
 chosen = w > 1e-3
 rows, cols, w, x, y = rows[chosen], cols[chosen], w[chosen], x[chosen], y[chosen]
 
-# The edited image was shaded like the view render; divide that factor out to get albedo.
-edit_linear = srgb_to_linear(sample(edited[..., :3], x, y))
-shade = sample(view_shade, x, y)[:, 0]
-albedo = linear_to_srgb(edit_linear / np.maximum(shade, 0.3)[:, None])
+if decal:
+    # Decal colours are the albedo to paint as they are; weight by alpha when sampling so the
+    # colour of transparent pixels does not darken the decal's edge.
+    coverage = np.maximum(sample(edited[..., 3], x, y), 1e-4)
+    albedo = np.clip(sample(edited[..., :3] * edited[..., 3:4], x, y) / coverage, 0, 1)
+else:
+    # The edited image was shaded like the view render; divide that factor out to get albedo.
+    edit_linear = srgb_to_linear(sample(edited[..., :3], x, y))
+    shade = sample(view_shade, x, y)[:, 0]
+    albedo = linear_to_srgb(edit_linear / np.maximum(shade, 0.3)[:, None])
 
 factor = size // res
 base = np.empty(size * size * 4, np.float32)

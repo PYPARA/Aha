@@ -40,8 +40,8 @@ export const gen3dCopy: Record<string, string> = {
   Turntable: "转台",
   "Play (Space)": "播放（空格）",
   "Pause (Space)": "暂停（空格）",
-  "3D model. Drag to orbit, right-drag or arrow keys to pan, scroll to zoom; click a part to select it, with Cmd or Ctrl to add. R resets the view, 1–9 switch the display, T toggles the turntable, Space pauses the animation.":
-    "3D 模型。拖动旋转，右键拖动或方向键平移，滚轮缩放；单击选中部件，按住 Cmd 或 Ctrl 加选。R 重置视角，1–9 切换显示，T 开关转台，空格暂停动画。",
+  "3D model. Drag to orbit, right-drag or arrow keys to pan, scroll to zoom; click a part to select it, with Cmd or Ctrl to add. R resets the view, 1–9 switch the display, U shows the UV layout, T toggles the turntable, Space pauses the animation.":
+    "3D 模型。拖动旋转，右键拖动或方向键平移，滚轮缩放；单击选中部件，按住 Cmd 或 Ctrl 加选。R 重置视角，1–9 切换显示，U 显示 UV 布局，T 开关转台，空格暂停动画。",
   "Selected: {parts}": "已选：{parts}",
   "Prop animation": "道具动画",
   "Lid on a hinge": "合页盖子",
@@ -241,8 +241,6 @@ export const gen3dCopy: Record<string, string> = {
     "FBX，Y 轴向上、米制；LOD 命名为 _LOD0、_LOD1…，碰撞体为 _Collider。",
   "FBX that Unreal's importer turns into Z up and centimetres. LODs are named _LOD0, _LOD1… and the hull UCX_.":
     "FBX，由 Unreal 导入器转换为 Z 轴向上和厘米；LOD 命名为 _LOD0、_LOD1…，碰撞体为 UCX_。",
-  "STL for 3D printing. The export reports whether the mesh is closed.":
-    "用于 3D 打印的 STL，导出时会检查网格是否闭合。",
   "Model, LOD and collision files with embedded or adjacent textures.":
     "模型、LOD 和碰撞体文件，贴图内嵌或放在旁边。",
   "This format needs Blender. Set it up in the 3D workshop.":
@@ -370,4 +368,52 @@ export const gen3dCopy: Record<string, string> = {
   Warnings: "警告",
   errors: "个错误",
   validating: "检查中",
+  "Paint with": "绘制方式",
+  "A description (drawing channel)": "文字描述（绘图渠道）",
+  "An image of my own (decal)": "自己的图片（贴花）",
+  "Choose an image": "选择图片",
+  "Choose another image": "换一张图片",
+  "Image fit": "图片适配",
+  "Whole image inside the mask": "完整放进遮罩外框",
+  "Fill the mask (crop the image)": "填满遮罩外框（裁切图片）",
+  "Placing image…": "正在放置图片…",
+  "Place image on the model": "把图片放到模型上",
+  "The image could not be placed on the model.": "无法把图片放到模型上。",
+  "The painted area only marks where the image goes: the whole image is fitted into its bounds and projected onto the texture with its own colours, and its transparent parts keep the texture. No drawing channel is used. Use a PNG with transparency for logos and stickers.":
+    "画的遮罩只用来标出图片的位置：整张图片会适配到遮罩的外框里，按原本的颜色投影到贴图上，透明部分保留原贴图，不调用绘图渠道。标志和贴纸请用带透明背景的 PNG。",
+  "Low poly faces": "低模面型",
+  "Triangles (decimate)": "三角面（减面）",
+  "Quads (QuadriFlow remesh)": "四边面（QuadriFlow 重拓扑）",
+  "Rebuilds the surface as even quads (two triangles each) for sculpting, subdivision and clean deformation. Sharp detail softens and very thin parts may merge; baking restores the look. GLB stores triangles, FBX and OBJ keep the quads.":
+    "把表面重建为均匀的四边面（每个算两个三角面），便于雕刻、细分和变形。锐利细节会变柔和，很细的部件可能合并，烘焙会补回外观。GLB 存为三角面，FBX 和 OBJ 保留四边面。",
+  "Convex decomposition (up to 16 hulls)": "凸分解（最多 16 个凸包）",
+  "Splits the solid into convex pieces that follow legs, handles and openings, so objects can stand closer to the model than with one hull.":
+    "把实体拆成贴合腿、把手和开口的多个凸块，物体能比单个凸包更贴近模型。",
+  "{n} convex hulls": "{n} 个凸包",
+  "{n} quads": "{n} 个四边面",
+  "Triangles (QuadriFlow could not remesh this model)": "三角面（QuadriFlow 无法重拓扑这个模型）",
+  "3MF for 3D printing, in millimetres with one colour per material. The export checks whether the mesh is closed and how thick its walls are.":
+    "用于 3D 打印的 3MF，单位毫米，每种材质一个颜色。导出时检查网格是否闭合以及壁厚。",
+  "STL for 3D printing. The export checks whether the mesh is closed and how thick its walls are.":
+    "用于 3D 打印的 STL。导出时检查网格是否闭合以及壁厚。",
+  "Print check": "打印检查",
+  "Closed mesh.": "网格闭合。",
+  "{n} open edges: close the mesh before printing.": "有 {n} 条开放边，打印前需要先闭合网格。",
+  "Size {size} mm.": "尺寸 {size} mm。",
+  "Walls: thinnest {min} mm, typical {median} mm; {pct}% of the surface is under {limit} mm.":
+    "壁厚：最薄 {min} mm，典型 {median} mm；{pct}% 的表面低于 {limit} mm。",
+  "Wall thickness could not be measured (no closed walls).": "无法测量壁厚（没有闭合的壁）。",
+  "Measured at the model's real size from {n} surface samples. Intersecting parts measure to the nearest inner surface, so thin results may be conservative. Scale the model in your slicer to change wall thickness.":
+    "按模型真实尺寸、在 {n} 个表面采样点上测量。互相穿插的部件会量到最近的内表面，所以偏薄的结果可能偏保守。在切片软件里缩放模型会改变壁厚。",
+  "UV layout": "UV 布局",
+  "UV layout (U)": "UV 布局（U）",
+  "UV layout of the base colour map": "基础色贴图上的 UV 布局",
+  "UV coverage {coverage}% · overlap {overlap}%": "UV 覆盖 {coverage}% · 重叠 {overlap}%",
+  "Selected parts are highlighted.": "选中的部件已高亮。",
+  "3D model, editing joints. Drag a joint dot to move it in the plane facing you; turn the view to move it in depth. Arrow keys move the selected joint (Shift for larger steps), Cmd or Ctrl+Z undoes, R resets the view.":
+    "3D 模型，正在编辑关节。拖动关节圆点会在正对你的平面内移动它，转动视角后可以调整深度。方向键移动选中的关节（按住 Shift 移动更多），Cmd 或 Ctrl+Z 撤销，R 重置视角。",
+  "Editing joints: drag a dot, turn the view for depth, arrow keys nudge.":
+    "正在编辑关节：拖动圆点，转动视角调整深度，方向键微调。",
+  "You can also drag the joints on the model in the viewer: they stay in front of the model, and turning the view moves them in depth.":
+    "也可以在查看器里直接拖动模型上的关节：关节始终显示在模型前面，转动视角后拖动即可调整深度。",
 };

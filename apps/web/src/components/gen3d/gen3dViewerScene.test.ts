@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frameColumnRow, heat, overlayFrame, weightColors } from "./gen3dViewerScene";
+import { frameColumnRow, heat, overlayFrame, uvUsage, weightColors } from "./gen3dViewerScene";
 
 // The score's convention (gen3dScore / process.py): bx = 128 + (u - cu) * ppm; x = mirrored ?
 // 256 - bx + dx : bx + dx; y = GROUND - (v - y0) * ppm, with GROUND = 243 and y0 = 0.
@@ -40,5 +40,22 @@ describe("weights", () => {
     expect(Array.from(colors.slice(0, 3))).toEqual(heat(1));
     expect(Array.from(colors.slice(3, 6))).toEqual(heat(0.5));
     expect(heat(0)).toEqual([0, 0, 1]);
+  });
+});
+
+describe("uvUsage", () => {
+  it("measures coverage and counts shared edges once", () => {
+    // Two triangles making the lower-left quarter square.
+    const quad = Float32Array.from([0, 0, 0.5, 0, 0.5, 0.5, 0, 0, 0.5, 0.5, 0, 0.5]);
+    const usage = uvUsage([quad], 64);
+    expect(usage.coverage).toBeCloseTo(0.25, 2);
+    expect(usage.overlap).toBe(0);
+  });
+  it("reports overlapping islands and wraps tiles", () => {
+    const quad = Float32Array.from([0, 0, 0.5, 0, 0.5, 0.5, 0, 0, 0.5, 0.5, 0, 0.5]);
+    const shifted = quad.map((v) => v + 1);
+    const usage = uvUsage([quad, shifted], 64);
+    expect(usage.coverage).toBeCloseTo(0.25, 2);
+    expect(usage.overlap).toBeCloseTo(0.25, 2);
   });
 });

@@ -22,6 +22,7 @@
 - **附加关节**：版本不可修改，后补的关节存在 `Gen3DProject.skeletons`（按 versionId，最多 64 组；`origin` 为 ai / template / user，`confirmed`）。工作台用 `set-skeleton`（空数组删除），Agent 工具的 `skeleton` 操作走 `propose-skeleton`，引擎强制记为 `origin: "ai"`、未确认，不消耗轮次。两者都要通过 `validateSkeleton`，且每个关节都在版本包围盒外扩 25% 以内。`rigSkeleton`（`@synara/shared/gen3dVersions`）沿版本链从近到远查找：某个版本的附加关节（默认只认已确认的）优先于它构建时带的骨架。导出时附加关节写成 `skeleton.json`。
   - 关节编辑器把关节画在运行页的 512 像素正交渲染上：取景是最长边的 1.2 倍、以底部居中模型的包围盒中心为中心；正面 x 向右，侧面（相机在 +X）−z 向右（`skeletonJoints.ts`）。改动运行页的渲染取景时必须同步这里。
   - 编辑器只在已保存关节的内容变化时重置本地编辑，项目刷新不会打断拖动。
+  - 编辑中的关节放在 `Gen3DJointSession`（`gen3dJoints.ts`）里，由编辑器创建、经工作台交给查看器，两边改的是同一份（一次拖动一个撤销步骤，最多 50 步）。关节坐标是版本的 glTF 坐标（底部居中），与查看器世界坐标一致，所以优化、重绘等派生版本上也能直接显示来源版本的关节。查看器在捕获阶段处理圆点 12 像素内的按下（否则交给 OrbitControls 旋转），拖动沿过关节、垂直于视线的平面移动；方向键在捕获阶段先于 OrbitControls 的平移处理。
 - **绑定（`rig` 命令）**：只能由工作台发起，`submit` 拒绝带 `rig` 的构建。引擎用 `rigSkeleton` 确认版本链上有已确认的关节，再创建 `mode: "process"`、带 `rig.clips` 的任务。绑定版本的 `model.glb` 是父版本静态网格的原样副本，所以评分、查看器和工坊的模型校验都不受影响（工坊的加载器拒绝蒙皮和动画，不要放宽）；蒙皮动画模型是派生文件 `rigged.glb`（同样要通过 glTF Validator），每段动画另有预览 `anim-<clip>.webp`。版本记录 `process.rig`（类型、骨骼数、片段、按部件绑定的数量）。重绘一个绑定版本时，宿主同样替换 `rigged.glb` 里的基础色图片，并复制预览。
 - **风格化（`stylize` 命令）**：只能由工作台发起，`submit` 拒绝带 `stylize` 的构建。精细度范围按风格（`GEN3D_STYLES`）在引擎里检查。宿主发布 Blender 写出的 GLB，版本记录 `process.stylize`（风格、精细度、颜色数、体素和凸点数），`process.baked` 为空，所以不能直接重绘（调色板 UV 被同色的面共用）。
 - **道具动画（`animate` 命令）**：只能由工作台发起，`submit` 拒绝带 `animate` 的构建。部件用版本报告里的对象 id（即 `ahaId`），必须都存在、至少留一个网格部件不动；门只能用左右边，盖子必须指定边。和绑定一样，`model.glb` 是父版本的原样副本，动画模型是派生文件 `animated.glb`，预览为 `anim-open|close|spin.webp`，版本记录 `process.props`。导出、重绘与 `rigged.glb` 同等处理。
@@ -62,8 +63,10 @@
 - **固定后处理脚本**（`blenderScripts.ts`，原型和调试在 `.tmp/gen3d/m2/`）：
   - 宿主用 `blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python <脚本> -- <config.json>` 运行，只传 schema 校验过的参数，不经过 MCP，也不执行 AI 代码。必须带 `--python-exit-code 1`，否则 Python 报错时 Blender 仍返回 0。stdout 和 stderr 都写进任务目录的 `blender-<kind>.log`，结果从 `AHA_PROCESS=` / `AHA_CONVERT=` 行读取。
   - 这些后台进程不占用工坊的 MCP 锁（是独立进程，不连接 GUI 实例），但 3D 生成内部排队，一次只跑一个；超时 `processMs`（10 分钟），取消和退出时只终止 Aha 保存的进程句柄。
-  - `process`：导入父版本 GLB → 清除父子关系并应用变换 → 合并为一个高模 → 可选修复 → Decimate 到目标面数 → 重新底部居中 → 可选 Smart UV + Cycles「选中到活动」烘焙（颜色和金属度都把 Principled 的输入接到发射节点后用 EMIT 烘焙；ROUGHNESS；切线空间 NORMAL；AO）→ LOD → 碰撞体 → 导出。颜色不能用 DIFFUSE 的 COLOR 通道：它乘了 (1 − 金属度)，金属会变黑（M3a 的预设样本里金色部件全黑，M3b 修复）。AO 通过名为 `glTF Material Output` 的节点组的 Occlusion 输入导出，glTF 导出器会把 AO 和粗糙度合并成一张贴图。低模材质开启背面剔除（导出为单面）。优化版本的 GLB 原样发布，不经过运行页重新导出（运行页只负责统计、剪影和渲染），否则会丢掉合并贴图和切线。
+  - `process`：导入父版本 GLB → 清除父子关系并应用变换 → 合并为一个高模 → 可选修复 → Decimate（或 QuadriFlow）到目标面数 → 重新底部居中 → 可选 Smart UV + Cycles「选中到活动」烘焙（颜色和金属度都把 Principled 的输入接到发射节点后用 EMIT 烘焙；ROUGHNESS；切线空间 NORMAL；AO）→ LOD → 碰撞体 → 导出。颜色不能用 DIFFUSE 的 COLOR 通道：它乘了 (1 − 金属度)，金属会变黑（M3a 的预设样本里金色部件全黑，M3b 修复）。AO 通过名为 `glTF Material Output` 的节点组的 Occlusion 输入导出，glTF 导出器会把 AO 和粗糙度合并成一张贴图。低模材质开启背面剔除（导出为单面）。优化版本的 GLB 原样发布，不经过运行页重新导出（运行页只负责统计、剪影和渲染），否则会丢掉合并贴图和切线。
   - 减面前清除导入时的自定义拆分法线，减面后删除退化面：否则插值出的零长度法线会被 glTF Validator 拒绝（骑士样本实测）。
+  - **四边面**（`topology: "quads"`）：QuadriFlow 拒绝短于 0.1 mm 的边（绝对长度）和法线不一致的网格，游戏尺寸的模型几乎都会被拒，所以先缩放到对角线 10 个单位、按 2e-4 焊接、清理退化边、统一法线后再运行，完成后缩回。仍被拒时体素重建（1/256 对角线）后重试，再不行就退回 Decimate，`process.topology.method` 如实记录。QuadriFlow 的输出没有材质槽位和 `aha_part`，按每个新面中心在高模上找最近面拷回，所以保留部件和不烘焙的多材质仍然可用；很小的部件可能被合并掉（AI 狐狸 18 个部件剩 15 个）。
+  - **凸分解**（`collision: "decomposition"`）：思路同 V-HACD，但用 Aha 自己的实现（Blender 没有 V-HACD，也不引入外部二进制）。低模体素化为实心网格（最长边 40 格，外壳加洪水填充），反复挑「凸包浪费体积」最大的块，在三个轴的 20–80% 处各试 7 个切面，取浪费最少的切法，直到每块凹度低于 5% 或达到 16 块。最终凸包取块内的低模顶点加上与相邻块的接缝格角点（不留缝），超过 64 个顶点时减面后再取一次凸包。导出时每块是一个对象：Godot `<名称>_NN-convcolonly`（Godot 匹配后缀前会去掉末尾数字，所以编号放在前面）、Unity `_Collider_NN`、Unreal `UCX_<名称>_NN`。
   - **参考图投影**（`texture: "projection"`）：复用版本评分时的对齐，而不是重新对齐。链路是 世界坐标 → 蓝图像素（同一 px/m、地面线、各视图按模型 u 范围居中）→ 评分记录的 `shiftPx` 和 `mirrored` → 参考图像素（按 `extractBlueprint` 的统一比例和框中心）。宿主把参考图、三张蓝图剪影、框、px/m 和父版本各视图的配准一起传给脚本。
     - 先用 EMIT 烘焙出低模每个贴图像素的世界坐标和法线（归一化到 0–1，因为发射值不能为负），再对正、背和左右两侧四个方向投影；侧视参考同时用于两侧，另一侧镜像取反。
     - 只接受法线与视线夹角足够小、落在蓝图剪影内、且从该方向对高模做光线检测没有被挡住的像素，按夹角的平方加权混合，权重低处向烘焙颜色过渡；再向岛外扩 8 像素，盖住烘焙边距。超过 1024 的贴图按 1024 计算后放大。
@@ -73,6 +76,7 @@
   - `texture`（`view` / `repaint` 两种模式）：
     - 视图：七个正交方向（Blender 小键盘命名，glTF +Z 为正面），按模型投影范围的 1.1 倍取景。Cycles 1 采样、极小像素滤波渲染位置和法线（不做抗锯齿，像素中心可精确换算），16 采样渲染发射的基础色；输出的视图图片是基础色乘一个固定的明暗系数（来自法线和固定光向），让绘图模型看得出形体。渲染设置固定，同一版本同一视角的输出逐字节相同，引擎靠这一点核对编辑来源。
     - 自由视角：方向和上方向来自查看器（上方向与方向近乎平行时改用 -Z）。带遮罩网格时，取景对准网格里已涂的格子（跨度 × 1.8 加 6 格，不小于整体取景的 40%，尽量不超出整体画面），每个命中像素按渲染出的位置采样网格得到 2D 遮罩；一个像素都没有时报错「cannot be seen from this angle」，宿主换成给用户的提示。重绘模式直接用 `camera.frame` 复现同一取景。
+    - 贴花（`repaint.decal`）：服务端 `placeDecal` 把上传的图片按 `contain` / `cover` 放进遮罩外框，写成与视图同尺寸的透明 PNG；脚本把它的颜色直接当作基础色（不除明暗系数），权重不再用遮罩形状和柔化（外框以外图片本来就透明），只乘图片自身的透明度，采样时按透明度加权，避免透明像素的颜色压暗边缘。`imageJobId` 为空，`imageAssetId` 是上传的图片。
     - 重绘：EMIT 烘焙每个贴图像素的世界坐标和法线（超过 2048 的贴图按 2048 计算后放大），换算到视图像素；只接受落在画面内、朝向相机、并且就是该像素渲染到的那个表面（与位置图比较，代替光线检测）的像素。权重 = 向内柔化后的遮罩 × 掠射角衰减；编辑图先除以同一明暗系数还原成基础色再混合。权重为 0 的像素保持原值，只向 UV 岛外扩 4 像素。脚本报告改动的纹素数，和 8 位量化后的实际差异一致。
     - 宿主用 `replaceBaseColor`（`glbTexture.ts`）只替换 GLB 里基础色图片的数据，其余 bufferView 按原字节复制；父版本的 LOD 也换上同一张图，碰撞体原样复制。
   - `rig`：
@@ -87,12 +91,14 @@
     - 颜色：在源模型上找最近点，按面角 UV 插值采样基础色贴图（或材质颜色）。输出时不用顶点色：Godot 的 glTF 导入不会把 COLOR_0 当作反照率（实测模型发白），改为生成调色板贴图（每种颜色 8 像素一格，最多 4096 色，`Closest` 采样），每个面的 UV 指向自己颜色格的中心。
   - `prop`：按 `ahaId`（或去掉 `.001` 后缀的对象名）找到部件，只移动最上层的选中对象；在它们的整体包围盒上放一个 `Pivot` 空物体，把部件挂到它下面（保持世界变换），只给支点打关键帧。旋转方向在 glTF 坐标里推导：后边合页绕 +X 取负角、前边取正角，左边（+x 端）绕 Z 取负角、右边取正角；门在左边绕 Y 取正角、右边取负角，使远端向上或向前。导出时开启 extras，保留部件的 `ahaId`。
   - `convert` 的动画模式（`rigged: true`，用于绑定版本和道具动画版本的 GLB 和 FBX）：有骨架时保留骨架和蒙皮网格、删除导入器生成的骨骼显示形状；道具动画保留全部部件和支点；不带 LOD；FBX 用 `bake_anim_use_all_actions` 导出所有动作（Unity 里名为 `Pivot|open`）。
+  - `convert` 的打印格式（STL、3MF）：焊接、三角化后统计开放边，并测壁厚：按面积随机取 4000 个表面点，从点内侧沿 −法线做光线检测，取到对面的距离；报告第 2 百分位、中位数和低于 0.8 mm 的比例（`Gen3DPrintReport`，随导出结果返回给界面并写进 `validation.json`）。3MF 是脚本自己写的 core 规范包（`[Content_Types].xml`、`_rels/.rels`、`3D/3dmodel.model`），毫米、Z 向上，每个材质一个 `basematerials` 显示颜色（基础色贴图的平均值或材质颜色），不依赖 Blender 扩展。
   - `convert`：FBX 对所有引擎都写同一套坐标系（`-Z` 前、`Y` 上、`FBX_SCALE_UNITS`），Unreal 导入器会自己换算；把数据改成 Z 轴向上会和文件头矛盾，Godot 导入时会躺倒（已实测）。FBX 里的 LOD 改用 LOD0 的材质，避免每级都带一份贴图。STL 先按距离焊接再统计开放边，因为 glTF 在 UV 接缝处拆开了顶点。
 - **查看器**（`Gen3DViewer.tsx`、`gen3dViewerScene.ts`）：3D 生成自己的查看器，不再使用工坊的 `ModelViewer`。
   - 自己的加载函数接受蒙皮和动画（工坊的加载器和 Worker 限制不变），只允许 `data:`/`blob:` 资源，检查大小和贴图解码；它只加载 Aha 已发布、通过 glTF Validator 的文件。版本有 `rigged.glb` 或 `animated.glb` 时加载它（静止姿态与 `model.glb` 相同）。
   - 整个查看器只有一个 WebGL 上下文：版本对比用同一个渲染器左右分屏（剪裁区域），参考叠加时渲染到居中的正方形视口。按需渲染，只有播放动画或转台时才连续出帧；`orbit.update()` 会通过 change 事件排下一帧，循环里必须先判断是否已排帧，否则每帧回调翻倍（实测会卡死页面）。
   - 通道显示用 `MeshBasicMaterial` 的 `onBeforeCompile` 只取一个通道并抵消输出的 sRGB 转换，从而保留蒙皮；权重显示克隆几何体写入顶点色，切换模式时恢复原几何体和材质。
   - 部件选择：点击（拖动超过 4 像素算旋转）用射线找到网格，向上找第一个带 `ahaId` 的对象；叠加和对比时不选。选中的 id 由工作台持有，和道具动画面板共用，切换版本时清空；高亮是主题色的包围盒。
+  - UV 布局：`uvTriangles` 取每个网格的 UV 三角形，画在 512 像素画布上（glTF 的 v = 0 在图片顶部，与画布一致，不翻转）；`uvUsage` 在 256² 栅格的像素中心（略偏离中心，避免共享对角线被两个三角形同时计入）统计覆盖和重叠，UV 超出 0–1 时按三角形第一个顶点所在的格子整体平移。
   - 参考叠加的正交取景由 `overlayFrame` 计算，与评分的配准一致（同一 px/m、地面线、按模型 u 范围居中、`shiftPx`，镜像时翻转剪影），单元测试逐点比对评分公式。蓝图剪影作为场景里的平面绘制（轮廓加淡填充，颜色取主题的 `--primary`），不用 HTML 叠加，以适配明暗主题。
 - **可信层**（`gen3dRuntime.ts`）：
   - 检查 Worker 输出：沿用工坊的 `validateSceneJSON`，不接受灯光、相机、纹理、动画和骨骼。
@@ -104,7 +110,7 @@
 ## 核心回归
 
 ```sh
-bunx vitest run packages/shared/src/gen3dSdf.test.ts packages/shared/src/gen3dScore.test.ts packages/shared/src/gen3dTexture.test.ts packages/shared/src/gen3dVersions.test.ts apps/desktop/src/gen3d apps/server/src/gen3d apps/server/src/agentGateway/gen3dTools.test.ts apps/web/src/aha/translations.test.ts apps/web/src/components/resources apps/web/src/components/sprite/spriteNavigation.test.ts apps/desktop/src/model3d
+bunx vitest run packages/shared/src/gen3dPaintMask.test.ts apps/web/src/components/gen3d packages/shared/src/gen3dSdf.test.ts packages/shared/src/gen3dScore.test.ts packages/shared/src/gen3dTexture.test.ts packages/shared/src/gen3dVersions.test.ts apps/desktop/src/gen3d apps/server/src/gen3d apps/server/src/agentGateway/gen3dTools.test.ts apps/web/src/aha/translations.test.ts apps/web/src/components/resources apps/web/src/components/sprite/spriteNavigation.test.ts apps/desktop/src/model3d
 bun run typecheck
 bun run build:desktop
 ```

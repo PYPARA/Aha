@@ -3519,6 +3519,42 @@ const makeWsRpcHandlersLayer = () =>
                     );
                     return { project: null, viewAsset };
                   }
+                  if (command.operation === "repaint" && command.decal) {
+                    if (!command.projectId || command.revision === undefined || !command.versionId)
+                      return yield* Effect.fail(
+                        new Error("Choose a version to place the image on."),
+                      );
+                    if (!command.repaintView)
+                      return yield* Effect.fail(new Error("Render a view first."));
+                    const decal = command.decal;
+                    const [viewAsset, maskAsset, imageAsset] = yield* Effect.all([
+                      imageGenerationService.getAsset(decal.viewAssetId),
+                      imageGenerationService.getAsset(decal.maskAssetId),
+                      imageGenerationService.getAsset(decal.imageAssetId),
+                    ]);
+                    const view = yield* imageGenerationService.readAsset(viewAsset, "original");
+                    const mask = yield* imageGenerationService.readAsset(maskAsset, "original");
+                    // A GIF contributes its first frame (the still edit variant).
+                    const image = yield* imageGenerationService.readAsset(
+                      imageAsset,
+                      imageAsset.animation ? "edit" : "original",
+                    );
+                    const repaintView = command.repaintView;
+                    return yield* model3dEffect(async () =>
+                      (await gen3DEngine()).repaintBytes(command.projectId!, command.revision!, {
+                        versionId: command.versionId!,
+                        view: repaintView,
+                        viewImage: view,
+                        image,
+                        mask,
+                        imageJobId: "",
+                        imageAssetId: imageAsset.id,
+                        instruction: command.instruction ?? "",
+                        feather: command.feather ?? 4,
+                        decal: { fit: decal.fit },
+                      }),
+                    );
+                  }
                   if (command.operation === "repaint") {
                     if (
                       !command.projectId ||

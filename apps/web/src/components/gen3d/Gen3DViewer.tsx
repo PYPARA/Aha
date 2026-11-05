@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -17,11 +17,14 @@ import {
   disposeScene,
   loadGen3DModel,
   overlayFrame,
+  uvTriangles,
+  uvUsage,
   weightColors,
   type BlueprintView,
   type DisplayMode,
 } from "./gen3dViewerScene";
 import { gen3dAssetUrl } from "./useGen3D";
+import type { Gen3DJointSession } from "./gen3dJoints";
 import type { Gen3DPaintSession } from "./gen3dPaint";
 
 type Vec3 = [number, number, number];
@@ -120,6 +123,10 @@ function silhouetteMaterial(texture: THREE.Texture, color: THREE.Color) {
       }`,
   });
 }
+type UvUsage = ReturnType<typeof uvUsage>;
+const UV_CANVAS = 512;
+const noSubscription = () => () => {};
+const noSnapshot = () => 0;
 const animatedFile = (version: Gen3DVersion) =>
   version.files.find((f) => f.name === "rigged.glb" || f.name === "animated.glb")?.name;
 
@@ -136,6 +143,10 @@ interface Controls {
   highlight: (ids: readonly string[]) => void;
   setPaint: (session: Gen3DPaintSession | null) => void;
   paintChanged: () => void;
+  setJoints: (session: Gen3DJointSession | null) => void;
+  /** Draws the UV layout (selected parts highlighted) and returns how the layout uses the map. */
+  drawUv: (canvas: HTMLCanvasElement, selected: readonly string[]) => UvUsage | null;
+  jointsChanged: () => void;
   reset: () => void;
   apply: (settings: Settings) => void;
   play: (clip: string, loop: boolean) => void;
@@ -153,11 +164,14 @@ export function Gen3DViewer({
   selected = [],
   onSelect,
   paint = null,
+  joints = null,
 }: {
   project: Gen3DProject;
   version: Gen3DVersion;
   /** While set, dragging on the model paints this repaint mask instead of picking parts. */
   paint?: Gen3DPaintSession | null;
+  /** While set, the joints being edited are drawn over the model and can be dragged. */
+  joints?: Gen3DJointSession | null;
   /** Part ids (ahaId) highlighted in the view; shared with the part lists in the panels. */
   selected?: readonly string[];
   /** A click on a part (additive with Cmd, Ctrl or Shift), or null for empty space. */
@@ -180,10 +194,14 @@ export function Gen3DViewer({
     [clip, setClip] = useState(""),
     [paused, setPaused] = useState(false),
     [compareId, setCompareId] = useState(""),
+    [uvLayout, setUvLayout] = useState(false),
+    [hasUv, setHasUv] = useState(false),
+    [usage, setUsage] = useState<UvUsage | null>(null),
     [error, setError] = useState<string | null>(null),
     [loading, setLoading] = useState(true);
   const compare = project.versions.find((v) => v.id === compareId && v.id !== version.id);
-  const controls = useRef<Controls | null>(null);
+  const controls = useRef<Controls | null>(null),
+    uvCanvas = useRef<HTMLCanvasElement>(null);
   const settings: Settings = {
     mode,
     grid,
@@ -212,6 +230,20 @@ export function Gen3DViewer({
     setCompareId("");
     return paint.subscribe(() => controls.current?.paintChanged());
   }, [paint]);
+  // The status chip names the selected joint.
+  useSyncExternalStore(joints?.subscribe ?? noSubscription, joints?.snapshot ?? noSnapshot);
+  const jointsRef = useRef(joints);
+  jointsRef.current = joints;
+  // Joints are edited on the rest pose, like painting.
+  useEffect(() => {
+    controls.current?.setJoints(joints);
+    if (!joints) return;
+    setClip("");
+    setTurntable(false);
+    setOverlay("off");
+    setCompareId("");
+    return joints.subscribe(() => controls.current?.jointsChanged());
+  }, [joints]);
   // Reset per-version choices when another version is shown.
   useEffect(() => {
     setClip("");
@@ -230,6 +262,11 @@ export function Gen3DViewer({
     setPaused(false);
   }, [clip]);
   useEffect(() => controls.current?.pause(paused), [paused]);
+  const showUv = uvLayout && hasUv && !compare;
+  useEffect(() => {
+    if (!showUv || loading || !uvCanvas.current) return;
+    setUsage(controls.current?.drawUv(uvCanvas.current, selected) ?? null);
+  }, [showUv, loading, selected.join("\n"), version.id, compare?.id]);
 
   const mainUrl = gen3dAssetUrl(project.id, "versions", version.id, animated ?? "model.glb");
   const compareUrl = compare
@@ -336,6 +373,71 @@ export function Gen3DViewer({
         };
         const raycaster = new THREE.Raycaster(),
           pointer = new THREE.Vector2();
+        // UV layout: each mesh's UV triangles with its part id and base colour map.
+        const uvSources = [...originals.keys()]
+          .filter((mesh) => {
+            let o: THREE.Object3D | null = mesh;
+            while (o && o !== main.root) o = o.parent;
+            return !!o;
+          })
+          .flatMap((mesh) => {
+            const triangles = uvTriangles(geometries.get(mesh)!);
+            if (!triangles) return [];
+            let owner: THREE.Object3D | null = mesh;
+            while (owner && typeof owner.userData.ahaId !== "string") owner = owner.parent;
+            const source = originals.get(mesh)!;
+            const map = (
+              (Array.isArray(source) ? source[0] : source) as THREE.MeshStandardMaterial | undefined
+            )?.map;
+            return [
+              {
+                triangles,
+                id: owner ? (owner.userData.ahaId as string) : null,
+                image: (map?.image ?? null) as CanvasImageSource | null,
+              },
+            ];
+          });
+        setHasUv(uvSources.length > 0);
+        let uvUsageCache: UvUsage | null = null;
+        const uvLine = `#${themeColor(element, "--info").getHexString()}`,
+          uvSelected = `#${themeColor(element, "--warning").getHexString()}`;
+        const drawUv = (canvas: HTMLCanvasElement, ids: readonly string[]) => {
+          if (!uvSources.length) return null;
+          uvUsageCache ??= uvUsage(uvSources.map((s) => s.triangles));
+          const context = canvas.getContext("2d");
+          if (!context) return uvUsageCache;
+          const n = canvas.width;
+          context.clearRect(0, 0, n, n);
+          // glTF UVs put v = 0 at the top of the image, as the canvas does.
+          const image = uvSources.find((s) => s.image)?.image;
+          if (image) {
+            context.globalAlpha = 0.85;
+            context.drawImage(image, 0, 0, n, n);
+            context.globalAlpha = 1;
+          }
+          const chosen = new Set(ids);
+          for (const highlighted of [false, true]) {
+            context.beginPath();
+            for (const source of uvSources) {
+              if ((source.id !== null && chosen.has(source.id)) !== highlighted) continue;
+              const t = source.triangles;
+              for (let i = 0; i + 5 < t.length; i += 6) {
+                const tu = Math.floor(t[i]!),
+                  tv = Math.floor(t[i + 1]!);
+                context.moveTo((t[i]! - tu) * n, (t[i + 1]! - tv) * n);
+                context.lineTo((t[i + 2]! - tu) * n, (t[i + 3]! - tv) * n);
+                context.lineTo((t[i + 4]! - tu) * n, (t[i + 5]! - tv) * n);
+                context.closePath();
+              }
+            }
+            context.strokeStyle = highlighted ? uvSelected : uvLine;
+            context.globalAlpha = highlighted ? 1 : chosen.size ? 0.35 : 0.8;
+            context.lineWidth = highlighted ? 1.5 : 1;
+            context.stroke();
+          }
+          context.globalAlpha = 1;
+          return uvUsageCache;
+        };
         const mainMeshes = [...originals.keys()].filter((m) => {
           let o: THREE.Object3D | null = m;
           while (o && o !== main.root) o = o.parent;
@@ -517,6 +619,188 @@ export function Gen3DViewer({
           if (ring.visible && paintSession) ring.scale.setScalar(paintSession.radiusMetres * 0.85);
           render();
         };
+        // Joint editing: a dot per joint and a line to its parent, drawn over the model at a
+        // constant size on screen. A drag moves the joint in the plane facing the camera.
+        let jointSession: Gen3DJointSession | null = null,
+          jointDrag: { id: string; pointer: number; offset: THREE.Vector3 } | null = null;
+        const jointGroup = new THREE.Group();
+        jointGroup.visible = false;
+        scene.add(jointGroup);
+        const jointColor = themeColor(element, "--info"),
+          jointSelectedColor = themeColor(element, "--warning");
+        const jointGeometry = new THREE.SphereGeometry(1, 16, 12);
+        const jointMaterial = new THREE.MeshBasicMaterial({
+          color: jointColor,
+          depthTest: false,
+          transparent: true,
+        });
+        const jointSelectedMaterial = new THREE.MeshBasicMaterial({
+          color: jointSelectedColor,
+          depthTest: false,
+          transparent: true,
+        });
+        const boneLineMaterial = new THREE.LineBasicMaterial({
+          color: jointColor,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.85,
+        });
+        let jointDots = new Map<string, THREE.Mesh>(),
+          boneLines: THREE.LineSegments | null = null;
+        const rebuildJoints = () => {
+          jointGroup.clear();
+          boneLines?.geometry.dispose();
+          boneLines = null;
+          jointDots = new Map();
+          if (!jointSession) return;
+          const list = jointSession.joints,
+            byId = new Map(list.map((j) => [j.id, j]));
+          const segments: number[] = [];
+          for (const joint of list) {
+            const parent = joint.parent ? byId.get(joint.parent) : undefined;
+            if (parent) segments.push(...parent.position, ...joint.position);
+          }
+          if (segments.length) {
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute("position", new THREE.Float32BufferAttribute(segments, 3));
+            boneLines = new THREE.LineSegments(geometry, boneLineMaterial);
+            boneLines.renderOrder = 30;
+            jointGroup.add(boneLines);
+          }
+          for (const joint of list) {
+            const dot = new THREE.Mesh(
+              jointGeometry,
+              joint.id === jointSession.selected ? jointSelectedMaterial : jointMaterial,
+            );
+            dot.position.set(...(joint.position as Vec3));
+            dot.renderOrder = joint.id === jointSession.selected ? 32 : 31;
+            dot.userData.joint = joint.id;
+            jointGroup.add(dot);
+            jointDots.set(joint.id, dot);
+          }
+        };
+        // Dots keep their pixel size whatever the zoom (6 px, 8 px for the selected joint).
+        const scaleJointDots = (height: number) => {
+          if (!jointSession) return;
+          const perPixel = (d: number) =>
+            (2 * d * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / Math.max(1, height);
+          for (const [id, dot] of jointDots)
+            dot.scale.setScalar(
+              perPixel(camera.position.distanceTo(dot.position)) *
+                (id === jointSession.selected ? 8 : 6),
+            );
+        };
+        const screenOf = (point: THREE.Vector3) => {
+          const rect = renderer!.domElement.getBoundingClientRect();
+          const p = point.clone().project(camera);
+          return {
+            x: rect.left + ((p.x + 1) / 2) * rect.width,
+            y: rect.top + ((1 - p.y) / 2) * rect.height,
+            front: p.z < 1,
+          };
+        };
+        /** The joint under the pointer: the nearest dot within 12 px. */
+        const jointAt = (event: PointerEvent) => {
+          let best: string | null = null,
+            bestDistance = 12;
+          for (const [id, dot] of jointDots) {
+            const at = screenOf(dot.position);
+            const d = Math.hypot(at.x - event.clientX, at.y - event.clientY);
+            if (at.front && d <= bestDistance) {
+              best = id;
+              bestDistance = d;
+            }
+          }
+          return best;
+        };
+        /** Where the pointer ray meets the plane facing the camera through a point. */
+        const onCameraPlane = (event: PointerEvent, through: THREE.Vector3) => {
+          setPointer(event);
+          const normal = camera.getWorldDirection(new THREE.Vector3());
+          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, through);
+          return raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+        };
+        const jointDown = (event: PointerEvent) => {
+          if (!jointSession || other || frameState || event.button !== 0) return;
+          const id = jointAt(event);
+          if (!id) return;
+          event.stopPropagation();
+          event.preventDefault();
+          element.focus({ preventScroll: true });
+          element.setPointerCapture(event.pointerId);
+          const dot = jointDots.get(id)!;
+          const hit = onCameraPlane(event, dot.position);
+          jointDrag = {
+            id,
+            pointer: event.pointerId,
+            offset: hit ? dot.position.clone().sub(hit) : new THREE.Vector3(),
+          };
+          jointSession.select(id);
+          jointSession.beginDrag();
+        };
+        const jointMove = (event: PointerEvent) => {
+          if (!jointSession || other || frameState) return;
+          if (!jointDrag) {
+            if (!event.buttons) renderer!.domElement.style.cursor = jointAt(event) ? "grab" : "";
+            return;
+          }
+          const dot = jointDots.get(jointDrag.id);
+          if (!dot) return;
+          const hit = onCameraPlane(event, dot.position);
+          if (!hit) return;
+          renderer!.domElement.style.cursor = "grabbing";
+          jointSession.move(jointDrag.id, hit.add(jointDrag.offset).toArray());
+        };
+        const jointUp = (event: PointerEvent) => {
+          if (!jointDrag || event.pointerId !== jointDrag.pointer) return;
+          jointDrag = null;
+          if (element.hasPointerCapture(event.pointerId))
+            element.releasePointerCapture(event.pointerId);
+          renderer!.domElement.style.cursor = "";
+          jointSession?.endDrag();
+        };
+        // Arrow keys move the selected joint across the screen (Shift for larger steps); this
+        // runs before the orbit controls' own arrow-key panning.
+        const jointKey = (event: globalThis.KeyboardEvent) => {
+          if (!jointSession || event.target !== element || other || frameState) return;
+          const delta = {
+            ArrowLeft: [-1, 0],
+            ArrowRight: [1, 0],
+            ArrowUp: [0, 1],
+            ArrowDown: [0, -1],
+          }[event.key];
+          const joint = jointSession.joints.find((j) => j.id === jointSession!.selected);
+          if (!delta || !joint || event.metaKey || event.ctrlKey || event.altKey) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          const step = diameter * (event.shiftKey ? 0.02 : 0.004);
+          const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0),
+            upward = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+          jointSession.move(
+            joint.id,
+            new THREE.Vector3(...(joint.position as Vec3))
+              .addScaledVector(right, delta[0]! * step)
+              .addScaledVector(upward, delta[1]! * step)
+              .toArray(),
+          );
+        };
+        element.addEventListener("pointerdown", jointDown, true);
+        element.addEventListener("pointermove", jointMove);
+        element.addEventListener("pointerup", jointUp);
+        element.addEventListener("pointercancel", jointUp);
+        element.addEventListener("keydown", jointKey, true);
+        const setJoints = (session: Gen3DJointSession | null) => {
+          jointSession = other ? null : session;
+          jointDrag = null;
+          jointGroup.visible = !!jointSession;
+          rebuildJoints();
+          if (!jointSession) renderer!.domElement.style.cursor = paintSession ? "crosshair" : "";
+          render();
+        };
+        const jointsChanged = () => {
+          rebuildJoints();
+          render();
+        };
         let pressed = { x: 0, y: 0 };
         const down = (event: PointerEvent) => {
           pressed = { x: event.clientX, y: event.clientY };
@@ -524,7 +808,7 @@ export function Gen3DViewer({
         const up = (event: PointerEvent) => {
           // A drag orbits; only a click picks. Picking is off while overlaying or comparing.
           if (Math.hypot(pressed.x - event.clientX, pressed.y - event.clientY) > 4) return;
-          if (frameState || other || paintSession || !onSelectRef.current) return;
+          if (frameState || other || paintSession || jointSession || !onSelectRef.current) return;
           const rect = renderer!.domElement.getBoundingClientRect();
           pointer.set(
             ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -616,6 +900,7 @@ export function Gen3DViewer({
           camera.aspect = width / height;
           camera.updateProjectionMatrix();
           renderer!.setViewport(0, 0, width, height);
+          scaleJointDots(height);
           renderer!.render(scene, camera);
           placeLabels(camera, width, height);
           if (paintSession) {
@@ -838,7 +1123,18 @@ export function Gen3DViewer({
           paused = next;
           render();
         };
-        controls.current = { highlight, setPaint, paintChanged, reset, apply, play, pause };
+        controls.current = {
+          highlight,
+          setPaint,
+          paintChanged,
+          setJoints,
+          jointsChanged,
+          drawUv,
+          reset,
+          apply,
+          play,
+          pause,
+        };
         const observer = new ResizeObserver(resize);
         observer.observe(element);
         const visibility = new IntersectionObserver((entries) => {
@@ -854,6 +1150,7 @@ export function Gen3DViewer({
         apply(latest.current);
         highlight(selection.current);
         setPaint(paintRef.current);
+        setJoints(jointsRef.current);
         setLoading(false);
         cleanup = () => {
           controls.current = null;
@@ -865,6 +1162,16 @@ export function Gen3DViewer({
           element.removeEventListener("pointerup", paintUp);
           element.removeEventListener("pointercancel", paintUp);
           element.removeEventListener("pointerleave", paintLeave);
+          element.removeEventListener("pointerdown", jointDown, true);
+          element.removeEventListener("pointermove", jointMove);
+          element.removeEventListener("pointerup", jointUp);
+          element.removeEventListener("pointercancel", jointUp);
+          element.removeEventListener("keydown", jointKey, true);
+          boneLines?.geometry.dispose();
+          jointGeometry.dispose();
+          jointMaterial.dispose();
+          jointSelectedMaterial.dispose();
+          boneLineMaterial.dispose();
           overlays.forEach((o) => o.removeFromParent());
           paintMaterial.dispose();
           paintTexture?.dispose();
@@ -922,6 +1229,11 @@ export function Gen3DViewer({
       paint.undo();
       return;
     }
+    if (joints && key === "z" && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
+      event.preventDefault();
+      joints.undo();
+      return;
+    }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (paint && (key === "[" || key === "]")) {
       paint.setBrush({ radius: paint.radius * (key === "]" ? 1.25 : 0.8) });
@@ -931,7 +1243,8 @@ export function Gen3DViewer({
       paint.setBrush({ erase: key === "e" });
       return;
     }
-    if (key === "r") controls.current?.reset();
+    if (key === "u" && hasUv) setUvLayout((v) => !v);
+    else if (key === "r") controls.current?.reset();
     else if (key === "t") setTurntable((v) => !v);
     else if (key === " " && clip) {
       event.preventDefault();
@@ -977,7 +1290,7 @@ export function Gen3DViewer({
             </OptionSelect>
           </div>
         )}
-        {canOverlay && !compare && !paint && (
+        {canOverlay && !compare && !paint && !joints && (
           <div className="w-36">
             <OptionSelect
               size="xs"
@@ -994,7 +1307,7 @@ export function Gen3DViewer({
             </OptionSelect>
           </div>
         )}
-        {project.versions.length > 1 && !paint && (
+        {project.versions.length > 1 && !paint && !joints && (
           <div className="w-36">
             <OptionSelect
               size="xs"
@@ -1045,6 +1358,12 @@ export function Gen3DViewer({
           <Checkbox checked={bounds} onCheckedChange={(v) => setBounds(v === true)} />
           {tr("Dimensions")}
         </label>
+        {hasUv && (
+          <label className="flex items-center gap-1 text-ui-xs" title={tr("UV layout (U)")}>
+            <Checkbox checked={uvLayout} onCheckedChange={(v) => setUvLayout(v === true)} />
+            {tr("UV layout")}
+          </label>
+        )}
         <label className="flex items-center gap-1 text-ui-xs">
           <Checkbox checked={turntable} onCheckedChange={(v) => setTurntable(v === true)} />
           {tr("Turntable")}
@@ -1072,9 +1391,11 @@ export function Gen3DViewer({
           tabIndex={0}
           role="application"
           aria-label={tr(
-            paint
-              ? "3D model, painting the repaint mask. Drag on the model to paint, Alt-drag to erase, right-drag or drag beside the model to orbit, scroll to zoom. [ and ] change the brush size, E and B switch eraser and brush, Cmd or Ctrl+Z undoes, R resets the view."
-              : "3D model. Drag to orbit, right-drag or arrow keys to pan, scroll to zoom; click a part to select it, with Cmd or Ctrl to add. R resets the view, 1–9 switch the display, T toggles the turntable, Space pauses the animation.",
+            joints
+              ? "3D model, editing joints. Drag a joint dot to move it in the plane facing you; turn the view to move it in depth. Arrow keys move the selected joint (Shift for larger steps), Cmd or Ctrl+Z undoes, R resets the view."
+              : paint
+                ? "3D model, painting the repaint mask. Drag on the model to paint, Alt-drag to erase, right-drag or drag beside the model to orbit, scroll to zoom. [ and ] change the brush size, E and B switch eraser and brush, Cmd or Ctrl+Z undoes, R resets the view."
+                : "3D model. Drag to orbit, right-drag or arrow keys to pan, scroll to zoom; click a part to select it, with Cmd or Ctrl to add. R resets the view, 1–9 switch the display, U shows the UV layout, T toggles the turntable, Space pauses the animation.",
           )}
           onKeyDown={onKey}
           className="absolute inset-0 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
@@ -1097,7 +1418,16 @@ export function Gen3DViewer({
             )}
           </div>
         )}
-        {selected.length > 0 && !compare && !paint && (
+        {joints && !paint && !loading && !error && (
+          <div
+            className="pointer-events-none absolute bottom-2 start-2 max-w-[calc(100%-1rem)] rounded-md bg-background/85 px-2 py-1 text-ui-xs"
+            role="status"
+          >
+            {tr("Editing joints: drag a dot, turn the view for depth, arrow keys nudge.")}
+            {joints.selected ? ` · ${joints.selected}` : ""}
+          </div>
+        )}
+        {selected.length > 0 && !compare && !paint && !joints && (
           <div
             className="absolute bottom-2 start-2 flex max-w-[calc(100%-1rem)] items-center gap-2 rounded-md bg-background/85 px-2 py-1 text-ui-xs"
             role="status"
@@ -1111,6 +1441,26 @@ export function Gen3DViewer({
               </Button>
             )}
           </div>
+        )}
+        {showUv && !loading && !error && (
+          <figure className="absolute end-2 top-2 w-[min(45%,18rem)] space-y-1 rounded-md border border-border bg-background/90 p-1.5">
+            <canvas
+              ref={uvCanvas}
+              width={UV_CANVAS}
+              height={UV_CANVAS}
+              role="img"
+              aria-label={tr("UV layout of the base colour map")}
+              className="aspect-square w-full rounded-sm bg-muted"
+            />
+            {usage && (
+              <figcaption className="text-ui-xs tabular-nums text-muted-foreground">
+                {tr("UV coverage {coverage}% · overlap {overlap}%")
+                  .replace("{coverage}", (usage.coverage * 100).toFixed(1))
+                  .replace("{overlap}", (usage.overlap * 100).toFixed(1))}
+                {selected.length > 0 ? ` · ${tr("Selected parts are highlighted.")}` : ""}
+              </figcaption>
+            )}
+          </figure>
         )}
         {compare && (
           <div className="pointer-events-none absolute inset-x-0 top-2 flex text-ui-xs" aria-hidden>

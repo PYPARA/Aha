@@ -17,6 +17,7 @@ import {
   GEN3D_REPAINT_SIZE,
   GEN3D_VIEWS,
   Gen3DPaintMask,
+  Gen3DPrintReport,
   Gen3DRepaintCamera,
   Model3DValidationReport,
   type Gen3DExportFormat,
@@ -53,7 +54,7 @@ const BUILD_DEADLINE_MS = {
 /** Derived files an optimized version carries next to model.glb. */
 const PROCESS_FILES = ["lod1.glb", "lod2.glb", "lod3.glb", "collision.glb"] as const;
 const EXPORT_PRESETS = ["generic", "godot", "unity", "unreal"] as const;
-const EXPORT_FORMATS = ["glb", "fbx", "obj", "usdz", "stl"] as const;
+const EXPORT_FORMATS = ["glb", "fbx", "obj", "usdz", "stl", "3mf"] as const;
 const BLENDER_BUSY = /^Another Blender modeling task is running/;
 const FIXED_SCRIPTS = {
   process: { source: GEN3D_PROCESS_SCRIPT, label: "optimization" },
@@ -586,6 +587,8 @@ export class Gen3DHost {
           image: await modelPath(directory, "repaint-image.png"),
           mask: await modelPath(directory, "repaint-mask.png"),
           feather: build.repaint.feather,
+          // A decal's colours are albedo already and its transparency limits the change.
+          decal: !!build.repaint.decal,
         },
         jobId,
       )) as { maskPixels?: unknown; changedTexels?: unknown; seconds?: unknown };
@@ -1144,7 +1147,7 @@ export class Gen3DHost {
       temporary = path.join(parent, `.aha-gen3d-${randomUUID()}`);
     await fs.mkdir(temporary, { mode: 0o700 });
     try {
-      type Converted = { files: string[]; watertight?: boolean; openEdges?: number };
+      type Converted = { files: string[] } & Partial<Gen3DPrintReport>;
       let converted: Converted | null = null;
       // Godot reads collision from a "-colonly" node, so only that case needs a rewrite.
       if (format === "glb" && (preset !== "godot" || !collisionFile)) {
@@ -1177,6 +1180,16 @@ export class Gen3DHost {
         // Godot reads LODs it generates itself; generic GLB extras stay as separate files.
         if (format === "glb") converted!.files = ["model.glb"];
       }
+      // STL and 3MF exports check closure and wall thickness at real size.
+      const print =
+        converted && "watertight" in converted
+          ? Schema.decodeUnknownSync(Gen3DPrintReport)({
+              watertight: converted.watertight,
+              openEdges: converted.openEdges,
+              sizeMm: converted.sizeMm,
+              thickness: converted.thickness ?? null,
+            })
+          : null;
       for (const file of ["thumbnail.png", "render-34.png"])
         if (version.files.some((f) => f.name === file))
           await fs.copyFile(await versionFile(file), path.join(temporary, file));
@@ -1188,9 +1201,7 @@ export class Gen3DHost {
             topology: version.topology,
             score: version.score,
             process: version.process ?? null,
-            ...(converted && "watertight" in converted
-              ? { print: { watertight: converted.watertight, openEdges: converted.openEdges } }
-              : {}),
+            ...(print ? { print } : {}),
           },
           null,
           2,
@@ -1280,7 +1291,9 @@ export class Gen3DHost {
                 versionId: v.id,
                 view: v.build.repaint!.view,
                 instruction: v.build.repaint!.instruction,
-                imageJobId: v.build.repaint!.imageJobId,
+                ...(v.build.repaint!.decal
+                  ? { decal: v.build.repaint!.imageAssetId }
+                  : { imageJobId: v.build.repaint!.imageJobId }),
               })),
             blueprint: project.blueprint && {
               targetHeight: project.blueprint.targetHeight,
@@ -1293,7 +1306,7 @@ export class Gen3DHost {
         ),
       );
       await fs.rename(temporary, destination);
-      return { exportPath: destination };
+      return { exportPath: destination, ...(print ? { print } : {}) };
     } catch (error) {
       await fs.rm(temporary, { recursive: true, force: true });
       throw error;

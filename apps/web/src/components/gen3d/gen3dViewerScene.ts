@@ -190,3 +190,67 @@ export function frameColumnRow(
     row: BLUEPRINT / 2 - (point[1]! - frame.centre[1]) * scale,
   };
 }
+
+/** A geometry's UV triangles as flat [u0, v0, u1, v1, u2, v2, …], or null without UVs. */
+export function uvTriangles(geometry: THREE.BufferGeometry): Float32Array | null {
+  const uv = geometry.getAttribute("uv");
+  if (!uv) return null;
+  const index = geometry.getIndex();
+  const count = index ? index.count : uv.count;
+  const out = new Float32Array(Math.floor(count / 3) * 6);
+  for (let i = 0; i < out.length / 2; i++) {
+    const vertex = index ? index.getX(i) : i;
+    out[i * 2] = uv.getX(vertex);
+    out[i * 2 + 1] = uv.getY(vertex);
+  }
+  return out;
+}
+
+/**
+ * How the UV layout uses the texture, sampled at pixel centres of a size × size raster over the
+ * unit square: the share covered at least once, and the share covered by more than one triangle
+ * (overlapping or mirrored islands, which baking cannot tell apart). UVs outside 0–1 wrap.
+ */
+export function uvUsage(layouts: readonly Float32Array[], size = 256) {
+  const hits = new Uint16Array(size * size);
+  const wrap = (n: number) => n - Math.floor(n);
+  for (const tris of layouts)
+    for (let t = 0; t + 5 < tris.length; t += 6) {
+      // Wrap each triangle by its first vertex's tile so it stays in one piece.
+      const tu = Math.floor(tris[t]!),
+        tv = Math.floor(tris[t + 1]!);
+      const ax = (tris[t]! - tu) * size,
+        ay = (tris[t + 1]! - tv) * size,
+        bx = (tris[t + 2]! - tu) * size,
+        by = (tris[t + 3]! - tv) * size,
+        cx = (tris[t + 4]! - tu) * size,
+        cy = (tris[t + 5]! - tv) * size;
+      const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+      if (!area) continue;
+      const x0 = Math.floor(Math.min(ax, bx, cx)),
+        x1 = Math.ceil(Math.max(ax, bx, cx)),
+        y0 = Math.floor(Math.min(ay, by, cy)),
+        y1 = Math.ceil(Math.max(ay, by, cy));
+      for (let y = y0; y < y1; y++)
+        for (let x = x0; x < x1; x++) {
+          // Just off the pixel centre, so a centre on an edge shared by two triangles (such as a
+          // quad's diagonal) is not counted by both.
+          const px = x + 0.5013,
+            py = y + 0.4987;
+          const w0 = (bx - px) * (cy - py) - (cx - px) * (by - py),
+            w1 = (cx - px) * (ay - py) - (ax - px) * (cy - py),
+            w2 = (ax - px) * (by - py) - (bx - px) * (ay - py);
+          const inside = area > 0 ? w0 >= 0 && w1 >= 0 && w2 >= 0 : w0 <= 0 && w1 <= 0 && w2 <= 0;
+          if (!inside) continue;
+          const i = Math.floor(wrap(py / size) * size) * size + Math.floor(wrap(px / size) * size);
+          if (hits[i]! < 65535) hits[i]!++;
+        }
+    }
+  let covered = 0,
+    overlapped = 0;
+  for (const h of hits) {
+    if (h) covered++;
+    if (h > 1) overlapped++;
+  }
+  return { coverage: covered / hits.length, overlap: overlapped / hits.length };
+}

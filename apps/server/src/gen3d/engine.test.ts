@@ -484,6 +484,35 @@ describe("Gen3DEngine", () => {
       .toBuffer();
     expect(stored.length).toBe(1024 * 1024);
     expect(stored.some((v) => v === 0) && stored.some((v) => v === 255)).toBe(true);
+    // A decal: an uploaded image of any shape, placed in the mask's bounds without the channel.
+    const decal = await sharp({
+      create: {
+        width: 300,
+        height: 100,
+        channels: 4,
+        background: { r: 255, g: 0, b: 0, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+    await engine.repaintBytes(
+      p.id,
+      p.revision,
+      await input({ image: decal, imageJobId: "", decal: { fit: "contain" } }),
+    );
+    p = await settled(engine, p.id);
+    const placed = p.versions[4]!;
+    expect(placed.build.repaint).toMatchObject({ view: "front-left", decal: { fit: "contain" } });
+    const decalImage = await sharp(
+      path.join(root, p.id, "versions", placed.id, "repaint-image.png"),
+    )
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    expect([decalImage.info.width, decalImage.info.channels]).toEqual([1024, 4]);
+    // The mask's 200 painted pixels are the first five rows of the 40 px mask: x 0–39, y 0–4.
+    const at = (x: number, y: number) => decalImage.data[(y * 1024 + x) * 4 + 3]!;
+    expect(at(512, 60)).toBe(255);
+    expect(at(512, 400)).toBe(0);
     // Repaint is a workbench operation; the agent cannot submit or start it.
     await expect(
       engine.command({

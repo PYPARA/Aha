@@ -10,6 +10,7 @@ import {
   type Gen3DCommandResult,
   type Gen3DEnvironment,
   type Gen3DExportFormat,
+  type Gen3DPrintReport,
   type Gen3DProcess,
   type Gen3DProject,
   type Gen3DVersion,
@@ -24,6 +25,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
+import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { OptionSelect } from "../ui/option-select";
 import { Textarea } from "../ui/textarea";
 import {
@@ -45,6 +47,7 @@ import { ensureGen3DThread } from "./Gen3DChat";
 import { AnimationPanel, CLIP_LABELS, RIG_KIND_LABELS } from "./AnimationPanel";
 import { MOTION_LABELS } from "./PropAnimationPanel";
 import { REPAINT_VIEW_LABELS, RepaintPanel } from "./RepaintPanel";
+import type { Gen3DJointSession } from "./gen3dJoints";
 import { Gen3DPaintSession } from "./gen3dPaint";
 import { STYLE_LABELS, StylizePanel } from "./StylizePanel";
 import { TiledTextureField, validTileSize, type TileChoice } from "./TiledTextureField";
@@ -317,10 +320,13 @@ function ProjectWorkspace({
     [sheetOpen, setSheetOpen] = useState(false),
     [busy, setBusy] = useState(false),
     [exportPath, setExportPath] = useState<string | null>(null),
+    [printReport, setPrintReport] = useState<Gen3DPrintReport | null>(null),
     // Parts picked in the viewer or the part lists; ids belong to the selected version.
     [parts, setParts] = useState<string[]>([]),
     // The repaint panel's free-angle mode: the viewer paints this version's 3D mask.
-    [painting, setPainting] = useState(false);
+    [painting, setPainting] = useState(false),
+    // The open joint editor: the viewer drags the same joints on the model.
+    [jointSession, setJointSession] = useState<Gen3DJointSession | null>(null);
   const paintSessions = useRef(new Map<string, Gen3DPaintSession>());
   const paintFor = (versionId: string) => {
     let session = paintSessions.current.get(versionId);
@@ -356,7 +362,10 @@ function ProjectWorkspace({
     try {
       const latest = await gen3dApi().get({ id: project.id });
       const result = await command({ ...input, projectId: project.id, revision: latest.revision });
-      if (result.exportPath) setExportPath(result.exportPath);
+      if (result.exportPath) {
+        setExportPath(result.exportPath);
+        setPrintReport(result.print ?? null);
+      }
       return result;
     } catch (error) {
       onError(error);
@@ -499,6 +508,7 @@ function ProjectWorkspace({
           act={act}
           parts={parts}
           onPartsChange={setParts}
+          onJointSession={setJointSession}
           onAskAssistant={(prompt) => void askAssistant(prompt)}
         />
       )}
@@ -517,6 +527,7 @@ function ProjectWorkspace({
           disabled={busy || !desktop}
           headless={blender?.headless === true}
           path={exportPath}
+          print={printReport}
           onExport={(versionId, exportPreset, exportFormat) =>
             void act({ operation: "export", versionId, exportPreset, exportFormat })
           }
@@ -674,6 +685,7 @@ function ProjectWorkspace({
                 selected={parts}
                 onSelect={pickPart}
                 paint={tool === "texture" && painting ? paintFor(version.id) : null}
+                joints={tool === "animation" ? jointSession : null}
               />
             </Suspense>
           ) : (
@@ -1236,6 +1248,7 @@ function OptimizePanel({
     [lods, setLods] = useState(true),
     [keepParts, setKeepParts] = useState(false),
     [collision, setCollision] = useState<Gen3DProcess["collision"]>("convex"),
+    [topology, setTopology] = useState<"triangles" | "quads">("triangles"),
     [texture, setTexture] = useState<"bake" | "projection">(canProject ? "projection" : "bake"),
     [presets, setPresets] = useState<Record<string, MaterialChoice>>({}),
     [tiles, setTiles] = useState<Record<string, TileChoice>>({});
@@ -1302,6 +1315,24 @@ function OptimizePanel({
             </option>
           ))}
         </OptionSelect>
+      </label>
+      <label className="block space-y-1.5">
+        <span className="text-ui-xs text-muted-foreground">{tr("Low poly faces")}</span>
+        <OptionSelect
+          label={tr("Low poly faces")}
+          value={topology}
+          onValueChange={(value) => setTopology(value as typeof topology)}
+        >
+          <option value="triangles">{tr("Triangles (decimate)")}</option>
+          <option value="quads">{tr("Quads (QuadriFlow remesh)")}</option>
+        </OptionSelect>
+        {topology === "quads" && (
+          <span className="block text-ui-xs leading-relaxed text-muted-foreground">
+            {tr(
+              "Rebuilds the surface as even quads (two triangles each) for sculpting, subdivision and clean deformation. Sharp detail softens and very thin parts may merge; baking restores the look. GLB stores triangles, FBX and OBJ keep the quads.",
+            )}
+          </span>
+        )}
       </label>
       <div className="space-y-2">
         {option(
@@ -1409,7 +1440,15 @@ function OptimizePanel({
           <option value="none">{tr("None")}</option>
           <option value="box">{tr("Bounding box")}</option>
           <option value="convex">{tr("Convex hull")}</option>
+          <option value="decomposition">{tr("Convex decomposition (up to 16 hulls)")}</option>
         </OptionSelect>
+        {collision === "decomposition" && (
+          <span className="block text-ui-xs leading-relaxed text-muted-foreground">
+            {tr(
+              "Splits the solid into convex pieces that follow legs, handles and openings, so objects can stand closer to the model than with one hull.",
+            )}
+          </span>
+        )}
       </label>
       <Button
         className="w-full"
@@ -1422,6 +1461,7 @@ function OptimizePanel({
             bake,
             lods: lods ? [0.5, 0.25] : [],
             collision,
+            ...(topology === "quads" ? { topology } : {}),
             ...(keepParts ? { keepParts: true } : {}),
             ...(bake ? { texture: source } : {}),
             ...(bake && Object.keys(presets).length
@@ -1476,7 +1516,54 @@ const EXPORT_FORMAT_LABELS: Record<Gen3DExportFormat, string> = {
   obj: "OBJ + MTL",
   usdz: "USDZ",
   stl: "STL",
+  "3mf": "3MF",
 };
+
+/** The printability check of an STL or 3MF export. */
+function PrintReport({ report }: { report: Gen3DPrintReport }) {
+  const tr = useAhaTranslation();
+  const thin = report.thickness;
+  const warn = !report.watertight || (thin && (thin.thinPct > 1 || thin.minMm < thin.thinMm));
+  return (
+    <Alert variant={warn ? "warning" : "default"} size="sm" role="status">
+      <AlertTitle>{tr("Print check")}</AlertTitle>
+      <AlertDescription className="gap-1 text-ui-xs">
+        <p className="text-foreground">
+          {report.watertight
+            ? tr("Closed mesh.")
+            : tr("{n} open edges: close the mesh before printing.").replace(
+                "{n}",
+                String(report.openEdges),
+              )}{" "}
+          {tr("Size {size} mm.").replace(
+            "{size}",
+            report.sizeMm.map((n) => n.toFixed(1)).join(" × "),
+          )}
+        </p>
+        {thin ? (
+          <p className="text-foreground">
+            {tr(
+              "Walls: thinnest {min} mm, typical {median} mm; {pct}% of the surface is under {limit} mm.",
+            )
+              .replace("{min}", thin.minMm.toFixed(2))
+              .replace("{median}", thin.medianMm.toFixed(1))
+              .replace("{pct}", thin.thinPct.toFixed(1))
+              .replace("{limit}", thin.thinMm.toFixed(1))}
+          </p>
+        ) : (
+          <p className="text-foreground">
+            {tr("Wall thickness could not be measured (no closed walls).")}
+          </p>
+        )}
+        <p>
+          {tr(
+            "Measured at the model's real size from {n} surface samples. Intersecting parts measure to the nearest inner surface, so thin results may be conservative. Scale the model in your slicer to change wall thickness.",
+          ).replace("{n}", String(thin?.samples ?? 0))}
+        </p>
+      </AlertDescription>
+    </Alert>
+  );
+}
 
 function ExportPanel({
   project,
@@ -1484,6 +1571,7 @@ function ExportPanel({
   disabled,
   headless,
   path,
+  print,
   onExport,
   onAdopt,
 }: {
@@ -1492,6 +1580,7 @@ function ExportPanel({
   disabled: boolean;
   headless: boolean;
   path: string | null;
+  print: Gen3DPrintReport | null;
   onExport: (versionId: string, preset: ExportPreset, format: Gen3DExportFormat) => void;
   onAdopt: () => void;
 }) {
@@ -1560,8 +1649,10 @@ function ExportPanel({
                   ? "FBX with Y up and metre units; LODs are named _LOD0, _LOD1… and the hull _Collider."
                   : preset === "unreal"
                     ? "FBX that Unreal's importer turns into Z up and centimetres. LODs are named _LOD0, _LOD1… and the hull UCX_."
-                    : format === "stl"
-                      ? "STL for 3D printing. The export reports whether the mesh is closed."
+                    : format === "stl" || format === "3mf"
+                      ? format === "3mf"
+                        ? "3MF for 3D printing, in millimetres with one colour per material. The export checks whether the mesh is closed and how thick its walls are."
+                        : "STL for 3D printing. The export checks whether the mesh is closed and how thick its walls are."
                       : "Model, LOD and collision files with embedded or adjacent textures.",
             )}
           </p>
@@ -1606,6 +1697,7 @@ function ExportPanel({
               {tr("Export saved")}: {path}
             </p>
           )}
+          {path && print && <PrintReport report={print} />}
           <p className="text-ui-xs text-muted-foreground">
             {tr(
               "Includes the model in the chosen format, thumbnail, 3/4 render, source, asset manifest and validation report with the blueprint score. UVs, baked textures, LODs and collision come from an optimized version.",
@@ -1725,6 +1817,16 @@ function VersionReport({ version }: { version: Gen3DVersion }) {
               <dd>{version.process.materials.length}</dd>
             </>
           )}
+          {version.process.topology && (
+            <>
+              <dt className="text-muted-foreground">{tr("Low poly faces")}</dt>
+              <dd>
+                {version.process.topology.method === "decimate"
+                  ? tr("Triangles (QuadriFlow could not remesh this model)")
+                  : tr("{n} quads").replace("{n}", version.process.topology.quads.toLocaleString())}
+              </dd>
+            </>
+          )}
           {version.process.lods.length > 0 && (
             <>
               <dt className="text-muted-foreground">LOD</dt>
@@ -1735,8 +1837,12 @@ function VersionReport({ version }: { version: Gen3DVersion }) {
             <>
               <dt className="text-muted-foreground">{tr("Collision")}</dt>
               <dd>
-                {tr(version.build.process?.collision === "box" ? "Bounding box" : "Convex hull")} ·{" "}
-                {version.process.collision.triangles}
+                {version.process.collision.hulls
+                  ? tr("{n} convex hulls").replace("{n}", String(version.process.collision.hulls))
+                  : tr(
+                      version.build.process?.collision === "box" ? "Bounding box" : "Convex hull",
+                    )}{" "}
+                · {version.process.collision.triangles}
               </dd>
             </>
           )}

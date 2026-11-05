@@ -11,7 +11,7 @@ import {
   type ImageJob,
 } from "@synara/contracts";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
-import { EraserIcon, PencilIcon, Undo2Icon } from "~/lib/icons";
+import { EraserIcon, PaperclipIcon, PencilIcon, Undo2Icon } from "~/lib/icons";
 import { Button } from "../ui/button";
 import { Slider } from "../ui/slider";
 import { OptionSelect } from "../ui/option-select";
@@ -76,7 +76,13 @@ export function RepaintPanel({
     [feather, setFeather] = useState(12),
     [choice, setChoice] = useState<{ providerId: string; model: string } | null>(null),
     [job, setJob] = useState<ImageJob | null>(null),
-    [failure, setFailure] = useState<string | null>(null);
+    [failure, setFailure] = useState<string | null>(null),
+    // "edit" asks the drawing channel; "decal" places an uploaded image in the mask's bounds.
+    [method, setMethod] = useState<"edit" | "decal">("edit"),
+    [decal, setDecal] = useState<ImageAsset | null>(null),
+    [fit, setFit] = useState<"contain" | "cover">("contain"),
+    [placing, setPlacing] = useState(false);
+  const decalInput = useRef<HTMLInputElement>(null);
   const current =
     choice ?? (enabled[0] ? { providerId: enabled[0].id, model: enabled[0].models[0]!.id } : null);
   const baked = version?.process?.baked.includes("baseColor") === true;
@@ -204,7 +210,35 @@ export function RepaintPanel({
       setFailure(error instanceof Error ? error.message : String(error));
     }
   };
-  const busy = disabled || rendering || generating;
+  const placeDecal = async () => {
+    if (!version || !base || !mask || !decal) return;
+    setPlacing(true);
+    setFailure(null);
+    try {
+      const result = await act({
+        operation: "repaint",
+        versionId: version.id,
+        repaintView: view,
+        decal: { viewAssetId: base.id, maskAssetId: mask.id, imageAssetId: decal.id, fit },
+        instruction: decal.name,
+        feather: 0,
+      });
+      if (result) setMask(null);
+      else setFailure(tr("The image could not be placed on the model."));
+    } finally {
+      setPlacing(false);
+    }
+  };
+  const chooseDecal = async (file: File | undefined) => {
+    if (!file) return;
+    setFailure(null);
+    try {
+      setDecal(await uploadDrawingImage(file, file.name));
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const busy = disabled || rendering || generating || placing;
   return (
     <section className="space-y-3" aria-labelledby="gen3d-repaint">
       <h3 id="gen3d-repaint" className="font-medium">
@@ -293,55 +327,128 @@ export function RepaintPanel({
             </Button>
           )}
           <label className="block space-y-1.5">
-            <span className="text-ui-xs text-muted-foreground">{tr("What to paint")}</span>
-            <Textarea
-              rows={3}
-              value={instruction}
-              disabled={busy}
-              placeholder={tr("For example: a silver skull-shaped lock with a dark keyhole")}
-              onChange={(event) => setInstruction(event.target.value)}
-            />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-ui-xs text-muted-foreground">{tr("Mask edge")}</span>
+            <span className="text-ui-xs text-muted-foreground">{tr("Paint with")}</span>
             <OptionSelect
-              label={tr("Mask edge")}
-              value={String(feather)}
+              label={tr("Paint with")}
+              value={method}
               disabled={busy}
-              onValueChange={(value) => setFeather(Number(value))}
+              onValueChange={(value) => setMethod(value as typeof method)}
             >
-              {FEATHERS.map(([value, label]) => (
-                <option key={value} value={String(value)}>
-                  {tr(label)}
-                </option>
-              ))}
+              <option value="edit">{tr("A description (drawing channel)")}</option>
+              <option value="decal">{tr("An image of my own (decal)")}</option>
             </OptionSelect>
           </label>
-          {providers.data && !enabled.length ? (
-            <p role="status" className="text-ui-xs text-muted-foreground">
-              {tr("No drawing channel is configured. Add a channel in Drawing to repaint.")}
-            </p>
+          {method === "edit" ? (
+            <>
+              <label className="block space-y-1.5">
+                <span className="text-ui-xs text-muted-foreground">{tr("What to paint")}</span>
+                <Textarea
+                  rows={3}
+                  value={instruction}
+                  disabled={busy}
+                  placeholder={tr("For example: a silver skull-shaped lock with a dark keyhole")}
+                  onChange={(event) => setInstruction(event.target.value)}
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-ui-xs text-muted-foreground">{tr("Mask edge")}</span>
+                <OptionSelect
+                  label={tr("Mask edge")}
+                  value={String(feather)}
+                  disabled={busy}
+                  onValueChange={(value) => setFeather(Number(value))}
+                >
+                  {FEATHERS.map(([value, label]) => (
+                    <option key={value} value={String(value)}>
+                      {tr(label)}
+                    </option>
+                  ))}
+                </OptionSelect>
+              </label>
+              {providers.data && !enabled.length ? (
+                <p role="status" className="text-ui-xs text-muted-foreground">
+                  {tr("No drawing channel is configured. Add a channel in Drawing to repaint.")}
+                </p>
+              ) : (
+                current && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-ui-xs text-muted-foreground">
+                      {tr("Channel and model")}
+                    </span>
+                    <DrawingModelPicker
+                      providers={enabled}
+                      providerId={current.providerId}
+                      model={current.model}
+                      onChange={(providerId, model) => setChoice({ providerId, model })}
+                      onSettings={() => void navigate({ to: "/drawing", search: {} })}
+                    />
+                  </div>
+                )
+              )}
+              <Button
+                className="w-full"
+                disabled={busy || !current || !base || !mask || !instruction.trim()}
+                onClick={() => void start()}
+              >
+                {tr(generating ? "Repainting…" : failure ? "Try again" : "Repaint")}
+              </Button>
+            </>
           ) : (
-            current && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-ui-xs text-muted-foreground">{tr("Channel and model")}</span>
-                <DrawingModelPicker
-                  providers={enabled}
-                  providerId={current.providerId}
-                  model={current.model}
-                  onChange={(providerId, model) => setChoice({ providerId, model })}
-                  onSettings={() => void navigate({ to: "/drawing", search: {} })}
+            <>
+              <div className="flex items-center gap-3">
+                {decal ? (
+                  <img
+                    src={imageUrl(decal, "thumbnail")}
+                    alt={decal.name}
+                    className="size-16 shrink-0 rounded-md border border-border bg-muted/40 object-contain"
+                  />
+                ) : null}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => decalInput.current?.click()}
+                >
+                  <PaperclipIcon />
+                  {tr(decal ? "Choose another image" : "Choose an image")}
+                </Button>
+                <input
+                  ref={decalInput}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(event) => {
+                    void chooseDecal(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
                 />
               </div>
-            )
+              <label className="block space-y-1.5">
+                <span className="text-ui-xs text-muted-foreground">{tr("Image fit")}</span>
+                <OptionSelect
+                  label={tr("Image fit")}
+                  value={fit}
+                  disabled={busy}
+                  onValueChange={(value) => setFit(value as typeof fit)}
+                >
+                  <option value="contain">{tr("Whole image inside the mask")}</option>
+                  <option value="cover">{tr("Fill the mask (crop the image)")}</option>
+                </OptionSelect>
+              </label>
+              <Button
+                className="w-full"
+                disabled={busy || !base || !mask || !decal}
+                onClick={() => void placeDecal()}
+              >
+                {tr(placing ? "Placing image…" : "Place image on the model")}
+              </Button>
+              <p className="rounded-md bg-muted/40 p-3 text-ui-xs leading-relaxed text-muted-foreground">
+                {tr(
+                  "The painted area only marks where the image goes: the whole image is fitted into its bounds and projected onto the texture with its own colours, and its transparent parts keep the texture. No drawing channel is used. Use a PNG with transparency for logos and stickers.",
+                )}
+              </p>
+            </>
           )}
-          <Button
-            className="w-full"
-            disabled={busy || !current || !base || !mask || !instruction.trim()}
-            onClick={() => void start()}
-          >
-            {tr(generating ? "Repainting…" : failure ? "Try again" : "Repaint")}
-          </Button>
           {generating && (
             <p role="status" aria-live="polite" className="text-ui-xs">
               {tr("Generating… this usually takes under a minute.")}

@@ -57,6 +57,45 @@ type Project = Mutable<Gen3DProject>;
 const now = () => new Date().toISOString();
 const active = (status: string) => ["queued", "running", "validating"].includes(status);
 const digest = (bytes: string | Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * A decal for a repaint: the uploaded image fitted into the bounds of the mask (alpha below one
+ * half is the area to repaint) on a transparent view-sized canvas. Its own transparency is kept;
+ * the texture script uses its colours as they are, without the view render's shading.
+ */
+export async function placeDecal(
+  bytes: Uint8Array,
+  maskAlpha: Uint8Array,
+  fit: "contain" | "cover",
+) {
+  const size = GEN3D_REPAINT_SIZE;
+  let left = size,
+    top = size,
+    right = -1,
+    bottom = -1;
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++)
+      if (maskAlpha[y * size + x]! < 128) {
+        if (x < left) left = x;
+        if (x > right) right = x;
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+  if (right < 0) throw new Error("Paint an area to repaint first.");
+  const width = right - left + 1,
+    height = bottom - top + 1;
+  const placed = await sharp(bytes, { limitInputPixels: 4096 * 4096, failOn: "error" })
+    .ensureAlpha()
+    .resize(width, height, { fit, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer();
+  return sharp({
+    create: { width: size, height: size, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  })
+    .composite([{ input: placed, left, top }])
+    .png()
+    .toBuffer();
+}
 /** Repaint edits the base colour texture that the optimize step baked. */
 const baked = (version: Gen3DVersion | undefined) =>
   version?.process?.baked.includes("baseColor") === true;
@@ -426,6 +465,8 @@ export class Gen3DEngine {
       imageAssetId: string;
       instruction: string;
       feather: number;
+      /** An uploaded image placed in the mask's bounds instead of a drawing edit. */
+      decal?: { fit: "contain" | "cover" };
     },
   ) {
     if (!GEN3D_REPAINT_ALL_VIEWS.includes(input.view)) throw new Error("Unsupported repaint view.");
@@ -464,13 +505,6 @@ export class Gen3DEngine {
         throw new Error(`The ${label} must be square like the view render.`);
       return image;
     };
-    const image = await (
-      await square(input.image, "edited image")
-    )
-      .removeAlpha()
-      .resize(GEN3D_REPAINT_SIZE, GEN3D_REPAINT_SIZE, { fit: "fill" })
-      .png()
-      .toBuffer();
     const { data: alpha } = await (
       await square(input.mask, "mask")
     )
@@ -480,6 +514,15 @@ export class Gen3DEngine {
       .raw()
       .toBuffer({ resolveWithObject: true });
     if (!alpha.some((v) => v < 128)) throw new Error("Paint an area to repaint first.");
+    const image = input.decal
+      ? await placeDecal(input.image, alpha, input.decal.fit)
+      : await (
+          await square(input.image, "edited image")
+        )
+          .removeAlpha()
+          .resize(GEN3D_REPAINT_SIZE, GEN3D_REPAINT_SIZE, { fit: "fill" })
+          .png()
+          .toBuffer();
     // Stored in the image-edit convention: transparent pixels are the area to repaint.
     const rgba = Buffer.alloc(alpha.length * 4, 255);
     for (let i = 0; i < alpha.length; i++) rgba[i * 4 + 3] = alpha[i]!;
@@ -510,6 +553,7 @@ export class Gen3DEngine {
           imageAssetId: input.imageAssetId,
           instruction: input.instruction.trim().slice(0, 2000),
           feather: input.feather,
+          ...(input.decal ? { decal: input.decal } : {}),
         },
       };
       const id = randomUUID();
