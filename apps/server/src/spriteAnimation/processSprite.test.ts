@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
-import { processSprite } from "./processSprite";
+import { expandGifFrames, processSprite } from "./processSprite";
 import type { SpriteContext } from "@synara/contracts";
 export const testContext: SpriteContext = {
   projectId: "sprite-test",
@@ -71,4 +71,38 @@ describe("sprite deterministic processing", () => {
       .toBuffer();
     expect((await processSprite(clipped, testContext)).warnings.join(" ")).toMatch(/boundary/);
   });
+});
+
+it("expands GIF frames onto full canvases in rows of at most eight", async () => {
+  // Static background plus one moving square: encoders store later frames as partial updates.
+  const pages = await Promise.all(
+    Array.from({ length: 10 }, (_, i) =>
+      sharp(
+        Buffer.from(
+          `<svg width="40" height="20"><rect width="40" height="20" fill="blue"/><rect x="${i * 3}" y="5" width="6" height="6" fill="red"/></svg>`,
+        ),
+      )
+        .png()
+        .toBuffer(),
+    ),
+  );
+  const gif = await sharp(pages, { join: { animated: true } })
+    .gif()
+    .toBuffer();
+  const expanded = await expandGifFrames(gif);
+  expect(expanded).toMatchObject({ frames: 10, width: 40, height: 20 });
+  const { data, info } = await sharp(expanded.bytes).raw().toBuffer({ resolveWithObject: true });
+  expect([info.width, info.height]).toEqual([200, 40]);
+  const pixel = (x: number, y: number) => [
+    ...data.subarray(
+      (y * info.width + x) * info.channels,
+      (y * info.width + x) * info.channels + 3,
+    ),
+  ];
+  for (let frame = 0; frame < 10; frame++) {
+    const left = (frame % 5) * 40,
+      top = Math.floor(frame / 5) * 20;
+    expect(pixel(left + frame * 3 + 3, top + 8)[0]).toBeGreaterThan(200);
+    expect(pixel(left + 39, top + 1)[2]).toBeGreaterThan(200);
+  }
 });

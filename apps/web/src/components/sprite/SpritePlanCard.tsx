@@ -15,8 +15,6 @@ import {
   spritePlanTasks,
   spritePlanTarget,
   spriteGenerationReference,
-  spriteLayoutGuideSvg,
-  spriteTaskGuideSvg,
   type SpriteGenerationPlan,
   type SpritePlanReference,
   type SpriteState,
@@ -511,18 +509,8 @@ export function SpritePlanCard({ projectId, planId, threadId }: SpritePlanPointe
                 {c.workflowVersion === 2 && (
                   <p className="w-full text-ui-sm">
                     {tr("Staged action generation")} · {tr("Cost unknown")} ·{" "}
-                    {tr("Maximum 8 frames per image task")}
+                    {tr("Generated as GIF animations")}
                   </p>
-                )}
-                {c.kind === "animation" && c.workflowVersion !== 2 && (
-                  <OptionSelect
-                    label={tr("Generation mode")}
-                    value={c.mode}
-                    onValueChange={(value) => patch({ mode: value as typeof c.mode })}
-                  >
-                    <option value="combined">{tr("One sheet for all actions")}</option>
-                    <option value="separate">{tr("One image per action")}</option>
-                  </OptionSelect>
                 )}
               </div>
               <label className="block space-y-1.5">
@@ -942,27 +930,33 @@ export function SpritePlanCard({ projectId, planId, threadId }: SpritePlanPointe
                         </option>
                       ))}
                     </OptionSelect>
-                    <OptionSelect
-                      label={tr("Format")}
-                      value={c.parameters.outputFormat ?? "png"}
-                      onValueChange={(value) =>
-                        patch({
-                          parameters: {
-                            ...c.parameters,
-                            outputFormat: value as typeof c.parameters.outputFormat,
-                          },
-                        })
-                      }
-                    >
-                      {(c.background === "transparent"
-                        ? ["png", "webp"]
-                        : ["png", "webp", "jpeg"]
-                      ).map((v) => (
-                        <option value={v} key={v}>
-                          {v.toUpperCase()}
-                        </option>
-                      ))}
-                    </OptionSelect>
+                    {c.kind === "animation" ? (
+                      <p className="self-center text-ui-sm text-muted-foreground">
+                        {tr("Format")}: GIF
+                      </p>
+                    ) : (
+                      <OptionSelect
+                        label={tr("Format")}
+                        value={c.parameters.outputFormat ?? "png"}
+                        onValueChange={(value) =>
+                          patch({
+                            parameters: {
+                              ...c.parameters,
+                              outputFormat: value as typeof c.parameters.outputFormat,
+                            },
+                          })
+                        }
+                      >
+                        {(c.background === "transparent"
+                          ? ["png", "webp"]
+                          : ["png", "webp", "jpeg"]
+                        ).map((v) => (
+                          <option value={v} key={v}>
+                            {v.toUpperCase()}
+                          </option>
+                        ))}
+                      </OptionSelect>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-3">
                     {c.kind === "animation" &&
@@ -1056,37 +1050,6 @@ export function SpritePlanCard({ projectId, planId, threadId }: SpritePlanPointe
                 </>
               )}
             </p>
-            {c.kind === "animation" && c.mode === "combined" && (
-              <>
-                <p className="mt-1 text-ui-sm text-muted-foreground">
-                  {layout.rows} {tr("rows")} × {layout.columns} {tr("columns")} · {layout.empty}{" "}
-                  {tr("empty cells")}
-                </p>
-                <div
-                  className="mt-3 max-h-40 space-y-1 overflow-auto"
-                  aria-label={tr("Sheet layout")}
-                >
-                  {layout.actions.map((a) => (
-                    <div key={a.id} className="flex items-center gap-2">
-                      <span className="w-16 shrink-0 truncate text-ui-xs text-muted-foreground">
-                        {a.name}
-                      </span>
-                      <div
-                        className="grid flex-1 gap-0.5"
-                        style={{ gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))` }}
-                      >
-                        {Array.from({ length: layout.columns }, (_, i) => (
-                          <span
-                            key={i}
-                            className={`h-3 rounded-sm ${i < a.frameCount ? "bg-primary/30" : "border border-dashed border-muted-foreground/30"}`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
           </div>
           <details>
             <summary className="cursor-pointer text-ui-sm text-muted-foreground">
@@ -1146,33 +1109,25 @@ export function SpritePlanCard({ projectId, planId, threadId }: SpritePlanPointe
                       ? draft.compiled[i]!.prompt
                       : spritePlanPrompt(task)}
                   </pre>
-                  {task.kind === "animation" && (
-                    <>
-                      <p className="text-ui-sm text-muted-foreground">
-                        {tr("The system adds a layout guide as the last reference for animation.")}
-                      </p>
-                      <img
-                        className="max-h-40 w-full rounded-lg border bg-white object-contain"
-                        alt={tr("System layout guide")}
-                        src={`data:image/svg+xml,${encodeURIComponent(
-                          task.layout
-                            ? spriteTaskGuideSvg(
-                                task.layout,
-                                task.canonical
-                                  ? task.canonical.pivotY / task.canonical.renderSpec.logicalHeight
-                                  : 0.9,
-                              )
-                            : spriteLayoutGuideSvg(
-                                taskLayout.columns,
-                                taskLayout.rows,
-                                task.parameters.size,
-                                task.width,
-                                task.height,
-                                taskLayout.actions.map((a) => a.frameCount),
-                              ),
-                        )}`}
-                      />
-                    </>
+                  {task.kind === "animation" && task.parameters.outputFormat === "gif" && (
+                    <p className="text-ui-sm text-muted-foreground">
+                      {tr("GIF")} · {task.parameters.frameCount} {tr("frames")} ×{" "}
+                      {task.parameters.size === "auto" ? tr("Auto") : task.parameters.size} ·{" "}
+                      {tr("Per frame")} {task.parameters.frameDurationMs}ms
+                      {task.layout && task.parameters.size !== "auto" && (
+                        <>
+                          {" "}
+                          · {tr("Combined")} ≈
+                          {(
+                            (task.layout.cells.length *
+                              task.layout.cells[0]!.width *
+                              task.layout.cells[0]!.height) /
+                            1_000_000
+                          ).toFixed(1)}
+                          MP
+                        </>
+                      )}
+                    </p>
                   )}
                 </div>
               );

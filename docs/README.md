@@ -2,20 +2,21 @@
 
 这里只保留当前使用说明、长期维护约束，以及仍在实施的必要方案。项目安装、开发、构建和数据目录见[根 README](../README.md)，上游来源和迁移记录见[UPSTREAM](../UPSTREAM.md)。
 
-| 文档                                                  | 内容                                             |
-| ----------------------------------------------------- | ------------------------------------------------ |
-| [精灵动画工作台](guides/SPRITE_WORKFLOW.md)           | 角色、动作、修帧、生成重试、导出与恢复           |
-| [资源中心](guides/RESOURCE_CENTER.md)                 | 目录导航、范围、选择、预览、整理和索引状态       |
-| [批量生图](guides/IMAGE_BATCHES.md)                   | 对话编排、方案预览、任务执行、结果挑选与手动入库 |
-| [UI 实现规则](UI_GUIDELINES.md)                       | 公共布局、控件、主题、键盘和视觉验收             |
-| [品牌与界面语言](development/BRANDING.md)             | 产品名、上游链接、语言设置与合并复查             |
-| [创作功能维护](development/CREATIVE_WORKBENCHES.md)   | 绘图、批量、精灵与资源中心的数据约束和回归入口   |
-| [3D 工坊](guides/MODEL3D_WORKSHOP.md)                 | 双路建模、候选版本、材质、GLB/Godot 导出与恢复   |
-| [3D 工坊维护](development/MODEL3D_WORKSHOP.md)        | 执行隔离、版本发布、MCP 和回归入口               |
-| [3D 工坊实施规格](design/3d-workshop/PRODUCT_SPEC.md) | 已批准范围、实际落地与验收边界                   |
-| [3D 生成](guides/GEN3D.md)                            | 三视图蓝图、AI 迭代建模、比对、导出与恢复        |
-| [3D 生成维护](development/GEN3D.md)                   | 数据与接口、执行边界和回归入口                   |
-| [3D 生成方案](design/3d-generation/PRODUCT_SPEC.md)   | 里程碑与后续范围（M4 已实现）                    |
+| 文档                                                   | 内容                                             |
+| ------------------------------------------------------ | ------------------------------------------------ |
+| [精灵动画工作台](guides/SPRITE_WORKFLOW.md)            | 角色、动作、修帧、生成重试、导出与恢复           |
+| [资源中心](guides/RESOURCE_CENTER.md)                  | 目录导航、范围、选择、预览、整理和索引状态       |
+| [批量生图](guides/IMAGE_BATCHES.md)                    | 对话编排、方案预览、任务执行、结果挑选与手动入库 |
+| [UI 实现规则](UI_GUIDELINES.md)                        | 公共布局、控件、主题、键盘和视觉验收             |
+| [品牌与界面语言](development/BRANDING.md)              | 产品名、上游链接、语言设置与合并复查             |
+| [创作功能维护](development/CREATIVE_WORKBENCHES.md)    | 绘图、批量、精灵与资源中心的数据约束和回归入口   |
+| [3D 工坊](guides/MODEL3D_WORKSHOP.md)                  | 双路建模、候选版本、材质、GLB/Godot 导出与恢复   |
+| [3D 工坊维护](development/MODEL3D_WORKSHOP.md)         | 执行隔离、版本发布、MCP 和回归入口               |
+| [3D 工坊实施规格](design/3d-workshop/PRODUCT_SPEC.md)  | 已批准范围、实际落地与验收边界                   |
+| [3D 生成](guides/GEN3D.md)                             | 三视图蓝图、AI 迭代建模、比对、导出与恢复        |
+| [3D 生成维护](development/GEN3D.md)                    | 数据与接口、执行边界和回归入口                   |
+| [3D 生成方案](design/3d-generation/PRODUCT_SPEC.md)    | 里程碑与后续范围（M4 已实现）                    |
+| [精灵 GIF 生成方案](design/sprite-gif/PRODUCT_SPEC.md) | 动作只用 GIF 生成、展开为虚拟精灵表（M1 已实现） |
 
 ## 放置与维护
 

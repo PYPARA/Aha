@@ -63,34 +63,35 @@ function Host({ legacy = false }: { legacy?: boolean }) {
     </div>
   );
 }
-it("shows linked sizes, updates odd counts and preserves the 8-frame request limit", async () => {
+it("requests each GIF frame at twice the output and splits long actions evenly", async () => {
   await render(<Host />);
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1152x576");
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("512x512");
   await page.getByRole("spinbutton", { name: "Frames", exact: true }).fill("5");
   await userEvent.keyboard("{Enter}");
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1008x672");
-  await page.getByRole("spinbutton", { name: "Frames", exact: true }).fill("16");
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("512x512");
+  await page.getByRole("spinbutton", { name: "Frames", exact: true }).fill("20");
   await userEvent.keyboard("{Enter}");
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1152x576,1152x576");
-});
-it("keeps manual request dimensions when frames change, then allows explicit linked adoption", async () => {
-  await render(<Host legacy />);
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1024x1024");
-  await page.getByRole("spinbutton", { name: "Frames", exact: true }).fill("6");
-  await userEvent.keyboard("{Enter}");
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1024x1024");
-  await page.getByRole("button", { name: "Adopt recommended layout", exact: true }).click();
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1008x672");
-});
-it("keeps source sampling independent of output scale and never silently increases request count", async () => {
-  await render(<Host />);
-  await page.getByText("Layout parameters", { exact: true }).click();
-  await page.getByRole("combobox", { name: "Source sampling", exact: true }).click();
-  await page.getByRole("option", { name: "2×", exact: true }).click();
-  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("2048x1024");
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("512x512,512x512");
   await expect
-    .element(page.getByText("Image requests: 1 · Cost unknown", { exact: true }))
+    .element(page.getByText("Image requests: 2 · Cost unknown", { exact: true }))
     .toBeVisible();
+});
+it("re-derives a legacy whole-sheet size, then keeps an explicit per-frame size", async () => {
+  await render(<Host legacy />);
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("512x512");
+  await page.getByRole("button", { name: "Adopt recommended frame size", exact: true }).click();
+  await page.getByRole("combobox", { name: "GIF frame size", exact: true }).click();
+  await page.getByRole("option", { name: "Specify frame size", exact: true }).click();
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("1024x1024");
+});
+it("lowers source sampling within the pixel minimum and sets frames per request", async () => {
+  await render(<Host />);
+  await page.getByRole("combobox", { name: "Source sampling", exact: true }).click();
+  await page.getByRole("option", { name: "1×", exact: true }).click();
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("288x288");
+  await page.getByRole("spinbutton", { name: "Frames per request", exact: true }).fill("4");
+  await userEvent.keyboard("{Enter}");
+  await expect.element(page.getByTestId("compiled-size")).toHaveTextContent("416x416,416x416");
   await expect
     .element(
       page.getByText("Output frame size: 256×256 · Output size follows project settings", {

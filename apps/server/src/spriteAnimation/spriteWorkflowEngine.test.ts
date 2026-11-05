@@ -90,22 +90,37 @@ async function fixture(spec: SpriteRenderSpec = DEFAULT_SPRITE_RENDER_SPEC, sour
             `global frames ${task.segment!.frameStart + 1}–${task.segment!.frameStart + task.segment!.frameCount}`,
           ),
       )!;
-      const layout = config.layout!;
-      const rects = layout.cells
-        .filter((c) => c.actionId)
-        .map(
-          (c, i) =>
-            `<rect x="${c.x + c.width * 0.3}" y="${c.y + c.height * (i % 2 ? 0.3 : 0.5)}" width="${c.width * 0.3}" height="${c.height * 0.3}" fill="red"/>`,
-        )
-        .join("");
-      const output = await upload(
-        await sharp(
-          Buffer.from(`<svg width="${layout.width}" height="${layout.height}">${rects}</svg>`),
-        )
-          .png()
-          .toBuffer(),
-        `sheet-${jobs.size}.png`,
+      // The provider returns one GIF; each frame holds a pose at alternating heights.
+      const { width, height } = config.layout!.cells[0]!;
+      const frames = input.parameters.frameCount ?? 2;
+      const pages = await Promise.all(
+        Array.from({ length: frames }, (_, i) =>
+          sharp(
+            Buffer.from(
+              `<svg width="${width}" height="${height}"><rect x="${width * 0.3}" y="${height * (i % 2 ? 0.3 : 0.5)}" width="${width * 0.3}" height="${height * 0.3}" fill="red"/></svg>`,
+            ),
+          )
+            .png()
+            .toBuffer(),
+        ),
       );
+      const bytes = await sharp(pages, { join: { animated: true } })
+        .gif()
+        .toBuffer();
+      const id = `asset-${nextId++}`;
+      const output: ImageAsset = {
+        id,
+        name: `sheet-${jobs.size}.gif`,
+        mimeType: "image/gif",
+        url: `/${id}`,
+        thumbnailUrl: `/${id}`,
+        width,
+        height,
+        bytes: bytes.length,
+        createdAt: new Date().toISOString(),
+        animation: { frameCount: frames, durationMs: frames * 40 },
+      };
+      assets.set(id, { asset: output, bytes });
       const job = { id: `job-${jobs.size}`, status: "running", outputs: [output] };
       jobs.set(input.clientRequestId, job);
       return job;
@@ -232,7 +247,12 @@ describe("staged sprite engine", () => {
     await f.confirm(plan);
     const request = f.images.createJob.mock.calls[0]![0];
     expect(request.inputAssetIds[0]).toBe(state.canonical!.generationReference!.id);
-    expect(request.parameters.size).toBe("1152x576");
+    expect(request.parameters).toMatchObject({
+      size: "512x512",
+      outputFormat: "gif",
+      frameCount: 8,
+      frameDurationMs: 40,
+    });
     f.finish();
     await f.engine.tick();
     const finished = await f.engine.command({ operation: "get", projectId: "project" });
@@ -303,7 +323,7 @@ describe("staged sprite engine", () => {
   });
   it("locks the reference, starts independent actions together, and waits for segment dependencies", async () => {
     const f = await fixture(),
-      plan = await f.propose(9, true);
+      plan = await f.propose(20, true);
     expect(f.images.createJob).not.toHaveBeenCalled();
     await Promise.all([f.confirm(plan), f.confirm(plan)]);
     expect(f.images.createJob).toHaveBeenCalledTimes(2);
@@ -323,7 +343,7 @@ describe("staged sprite engine", () => {
     state = await f.engine.command({ operation: "get", projectId: "project" });
     expect(
       state.runs.filter((r) => r.context.action === "jump").flatMap((r) => r.frames),
-    ).toHaveLength(9);
+    ).toHaveLength(20);
     expect(state.runs[1]!.actions![0]!.action).toMatchObject({ fps: 24, loop: false });
   });
   it("keeps paid source images after processing failure and reprocesses without a new image job", async () => {

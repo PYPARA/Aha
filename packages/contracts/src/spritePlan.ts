@@ -3,7 +3,7 @@ import type { SpritePlanConfiguration, SpritePlanAction } from "./spriteAnimatio
 import {
   spriteWorkflowTasks,
   spriteOutputSize,
-  spriteSegmentLayout,
+  spriteGifTask,
   spriteGenerationReference,
 } from "./spriteWorkflow";
 
@@ -60,20 +60,19 @@ export function spritePlanLayout(c: SpritePlanConfiguration) {
   const actions = spritePlanActions(c);
   if (c.workflowVersion === 2 && c.kind === "animation") {
     const frames = actions.reduce((n, a) => n + a.frameCount, 0);
-    let planned = c.layout;
+    let tasks: SpritePlanConfiguration[] = [];
     try {
-      if (!planned && actions[0])
-        planned = spriteSegmentLayout(c, actions[0], 0, Math.min(8, actions[0].frameCount));
+      tasks = spritePlanTasks(c);
     } catch {
       /* Draft errors are reported by spritePlanIssues. */
     }
     return {
       actions,
-      columns: planned?.columns ?? Math.min(4, Math.max(1, ...actions.map((a) => a.frameCount))),
-      rows: planned?.rows ?? 1,
+      columns: tasks[0]?.layout?.columns ?? Math.max(1, actions[0]?.frameCount ?? 1),
+      rows: 1,
       frames,
-      empty: planned ? planned.cells.filter((cell) => !cell.actionId).length : 0,
-      jobs: c.segment ? 1 : actions.reduce((n, a) => n + Math.ceil(a.frameCount / 8), 0),
+      empty: 0,
+      jobs: tasks.length || (c.segment ? 1 : actions.length),
     };
   }
   const columns = Math.max(1, ...actions.map((a) => a.frameCount));
@@ -110,25 +109,7 @@ export function spritePlanTasks(c: SpritePlanConfiguration): SpritePlanConfigura
       action.frameCount !== segment.frameCount
     )
       throw new Error("Keep this segment's frame range or regenerate the complete action.");
-    const layout =
-      c.layout &&
-      (c.parameters.size === `${c.layout.width}x${c.layout.height}` || c.parameters.size === "auto")
-        ? c.layout
-        : spriteSegmentLayout(c, action, segment.frameStart, segment.frameCount);
-    return [
-      {
-        ...c,
-        layout,
-        parameters: {
-          ...c.parameters,
-          n: 1,
-          size:
-            c.sizing?.mode === "model" || (!c.sizing && c.sizeSource === "auto")
-              ? "auto"
-              : `${layout.width}x${layout.height}`,
-        },
-      },
-    ];
+    return [spriteGifTask(c, action, segment)];
   }
   const actions = spritePlanActions(c);
   return (
@@ -147,11 +128,11 @@ export function spriteSizeSummary(c: SpritePlanConfiguration) {
   if (c.workflowVersion === 2 && c.kind === "animation") {
     try {
       const task = spritePlanTasks(c)[0]!,
-        layout = task.layout!,
-        cell = layout.cells[0]!;
+        cell = task.layout!.cells[0]!;
+      // GIF requests are sized per frame.
       return {
-        width: layout.width,
-        height: layout.height,
+        width: cell.width,
+        height: cell.height,
         cellWidth: cell.width,
         cellHeight: cell.height,
         scale: Math.min(c.width / cell.width, c.height / cell.height),
@@ -176,18 +157,39 @@ export function spriteSizeSummary(c: SpritePlanConfiguration) {
     : null;
 }
 export function spritePlanPrompt(c: SpritePlanConfiguration): string {
-  const l = spritePlanLayout(c);
   const creative = spritePlanForRevision(c).prompt;
-  if (c.workflowVersion === 2 && c.kind === "animation") {
+  if (c.kind === "animation") {
+    if (c.workflowVersion !== 2) return creative;
     const task = c.segment ? c : spriteWorkflowTasks(c)[0];
-    if (!task?.segment || !task.layout) return creative;
+    if (!task?.segment) return creative;
     const a = task.actions[0]!,
       segment = task.segment,
-      layout = task.layout;
-    const pivot = c.canonical;
-    return `${creative}\nCreate one coherent animation segment of the SAME character shown in Reference 1. Preserve its face, proportions, style, palette, materials, clothing and props.\n${task.references.map((r, i) => `Reference ${i + 1}: ${i === 0 ? "authoritative approved character identity" : r.purpose || r.role}.`).join("\n")}\nThe LAST reference is a layout-only construction guide. Never draw its lines, boxes, guide colors or ground marks.\nAction "${a.name}": ${a.description}. Generate exactly ${segment.frameCount} poses: global frames ${segment.frameStart + 1}–${segment.frameStart + segment.frameCount} of ${segment.totalFrames}. ${segment.index ? "The preceding references include the previous segment ending; continue its cadence without repeating those frames." : "Begin the action at its initial phase."} ${a.loop ? "This is part of one smooth loop; the final global frame must transition back to the first." : "Show the action progressing from its beginning to its end."}\nUse ${layout.rows} physical rows and ${layout.columns} columns, read left to right then top to bottom.\n${layout.cells.map((cell, i) => `Slot ${i + 1}: ${cell.frameIndex === null ? "empty background only" : `global frame ${cell.frameIndex + 1}`}, region (${cell.x},${cell.y},${cell.width},${cell.height}).`).join("\n")}\nKeep a fixed camera, one shared body scale and the reference ground coordinate in every slot${pivot ? ` (baseline ${Math.round((pivot.pivotY / pivot.renderSpec.logicalHeight) * 100)}% of slot height)` : ""}. Preserve intentional vertical motion, crouching and jumping; never independently recenter or refit poses. Keep complete limbs and props inside the safe area.\n${c.renderSpec?.mode === "pixel" ? "Pixel-art style with crisp, deliberate pixels and no blur or antialiasing." : "Preserve clean illustration contours and materials."}\n${c.background === "chroma" ? `Perfectly flat ${c.chromaKey} background, including empty slots; never use the key color on the character.` : "Transparent background including empty slots."} No labels, visible grids, text, scene, floor shadows or detached effects.`;
+      pivot = c.canonical,
+      references = task.references.length;
+    return [
+      creative,
+      `Create one animated GIF of the SAME character shown in Reference 1. Preserve its face, proportions, style, palette, materials, clothing and props.`,
+      ...task.references.map(
+        (r, i) =>
+          `Reference ${i + 1}: ${i === 0 ? "authoritative approved character identity" : r.purpose || r.role}.`,
+      ),
+      segment.index
+        ? `References ${references + 1}–${references + 2}: the last two frames of the previous segment. Continue its motion and cadence without repeating them.`
+        : "",
+      `Action "${a.name}": ${a.description}. Animate exactly ${segment.frameCount} frames: global frames ${segment.frameStart + 1}–${segment.frameStart + segment.frameCount} of ${segment.totalFrames}. ${segment.index ? "" : "Begin the action at its initial phase. "}${a.loop ? "This is part of one smooth loop; the final global frame must transition back to the first." : "Show the action progressing from its beginning to its end."}`,
+      `Every frame uses the same fixed camera, the same body scale and the same ground line${pivot ? ` (feet at ${Math.round((pivot.pivotY / pivot.renderSpec.logicalHeight) * 100)}% of the frame height)` : ""}. Preserve intentional travel, crouching and jumping; never recenter or refit individual frames. Keep complete limbs and props inside every frame with a small margin.`,
+      c.renderSpec?.mode === "pixel"
+        ? "Pixel-art style with crisp, deliberate pixels and no blur or antialiasing."
+        : "Preserve clean illustration contours and materials.",
+      c.background === "chroma"
+        ? `Perfectly flat ${c.chromaKey} background in every frame; never use the key color on the character.`
+        : "Transparent background in every frame.",
+      "No labels, text, borders, grids, scene, floor shadows or detached effects.",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
-  return `${creative}\nRequested whole image size: ${c.parameters.size ?? "auto"}.\n${c.references.map((r, i) => `Reference ${i + 1}: ${r.purpose || r.role}${r.actionId ? ` for action ${c.actions.find((a) => a.id === r.actionId)?.name}` : " for all actions"}. ${i === 0 ? "Authoritative identity: preserve face, palette, proportions, materials, clothing and props." : "Use only for its stated purpose; preserve the main character identity."}`).join("\n")}\n${c.kind === "character" ? "Create one complete static sprite image of the requested subject." : `Create ONE sprite sheet with exactly ${l.rows} equal-height rows and ${l.columns} equal-width columns. Fill the entire sheet with these cells, with no additional blank columns or outer margins. Place exactly ONE complete pose in each valid cell. Read top to bottom, then left to right. The LAST reference is layout only; never reproduce its grid.\n${l.actions.map((a, i) => `Row ${i + 1}: action "${a.name}": ${a.description}. Exactly ${a.frameCount} consecutive frames in the first ${a.frameCount} cells; leave the remaining ${l.columns - a.frameCount} cells completely empty. ${a.loop ? "Complete a smooth looping cycle." : "Show the action from beginning to end."}`).join("\n")}\nKeep every whole-body pose in its cell with 10% safe padding. Use a fixed camera, shared scale and ground coordinate. Preserve intentional vertical movement.`}\n${c.background === "chroma" ? `Perfectly flat ${c.chromaKey} background, including unused cells; avoid this color on the character.` : "Transparent background, including unused cells."} No labels, borders, text, scene, floor shadows, detached effects or visible grid.`;
+  return `${creative}\nRequested image size: ${c.parameters.size ?? "auto"}.\n${c.references.map((r, i) => `Reference ${i + 1}: ${r.purpose || r.role}. ${i === 0 ? "Authoritative identity: preserve face, palette, proportions, materials, clothing and props." : "Use only for its stated purpose; preserve the main character identity."}`).join("\n")}\nCreate one complete static sprite image of the requested subject.\n${c.background === "chroma" ? `Perfectly flat ${c.chromaKey} background; avoid this color on the character.` : "Transparent background."} No labels, borders, text, scene, floor shadows or detached effects.`;
 }
 export function spritePlanIssues(c: SpritePlanConfiguration): string[] {
   const l = spritePlanLayout(c),
@@ -223,6 +225,12 @@ export function spritePlanIssues(c: SpritePlanConfiguration): string[] {
       issues.push(e instanceof Error ? e.message : String(e));
     }
   }
+  if (c.kind === "animation" && c.workflowVersion !== 2)
+    issues.push(
+      "Sprite sheets are no longer generated. Confirm a character reference to generate actions as GIFs.",
+    );
+  if (c.kind === "animation" && l.actions.some((a) => a.frameCount < 2))
+    issues.push("Each action needs at least 2 frames for GIF generation.");
   if (c.kind === "animation" && !c.references.length)
     issues.push("Add a reference image before generating animation.");
   if (new Set(c.actions.map((a) => a.id)).size !== c.actions.length)
@@ -238,6 +246,7 @@ export function spritePlanIssues(c: SpritePlanConfiguration): string[] {
   if (c.parameters.n !== 1) issues.push("Each sprite task must generate one image.");
   if (
     c.background === "transparent" &&
+    c.kind === "character" &&
     !["png", "webp"].includes(c.parameters.outputFormat ?? "png")
   )
     issues.push("Transparent backgrounds require PNG or WebP.");
@@ -250,9 +259,9 @@ export function spritePlanIssues(c: SpritePlanConfiguration): string[] {
     issues.push(e instanceof Error ? e.message : String(e));
   }
   for (const task of tasks) {
-    if (task.workflowVersion === 2 && task.references.length + (task.segment?.index ? 3 : 1) > 16)
+    if (task.workflowVersion === 2 && task.references.length + (task.segment?.index ? 2 : 0) > 16)
       issues.push(
-        "Too many references for this action segment. Reserve space for the layout and previous frames.",
+        "Too many references for this action segment. Reserve space for the previous frames.",
       );
     if (spritePlanPrompt(task).length > 32000) {
       issues.push("Generation requirements exceed the prompt limit.");
@@ -267,24 +276,6 @@ export function spritePlanIssues(c: SpritePlanConfiguration): string[] {
     }
   }
   return issues;
-}
-/** The same bounded layout guide is shown in the card and sent to Drawing. */
-export function spriteLayoutGuideSvg(
-  columns: number,
-  rows = 1,
-  size?: string,
-  frameWidth = 1,
-  frameHeight = 1,
-  counts?: readonly number[],
-) {
-  const dimensions = size?.match(/^(\d+)x(\d+)$/);
-  const ratio = dimensions
-    ? Number(dimensions[2]) / Number(dimensions[1])
-    : (rows * frameHeight) / (columns * frameWidth);
-  const width = Math.max(1, Math.min(1536, Math.floor(2048 / ratio))),
-    height = Math.max(1, Math.round(width * ratio));
-  const padding = Math.min(8, width / columns / 10, height / rows / 10);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="white"/>${Array.from({ length: columns * rows }, (_, i) => `<rect x="${((i % columns) * width) / columns + padding}" y="${(Math.floor(i / columns) * height) / rows + padding}" width="${width / columns - 2 * padding}" height="${height / rows - 2 * padding}" fill="${counts && i % columns >= counts[Math.floor(i / columns)]! ? "#d1d5db" : "#ffffff"}" stroke="#999"/>`).join("")}</svg>`;
 }
 export function compileSpritePlan(c: SpritePlanConfiguration) {
   return spritePlanTasks(c).map((task) => {

@@ -21,6 +21,7 @@ const asset = (id: string) => ({
 function runs(): SpriteRun[] {
   const c: SpritePlanConfiguration = {
     workflowVersion: 2,
+    generation: { version: 1, segmentFrames: 8 },
     sequenceId: "sequence",
     renderSpec: { mode: "pixel", logicalWidth: 64, logicalHeight: 64, outputScale: 4 },
     kind: "animation",
@@ -40,7 +41,7 @@ function runs(): SpriteRun[] {
         name: "jump",
         description: "jump",
         enabled: true,
-        frameCount: 9,
+        frameCount: 16,
         fps: 24,
         loop: false,
       },
@@ -115,7 +116,7 @@ describe("complete action assembly", () => {
       }),
     );
     const assembled = spriteCombinedActionRun(pending[0]!, pending)!;
-    expect(assembled.frames).toHaveLength(9);
+    expect(assembled.frames).toHaveLength(16);
     expect(spriteBlockedActions(assembled.candidates![0]!).has("jump")).toBe(true);
     const checked = pending.map((p) =>
       Object.assign({}, p, {
@@ -159,9 +160,9 @@ describe("complete action assembly", () => {
     const parts = runs(),
       result = spriteCombinedActionRun(parts[1]!, parts.toReversed())!;
     expect(result.frames.map((f) => f.id)).toEqual(
-      Array.from({ length: 9 }, (_, i) => `frame-${i}`),
+      Array.from({ length: 16 }, (_, i) => `frame-${i}`),
     );
-    expect(result.actions![0]!.action).toMatchObject({ frameCount: 9, fps: 24, loop: false });
+    expect(result.actions![0]!.action).toMatchObject({ frameCount: 16, fps: 24, loop: false });
     expect(result.assembledRunIds).toEqual(["run-0", "run-1"]);
     const snapshots = spriteTaskSnapshots(result, parts);
     expect(snapshots.map((s) => s.segment.frameStart)).toEqual([0, 8]);
@@ -178,23 +179,24 @@ describe("complete action assembly", () => {
       candidates: [{ ...parts[1]!.candidates![0]!, status: "failed" as const }],
     };
     expect(spriteCombinedActionRun(parts[0]!, [parts[0]!, failed])).toBeUndefined();
+    const repairedFrames = Array.from({ length: 8 }, (_, i) => asset(`repaired-${i}`));
     const repaired = {
       ...parts[1]!,
       id: "repair",
       planId: "repair-plan",
-      frames: [asset("repaired")],
-      actions: [{ ...parts[1]!.actions![0]!, frames: [asset("repaired")] }],
+      frames: repairedFrames,
+      actions: [{ ...parts[1]!.actions![0]!, frames: repairedFrames }],
       candidates: [
         {
           ...parts[1]!.candidates![0]!,
-          frames: [asset("repaired")],
-          actions: [{ ...parts[1]!.actions![0]!, frames: [asset("repaired")] }],
+          frames: repairedFrames,
+          actions: [{ ...parts[1]!.actions![0]!, frames: repairedFrames }],
           processingVersionId: "repaired-version",
         },
       ],
     };
     const result = spriteCombinedActionRun(parts[0]!, [...parts, repaired])!;
-    expect(result.frames.at(-1)!.id).toBe("repaired");
+    expect(result.frames.at(-1)!.id).toBe("repaired-7");
     expect(result.frames.slice(0, 8).map((f) => f.id)).toEqual(parts[0]!.frames.map((f) => f.id));
     expect(result.candidates![0]!.processingVersionId).not.toBe(
       spriteCombinedActionRun(parts[0]!, parts)!.candidates![0]!.processingVersionId,

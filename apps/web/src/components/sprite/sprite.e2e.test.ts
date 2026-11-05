@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
 import { unzipSync, strFromU8 } from "fflate";
+import { createRequire } from "node:module";
 import type { SpriteState } from "@synara/contracts";
 function pngChunk(type: string, data: Buffer) {
   const tag = Buffer.from(type),
@@ -57,6 +58,28 @@ function fixturePng(width: number, height: number, regions: number[][]) {
 const enabled = process.env.AHA_SPRITE_E2E === "1";
 const root = path.resolve(import.meta.dirname, "../../../../..");
 const artifacts = path.join(root, ".tmp/validation/sprite-workflow");
+// The web package has no image codec; the fixture provider borrows the server's.
+type GifEncoder = (
+  frames: Buffer[],
+  options: { join: { animated: true } },
+) => { gif: () => { toBuffer: () => Promise<Buffer> } };
+const sharp = createRequire(path.join(root, "apps/server/package.json"))("sharp") as GifEncoder;
+/** An animated GIF whose frames each hold one pose at a slightly different height. */
+async function fixtureGif(width: number, height: number, frames: number) {
+  const pages = Array.from({ length: frames }, (_, i) =>
+    fixturePng(width, height, [
+      [
+        Math.round(width * 0.35),
+        Math.round(height * (0.3 + (i % 2) * 0.05)),
+        Math.round(width * 0.3),
+        Math.round(height * 0.5),
+      ],
+    ]),
+  );
+  return sharp(pages, { join: { animated: true } })
+    .gif()
+    .toBuffer();
+}
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function port() {
   const s = createServer();
@@ -161,15 +184,13 @@ it.skipIf(!enabled)(
             prompt = String(raw.prompt ?? "");
           requests.push({ size, prompt, endpoint: req.url ?? "" });
           const [w, h] = size.split("x").map(Number);
-          const animation = prompt.includes("global frames");
-          const regions = animation
-            ? [...prompt.matchAll(/region \((\d+),(\d+),(\d+),(\d+)\)/g)].map((m) =>
-                m.slice(1).map(Number),
-              )
-            : [[0, 0, w!, h!]];
-          const png = fixturePng(w!, h!, regions);
+          // Actions arrive as GIF requests; the character is a still PNG.
+          const image =
+            raw.output_format === "gif"
+              ? await fixtureGif(w!, h!, Number(raw.frame_count ?? 2))
+              : fixturePng(w!, h!, [[0, 0, w!, h!]]);
           res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ data: [{ b64_json: png.toString("base64") }] }));
+          res.end(JSON.stringify({ data: [{ b64_json: image.toString("base64") }] }));
         } catch (e) {
           res.statusCode = 500;
           res.end(String(e));
@@ -213,7 +234,7 @@ it.skipIf(!enabled)(
       });
       await page.goto(`http://127.0.0.1:${webPort}/sprite-animation`);
       for (let i = 0; i < 12; i++) {
-        for (const name of [/^Skip setup$/, /^Not now$/, /^Skip tour$/]) {
+        for (const name of [/^Skip setup$|^跳过设置$/, /^Not now$/, /^Skip tour$/]) {
           const button = page.getByRole("button", { name });
           if (await button.isVisible()) await button.click();
         }
@@ -222,9 +243,9 @@ it.skipIf(!enabled)(
       }
       await page.getByTestId("sprite-library").waitFor({ timeout: 25000 });
       await page
-        .getByRole("button", { name: /^Skip setup$/ })
+        .getByRole("button", { name: /^Skip setup$|^跳过设置$/ })
         .waitFor({ timeout: 10000 })
-        .then(() => page.getByRole("button", { name: /^Skip setup$/ }).click())
+        .then(() => page.getByRole("button", { name: /^Skip setup$|^跳过设置$/ }).click())
         .catch(() => {});
       await page.getByRole("button", { name: /^New sprite project$|^新建精灵项目$/ }).click();
       await page.getByRole("textbox", { name: /^Project name$|^项目名称$/ }).fill("Sprite v5 E2E");
@@ -334,11 +355,11 @@ it.skipIf(!enabled)(
       const generated = (await state(page, projectId)).runs.find(
         (r) => r.input.kind === "animation",
       )!;
-      expect(requests.map((r) => r.size)).toEqual(["1024x1024", "1152x576"]);
+      expect(requests.map((r) => r.size)).toEqual(["1024x1024", "512x512"]);
       expect(generated.configuration!.layout).toMatchObject({
-        columns: 4,
-        rows: 2,
-        width: 1024,
+        columns: 8,
+        rows: 1,
+        width: 4096,
         height: 512,
       });
       await page.getByRole("button", { name: /^Generation tasks|^生成任务/ }).click();

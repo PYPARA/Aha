@@ -227,8 +227,6 @@ export const copy: Record<string, string> = {
   "Ground line": "地面线",
   "Character reference history": "角色基准历史",
   "Compare character reference": "对比角色基准",
-  "Too many references for this action segment. Reserve space for the layout and previous frames.":
-    "此动作片段的参考图过多，请为布局和前一片段帧预留位置。",
   "The start of this segment may not continue the preceding pose. Review the complete animation.":
     "此片段的起始姿态可能与前一片段不连续，请检查完整动画。",
   "The last pose may not connect to the first. Review the loop transition.":
@@ -264,7 +262,6 @@ export const copy: Record<string, string> = {
   "Logical height": "逻辑高度",
   "Logical pixels": "逻辑像素",
   "Logical width": "逻辑宽度",
-  "Maximum 8 frames per image task": "每个图片任务最多 8 帧",
   "Model size support": "模型尺寸能力",
   "My draft": "我的草稿",
   "Original reference": "原始参考图",
@@ -602,9 +599,6 @@ export const copy: Record<string, string> = {
   "Generation target": "生成目标",
   "Character reference": "角色主参考",
   Animation: "动作动画",
-  "Generation mode": "生成方式",
-  "One sheet for all actions": "多个动作合成一张图",
-  "One image per action": "每个动作单独生成",
   "Generation requirements": "生成需求",
   "Enable action": "启用动作",
   "Action description": "动作描述",
@@ -625,15 +619,33 @@ export const copy: Record<string, string> = {
     "生成尺寸用于整张图片，单帧尺寸在切帧后应用。参数支持取决于绘图渠道。",
   "image tasks": "个绘图任务",
   actions: "个动作",
-  "empty cells": "个空位",
-  "Sheet layout": "精灵图布局",
   "Full generation inputs": "完整生图输入",
   "Image task": "绘图任务",
-  "The system adds a layout guide as the last reference for animation.":
-    "生成动画时，系统将此布局引导图放在参考图的最后一张。",
-  "System layout guide": "系统布局引导图",
   "Reload plan": "重新加载方案",
   "Combined sprite sheet": "多动作精灵图",
+  "Generated as GIF animations": "以 GIF 动图生成",
+  Combined: "合成",
+  "Adopt recommended frame size": "采用推荐帧尺寸",
+  "GIF frame size": "GIF 每帧尺寸",
+  "Follow output frame size": "跟随输出单帧",
+  "Specify frame size": "手动指定每帧尺寸",
+  "Let model decide frame size": "由模型决定每帧尺寸",
+  "Frames per request": "每次请求帧数",
+  "Source frame": "来源帧",
+  "Sprite sheets are no longer generated. Confirm a character reference to generate actions as GIFs.":
+    "已不再生成精灵表。请先确认角色基准，动作将以 GIF 生成。",
+  "Each action needs at least 2 frames for GIF generation.": "GIF 生成要求每个动作至少 2 帧。",
+  "Sprite sheets are no longer generated. Prepare a new plan to generate this action as a GIF.":
+    "已不再生成精灵表。请重新准备方案，以 GIF 生成这个动作。",
+  "The GIF returned a different number of frames than planned. Review the frame grouping.":
+    "GIF 返回的帧数与计划不同，请在修帧中检查动作分组。",
+  "This frame size exceeds GIF limits. Reduce the output frame size or source sampling.":
+    "每帧尺寸超出 GIF 限制，请减小输出单帧尺寸或来源采样倍率。",
+  "Specify a valid frame size.": "请输入有效的每帧尺寸。",
+  "A generation segment must contain 1–64 frames.": "每个生成片段需包含 1–64 帧。",
+  "The GIF exceeds frame processing capacity.": "GIF 超出帧处理容量。",
+  "Too many references for this action segment. Reserve space for the previous frames.":
+    "这个动作片段的参考图过多，请为上一段的末尾帧留出位置。",
   warnings: "条提醒",
   "Open sprite project": "打开精灵项目",
   "Confirm and generate": "确认并生成",
@@ -822,7 +834,6 @@ export const copy: Record<string, string> = {
   rows: "行数",
   width: "宽度",
   height: "高度",
-  Margin: "边距",
   Spacing: "间距",
   "Apply slicing": "应用切割",
   "Only complete cells are included; unused edge pixels are excluded.":

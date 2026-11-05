@@ -211,7 +211,14 @@ export const SpriteSizing = Schema.Struct({
   gap: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 4096 })),
 });
 export type SpriteSizing = typeof SpriteSizing.Type;
+/** Present on plans whose `parameters.size` is a per-frame GIF size. Actions are always GIF. */
+export const SpriteGeneration = Schema.Struct({
+  version: Schema.Literal(1),
+  segmentFrames: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 2, maximum: 64 }))),
+});
+export type SpriteGeneration = typeof SpriteGeneration.Type;
 export const SpritePlanConfiguration = Schema.Struct({
+  generation: Schema.optional(SpriteGeneration),
   sizing: Schema.optional(SpriteSizing),
   sequenceId: Schema.optional(Id),
   workflowVersion: Schema.optional(Schema.Literal(2)),
@@ -398,7 +405,9 @@ export const SpriteCandidate = Schema.Struct({
   processingVersions: Schema.optional(Schema.Array(SpriteProcessingVersion)),
   issues: Schema.optional(Schema.Array(SpriteLayoutIssue)),
   id: Id,
+  /** For GIF results: the frames laid out in one row. The generated GIF is `animationSource`. */
   source: ImageAsset,
+  animationSource: Schema.optional(ImageAsset),
   status: Schema.Literals(["pending", "processing", "ready", "needs-adjustment", "failed"]),
   frames: Schema.Array(ImageAsset),
   actions: Schema.Array(SpriteActionOutput),

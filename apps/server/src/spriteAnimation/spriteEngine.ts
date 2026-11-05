@@ -12,13 +12,12 @@ import {
   spriteGridSlice,
   SPRITE_ANALYSIS_VERSION,
   type SpriteSliceConfiguration,
-  spritePlanLayout,
   spritePlanIssues,
   spritePlanForRevision,
   spritePlanPrompt,
   spriteTaskConfiguration,
   spritePlanTasks,
-  spriteTaskGuideSvg,
+  spriteGifLayout,
   spriteOutputSize,
   spriteGenerationReference,
   spritePlanTarget,
@@ -38,7 +37,7 @@ import { ImageApiError } from "../imageGeneration/imageApi";
 import {
   analyzeSprite,
   processSprite,
-  spriteLayoutGuide,
+  expandGifFrames,
   normalizeSpriteCharacter,
 } from "./processSprite";
 import sharp from "sharp";
@@ -365,6 +364,7 @@ export class SpriteEngine {
         this.images.spriteAssetIds.add(reference.asset.id);
       for (const candidate of run.candidates ?? []) {
         this.images.spriteAssetIds.add(candidate.source.id);
+        if (candidate.animationSource) this.images.spriteAssetIds.add(candidate.animationSource.id);
         for (const frame of [
           ...candidate.frames,
           ...(candidate.processingVersions ?? []).flatMap((v) => v.frames),
@@ -539,11 +539,27 @@ export class SpriteEngine {
           !command.references?.[0]
         )
           throw new Error("Matching source context is required.");
-        const source = await this.images.getAsset(command.references[0].asset.id);
-        const imported = spriteImportOrigin(command.projectId, source.id, command);
+        const original = await this.images.getAsset(command.references[0].asset.id);
+        const imported = spriteImportOrigin(command.projectId, original.id, command);
         const existing = state.runs.find((r) => r.input.requestId === imported.requestId);
         if (existing) return state;
-        const configuration = command.configuration;
+        const gif = original.animation ? await this.gifSheet(original) : null;
+        const source = gif?.sheet ?? original;
+        const actionId = command.context.selection?.actionId ?? "imported";
+        const configuration =
+          gif && command.configuration
+            ? {
+                ...command.configuration,
+                layout: spriteGifLayout(
+                  command.configuration.actions[0]?.id ?? actionId,
+                  0,
+                  gif.frames,
+                  gif.frames,
+                  gif.width,
+                  gif.height,
+                ),
+              }
+            : command.configuration;
         const run: SpriteRun = {
           id: randomUUID(),
           importOrigin: imported.origin,
@@ -586,6 +602,7 @@ export class SpriteEngine {
           run,
           source,
           command.slice ?? analysis.suggestion,
+          gif ? this.pendingCandidate(source, original) : undefined,
         );
         const next = {
           ...state,
@@ -718,8 +735,8 @@ export class SpriteEngine {
           "fork-slicing",
         ].includes(command.operation)
       ) {
-        const run = state.runs.find((r) => r.id === command.runId);
-        const candidate = run?.candidates?.find((c) => c.id === command.candidateId);
+        let run = state.runs.find((r) => r.id === command.runId);
+        let candidate = run?.candidates?.find((c) => c.id === command.candidateId);
         if (!run || !candidate || run.input.kind !== "animation")
           throw new Error("Animation candidate not found.");
         if (
@@ -727,6 +744,7 @@ export class SpriteEngine {
           command.version !== (candidate.version ?? 0)
         )
           throw new Error("Candidate changed. Refresh before editing.");
+        ({ run, candidate } = await this.expandedCandidate(command.projectId, run, candidate));
         const descriptors = run.configuration
           ? spritePlanActions(run.configuration)
           : (run.actions?.map((a) => a.action) ?? []);
@@ -796,12 +814,19 @@ export class SpriteEngine {
         return this.state(command.projectId);
       }
       if (command.operation === "select-candidate") {
-        const run = state.runs.find((r) => r.id === command.runId);
-        const candidate = run?.candidates?.find((c) => c.id === command.candidateId);
+        let run = state.runs.find((r) => r.id === command.runId);
+        let candidate = run?.candidates?.find((c) => c.id === command.candidateId);
         if (!run || !candidate) throw new Error("Candidate not found.");
+        const unexpanded = candidate;
+        ({ run, candidate } = await this.expandedCandidate(command.projectId, run, candidate));
         const selected =
-          candidate.status === "pending"
-            ? await this.processCandidate(run, candidate.source)
+          candidate.status === "pending" || candidate !== unexpanded
+            ? await this.processCandidate(
+                run,
+                candidate.source,
+                undefined,
+                candidate.animationSource ? candidate : undefined,
+              )
             : candidate;
         await this.replace(command.projectId, run, {
           candidates: run.candidates!.map((c) => (c.id === selected.id ? selected : c)),
@@ -1006,6 +1031,8 @@ export class SpriteEngine {
         let configuration = this.workflowConfiguration(
           state,
           spritePlanForRevision(command.configuration ?? plan.configuration),
+          state.context,
+          plan.configuration,
         );
         configuration = { ...configuration, sizePolicy: undefined };
         if (configuration.sizeSource === "recommended")
@@ -1132,7 +1159,12 @@ export class SpriteEngine {
           sequenceId: undefined,
         };
       }
-      configuration = this.workflowConfiguration(state, configuration, base);
+      configuration = this.workflowConfiguration(
+        state,
+        configuration,
+        base,
+        command.configuration ? undefined : (original?.configuration ?? oldPlan?.configuration),
+      );
       configuration = { ...configuration, sizePolicy: undefined };
       const sourceKey = `${original ? `run:${original.id}` : oldPlan ? `plan:${oldPlan.id}` : `request:${requestId}`}:${command.actionId ?? "all"}`;
       const targetKey = spritePlanTarget(configuration);
@@ -1247,7 +1279,30 @@ export class SpriteEngine {
     if (c.references.some((r) => !owned.has(r.asset.id)))
       throw new Error("Reference image does not belong to this conversation.");
   }
+  /**
+   * Actions are GIFs: new plans carry `generation`, so manual sizes are per frame. A draft made
+   * before that described a whole sheet, so its manual size goes back to following the frame size.
+   */
+  private gifGeneration(c: SpritePlanConfiguration, previous?: SpritePlanConfiguration) {
+    if (c.kind !== "animation" || c.workflowVersion !== 2 || c.generation) return c;
+    const legacy = previous && !previous.generation && c.sizing?.mode === "manual";
+    return {
+      ...c,
+      generation: { version: 1 as const },
+      ...(legacy
+        ? { sizing: { ...c.sizing!, mode: "linked" as const }, sizeSource: "recommended" as const }
+        : {}),
+    };
+  }
   private workflowConfiguration(
+    state: SpriteState,
+    c: SpritePlanConfiguration,
+    context = state.context,
+    previous?: SpritePlanConfiguration,
+  ) {
+    return this.gifGeneration(this.stagedConfiguration(state, c, context), previous);
+  }
+  private stagedConfiguration(
     state: SpriteState,
     c: SpritePlanConfiguration,
     context = state.context,
@@ -1475,6 +1530,10 @@ export class SpriteEngine {
           throw new Error(
             "The original request snapshot is unavailable. Modify the plan before retrying.",
           );
+        if (original.input.kind === "animation" && parameters.outputFormat !== "gif")
+          throw new Error(
+            "Sprite sheets are no longer generated. Prepare a new plan to generate this action as a GIF.",
+          );
         for (const assetId of inputs) await this.images.getAsset(assetId);
         attempts.push({
           ...original,
@@ -1536,43 +1595,17 @@ export class SpriteEngine {
           const dependency = this.latestDependency(state, run.dependsOnRunId);
           inputs.push(...dependency!.frames.slice(-2).map((frame) => frame.id));
         }
-        const layout = configuration
-          ? spritePlanLayout(configuration)
-          : { columns: c.frameCount, rows: 1 };
-        inputs.push(
-          (
-            await this.images.upload(
-              configuration?.layout
-                ? await sharp(
-                    Buffer.from(
-                      spriteTaskGuideSvg(
-                        configuration.layout,
-                        configuration.canonical
-                          ? configuration.canonical.pivotY /
-                              configuration.canonical.renderSpec.logicalHeight
-                          : 0.9,
-                      ),
-                    ),
-                  )
-                    .png()
-                    .toBuffer()
-                : await spriteLayoutGuide(
-                    layout.columns,
-                    layout.rows,
-                    configuration?.parameters.size,
-                    c.width,
-                    c.height,
-                    configuration
-                      ? spritePlanActions(configuration).map((a) => a.frameCount)
-                      : undefined,
-                  ),
-              "sprite-layout.png",
-            )
-          ).id,
-        );
       }
       const prompt =
         run.requestPrompt ?? (configuration ? spritePlanPrompt(configuration) : run.input.prompt);
+      // Actions are generated only as GIFs; their task parameters carry the frame settings.
+      if (
+        animation &&
+        (run.submissionParameters ?? configuration?.parameters)?.outputFormat !== "gif"
+      )
+        throw new Error(
+          "Sprite sheets are no longer generated. Prepare a new plan to generate this action as a GIF.",
+        );
       const parameters = run.submissionParameters ?? {
         ...configuration?.parameters,
         n: 1,
@@ -1640,6 +1673,55 @@ export class SpriteEngine {
         ),
       });
     }
+  }
+  /** GIF outputs and imports are sliced from their frames laid out as one still sheet. */
+  private async gifSheet(source: ImageAsset) {
+    const expanded = await expandGifFrames(await this.images.assets.read(source, "original"));
+    const sheet = await this.images.upload(
+      expanded.bytes,
+      `${source.name.replace(/\.gif$/i, "")}-frames.png`,
+    );
+    this.images.spriteAssetIds.add(sheet.id);
+    this.images.spriteAssetIds.add(source.id);
+    return { ...expanded, sheet };
+  }
+  /** A GIF candidate keeps the GIF's id; its source is the expanded sheet. */
+  private pendingCandidate(sheet: ImageAsset, animationSource: ImageAsset): SpriteCandidate {
+    return {
+      id: animationSource.id,
+      source: sheet,
+      animationSource,
+      status: "pending",
+      frames: [],
+      actions: [],
+      warnings: [],
+      error: null,
+    };
+  }
+  /** Retries the expansion of a GIF candidate that could not be expanded when it arrived. */
+  private async expandedCandidate(id: string, run: SpriteRun, candidate: SpriteCandidate) {
+    const gifSource = candidate.animationSource;
+    if (!gifSource || candidate.source.id !== gifSource.id) return { run, candidate };
+    const gif = await this.gifSheet(gifSource);
+    const segment = run.configuration?.segment;
+    if (run.configuration && segment) {
+      run = {
+        ...run,
+        configuration: {
+          ...run.configuration,
+          layout: spriteGifLayout(
+            segment.actionId,
+            segment.frameStart,
+            segment.frameCount,
+            gif.frames,
+            gif.width,
+            gif.height,
+          ),
+        },
+      };
+      await this.replace(id, run, { configuration: run.configuration });
+    }
+    return { run, candidate: { ...candidate, source: gif.sheet } };
   }
   private async processCandidate(
     run: SpriteRun,
@@ -1759,6 +1841,20 @@ export class SpriteEngine {
             });
         }
       }
+      const gifFrames = previous?.animationSource?.animation?.frameCount;
+      if (
+        gifFrames !== undefined &&
+        run.configuration?.segment &&
+        gifFrames !== run.configuration.segment.frameCount
+      )
+        issues.push({
+          code: "gif-frame-count",
+          message:
+            "The GIF returned a different number of frames than planned. Review the frame grouping.",
+          actionId: run.configuration.segment.actionId,
+          frameIndex: null,
+          severity: "warning",
+        });
       if (run.configuration?.segment && !processed.configuration.edit)
         for (const output of actions)
           if (output.frames.length !== run.configuration.segment.frameCount)
@@ -1820,7 +1916,7 @@ export class SpriteEngine {
               : [])),
           processingVersion,
         ],
-        id: source.id,
+        id: previous?.id ?? source.id,
         source,
         frames,
         actions,
@@ -1840,7 +1936,7 @@ export class SpriteEngine {
       )
         return this.processCandidate(run, source, slice, {
           ...previous,
-          id: source.id,
+          id: previous?.id ?? source.id,
           source,
           frames: previous?.frames ?? [],
           actions: previous?.actions ?? [],
@@ -1851,7 +1947,7 @@ export class SpriteEngine {
         });
       return {
         ...previous,
-        id: source.id,
+        id: previous?.id ?? source.id,
         source,
         frames: previous?.frames ?? [],
         actions: previous?.actions ?? [],
@@ -1875,7 +1971,8 @@ export class SpriteEngine {
   }
   private async refresh(id: string, state: SpriteState) {
     if (state.recovery?.readOnly) return;
-    for (const run of state.runs) {
+    // A GIF result rewrites the run's layout to the frames actually returned.
+    for (let run of state.runs) {
       if (run.context.threadId && this.removedThreads.has(run.context.threadId)) continue;
       const active = ["queued", "running", "processing"].includes(run.status);
       if (!active && run.candidates) continue;
@@ -1910,18 +2007,83 @@ export class SpriteEngine {
         }
         if (job.status !== "succeeded" && job.status !== "partial") continue;
         if (!job.outputs.length) throw new Error("Image generation returned no image.");
-        const candidates: SpriteCandidate[] = [
-          ...new Map(job.outputs.map((source) => [source.id, source])).values(),
-        ].map((source) => ({
-          id: source.id,
-          source,
-          status: "pending",
-          frames: [],
-          actions: [],
-          warnings: [],
-          error: null,
-        }));
-        const legacyIndex = run.source ? candidates.findIndex((c) => c.id === run.source!.id) : -1;
+        const outputs = [...new Map(job.outputs.map((source) => [source.id, source])).values()];
+        const segment = run.configuration?.segment;
+        let candidates: SpriteCandidate[];
+        if (
+          run.input.kind === "animation" &&
+          outputs[0]?.animation &&
+          run.configuration &&
+          segment
+        ) {
+          // Slice the frames actually returned; providers may ignore the requested count or size.
+          // A GIF that cannot be expanded stays as a failed candidate for free reprocessing.
+          const sheets = await Promise.all(
+            outputs.map(async (output) => {
+              if (!output.animation) return null;
+              try {
+                return await this.gifSheet(output);
+              } catch (e) {
+                return e instanceof Error ? e : new Error(String(e));
+              }
+            }),
+          );
+          const gif = sheets[0] instanceof Error ? null : sheets[0]!;
+          if (gif) {
+            run = {
+              ...run,
+              configuration: {
+                ...run.configuration,
+                layout: spriteGifLayout(
+                  segment.actionId,
+                  segment.frameStart,
+                  segment.frameCount,
+                  gif.frames,
+                  gif.width,
+                  gif.height,
+                ),
+              },
+            };
+            await this.replace(id, run, { configuration: run.configuration });
+          }
+          candidates = outputs.map((output, i) => {
+            const sheet = sheets[i];
+            if (sheet instanceof Error)
+              return {
+                id: output.id,
+                source: output,
+                animationSource: output,
+                status: "failed" as const,
+                frames: [],
+                actions: [],
+                warnings: [],
+                error: sheet.message,
+              };
+            return sheet
+              ? this.pendingCandidate(sheet.sheet, output)
+              : {
+                  id: output.id,
+                  source: output,
+                  status: "pending",
+                  frames: [],
+                  actions: [],
+                  warnings: [],
+                  error: null,
+                };
+          });
+        } else
+          candidates = outputs.map((source) => ({
+            id: source.id,
+            source,
+            status: "pending",
+            frames: [],
+            actions: [],
+            warnings: [],
+            error: null,
+          }));
+        const legacyIndex = run.source
+          ? candidates.findIndex((c) => c.id === run.source!.id || c.source.id === run.source!.id)
+          : -1;
         if (legacyIndex >= 0 && run.frames.length)
           candidates[legacyIndex] = {
             ...candidates[legacyIndex]!,
@@ -1935,6 +2097,8 @@ export class SpriteEngine {
           candidates[selectedIndex] = await this.processCandidate(
             run,
             candidates[selectedIndex]!.source,
+            undefined,
+            candidates[selectedIndex]!.animationSource ? candidates[selectedIndex] : undefined,
           );
         const selected = candidates[selectedIndex]!;
         await this.replace(id, run, {

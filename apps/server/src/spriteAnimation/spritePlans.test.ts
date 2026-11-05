@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +8,7 @@ import { Effect } from "effect";
 import {
   spritePlanLayout,
   spritePlanPrompt,
+  spritePlanTasks,
   type ImageAsset,
   type SpriteContext,
   type SpritePlanConfiguration,
@@ -34,7 +36,24 @@ const asset: ImageAsset = {
   bytes: 100,
   createdAt: "2026-10-14T00:00:00.000Z",
 };
-const context: SpriteContext = {
+const renderSpec = {
+  mode: "illustration" as const,
+  logicalWidth: 16,
+  logicalHeight: 16,
+  outputScale: 1,
+};
+const canonical = {
+  revision: "revision",
+  source: asset,
+  asset,
+  renderSpec,
+  registration: { scale: 1, offsetX: 0, offsetY: 0 },
+  pivotX: 8,
+  pivotY: 14,
+  confirmedAt: asset.createdAt,
+};
+/** Retired sprite-sheet projects, still used to check slicing of imported sheets. */
+const sheetContext: SpriteContext = {
   projectId: "project",
   threadId: "thread",
   name: "Fox",
@@ -49,7 +68,8 @@ const context: SpriteContext = {
   background: "transparent",
   chromaKey: "#00ff00",
 };
-const config = (): SpritePlanConfiguration => ({
+const context: SpriteContext = { ...sheetContext, workflowVersion: 2, renderSpec };
+const sheetConfig = (): SpritePlanConfiguration => ({
   kind: "animation",
   mode: "combined",
   prompt: "A fox with consistent proportions",
@@ -77,38 +97,110 @@ const config = (): SpritePlanConfiguration => ({
     enabled: true,
   })),
 });
-function fixture(bytes?: Uint8Array) {
-  let uploads = 0;
+/** Three independent actions: idle 8, walk 12 and jump 6 frames. */
+const threeActions = (): SpritePlanConfiguration => ({
+  ...sheetConfig(),
+  workflowVersion: 2,
+  renderSpec,
+  canonical,
+  mode: "separate",
+  references: [{ referenceId: "canonical:revision", asset, role: "character", actionId: null }],
+});
+/** One idle action, so lifecycle tests make a single paid request. */
+const config = (): SpritePlanConfiguration => ({
+  ...threeActions(),
+  actions: [threeActions().actions[0]!],
+});
+/** A transparent GIF whose frames each hold a small moving square. */
+async function gif(frames: number, width: number, height: number) {
+  const pages = await Promise.all(
+    Array.from({ length: frames }, (_, i) =>
+      sharp(
+        Buffer.from(
+          `<svg width="${width}" height="${height}"><rect x="${width * 0.3 + (i % 3)}" y="${height * 0.4}" width="${width * 0.3}" height="${height * 0.4}" fill="red"/></svg>`,
+        ),
+      )
+        .png()
+        .toBuffer(),
+    ),
+  );
+  return sharp(pages, { join: { animated: true } })
+    .gif({ delay: 80 })
+    .toBuffer();
+}
+const gifAsset = (id: string, frames: number, width = 288, height = 288): ImageAsset => ({
+  ...asset,
+  id,
+  name: `${id}.gif`,
+  mimeType: "image/gif",
+  width,
+  height,
+  animation: { frameCount: frames, durationMs: frames * 80 },
+});
+function fixture() {
   const jobs = new Map<string, { id: string; status: string; outputs: ImageAsset[] }>();
+  const stored = new Map<string, Uint8Array>();
+  const upload = async (bytes: Uint8Array, name: string) => {
+    // Content-addressed like the real asset store, so re-expanding a GIF reuses its sheet.
+    const id = `upload-${createHash("sha256").update(bytes).digest("hex").slice(0, 12)}`;
+    const metadata = await sharp(bytes).metadata();
+    stored.set(id, bytes);
+    return { ...asset, id, name, width: metadata.width!, height: metadata.height! };
+  };
   const images = {
     spriteAssetIds: new Set<string>(),
     listProviders: vi.fn(async () => [
-      { id: "provider", enabled: true, models: [{ id: "model" }] },
+      { id: "provider", enabled: true, concurrency: 4, models: [{ id: "model" }] },
     ]),
     getAsset: vi.fn(async (id: string) => ({ ...asset, id })),
-    upload: vi.fn(async (_bytes: Uint8Array, name: string) => ({
-      ...asset,
-      id: `upload-${++uploads}`,
-      name,
-    })),
+    upload: vi.fn(upload),
     createJob: vi.fn(async (input: ImageJobCreateInput) => {
+      const size = /^(\d+)x(\d+)$/.exec(input.parameters.size ?? "");
       const job = {
         id: `job-${jobs.size}`,
         status: "succeeded",
-        outputs: [{ ...asset, id: "sheet" }],
+        outputs: [
+          gifAsset(
+            `gif-${jobs.size}`,
+            input.parameters.frameCount ?? 2,
+            Number(size?.[1] ?? 288),
+            Number(size?.[2] ?? 288),
+          ),
+        ],
       };
       jobs.set(input.clientRequestId, job);
       return job;
     }),
     getJob: vi.fn(async (id: string) => [...jobs.values()].find((j) => j.id === id)),
     repository: { getRequest: (id: string) => Effect.succeed(jobs.get(id) ?? null) },
-    assets: { read: async () => bytes },
+    assets: {
+      read: async (target: ImageAsset) => {
+        if (!stored.has(target.id) && target.animation)
+          stored.set(
+            target.id,
+            await gif(target.animation.frameCount, target.width, target.height),
+          );
+        return stored.get(target.id) ?? (await gif(2, 16, 16));
+      },
+    },
     cancelJob: vi.fn(async () => {}),
   };
   const engine = new SpriteEngine(root, images as unknown as ImageGenerationEngine, async () => {});
   return { engine, images, jobs };
 }
 async function prepare(engine: SpriteEngine, c = config()) {
+  // The project already has an approved character reference.
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(
+    path.join(root, "project.json"),
+    JSON.stringify({
+      context,
+      runs: [],
+      canonical,
+      canonicalVersions: [canonical],
+      threadIds: ["thread"],
+    }),
+  );
   await engine.initialize();
   await engine.command({ operation: "sync", projectId: "project", context });
   await engine.command(
@@ -131,7 +223,7 @@ const confirmInput = (p: { id: string; version: number }) => ({
   planId: p.id,
   version: p.version,
 });
-async function sheet(c = config(), odd = false) {
+async function sheet(c = sheetConfig(), odd = false) {
   const l = spritePlanLayout(c),
     w = odd ? 125 : 120,
     h = odd ? 35 : 30;
@@ -147,65 +239,107 @@ async function sheet(c = config(), odd = false) {
     .toBuffer();
 }
 describe("confirmed sprite generation plans", () => {
-  it("submits one combined job only after confirmation, then slices 8/12/6 frames", async () => {
-    const { engine, images } = fixture(await sheet());
-    const plan = await prepare(engine);
+  it("submits one GIF job per action only after confirmation, then slices 8/12/6 frames", async () => {
+    const { engine, images } = fixture();
+    const plan = await prepare(engine, threeActions());
     expect(images.createJob).not.toHaveBeenCalled();
-    expect(spritePlanLayout(plan.configuration)).toMatchObject({
-      rows: 3,
-      columns: 12,
-      frames: 26,
-      empty: 10,
-      jobs: 1,
-    });
+    expect(spritePlanLayout(plan.configuration)).toMatchObject({ rows: 1, frames: 26, jobs: 3 });
     await Promise.all([engine.confirm(confirmInput(plan)), engine.confirm(confirmInput(plan))]);
-    expect(images.createJob).toHaveBeenCalledTimes(1);
+    // Different actions run at most two at a time.
+    expect(images.createJob).toHaveBeenCalledTimes(2);
     expect(images.createJob.mock.calls[0]![0]).toMatchObject({
-      parameters: { n: 1, background: "transparent", outputFormat: "png" },
-      inputAssetIds: ["character", "upload-1"],
+      parameters: {
+        n: 1,
+        background: "transparent",
+        outputFormat: "gif",
+        frameCount: 8,
+        frameDurationMs: 80,
+        size: "288x288",
+      },
+      inputAssetIds: ["character"],
     });
-    expect(images.createJob.mock.calls[0]![0].prompt).toContain(
-      "3 equal-height rows and 12 equal-width columns",
-    );
+    expect(images.createJob.mock.calls[0]![0].prompt).toContain("Animate exactly 8 frames");
     await engine.tick();
+    await engine.tick();
+    expect(images.createJob).toHaveBeenCalledTimes(3);
     const state = await engine.command({ operation: "get", projectId: "project" });
-    expect(state.runs[0]!.actions!.map((a) => a.frames.length)).toEqual([8, 12, 6]);
-    expect(state.runs[0]!.actions!.map((a) => [a.action.fps, a.action.loop])).toEqual([
+    expect(state.runs.map((r) => r.actions![0]!.frames.length)).toEqual([8, 12, 6]);
+    expect(state.runs.map((r) => [r.actions![0]!.action.fps, r.actions![0]!.action.loop])).toEqual([
       [12, true],
       [13, true],
       [14, false],
     ]);
-    expect(state.runs[0]!.source?.id).toBe("sheet");
+    const candidate = state.runs[0]!.candidates![0]!;
+    expect(candidate.animationSource?.id).toBe("gif-0");
+    expect(state.runs[0]!.source?.id).toBe(candidate.source.id);
+    expect(candidate.source).toMatchObject({ width: 288 * 8, height: 288 });
+    expect(state.runs[0]!.configuration!.layout).toMatchObject({ columns: 8, rows: 1 });
+    // Twelve frames wrap to two rows to stay within browser canvas limits.
+    expect(state.runs[1]!.configuration!.layout).toMatchObject({ columns: 6, rows: 2 });
+    expect(images.spriteAssetIds.has("gif-0")).toBe(true);
   });
-  it("creates separate tasks with ordered, appropriately scoped references", async () => {
+  it("keeps extra GIF frames unassigned and blocks adoption when frames are missing", async () => {
+    const { engine, jobs } = fixture();
+    const plan = await prepare(engine, threeActions());
+    await engine.confirm(confirmInput(plan));
+    const [idle, walk] = [...jobs.values()];
+    idle!.outputs = [gifAsset("gif-extra", 10)];
+    walk!.outputs = [gifAsset("gif-short", 9)];
+    await engine.tick();
+    const state = await engine.command({ operation: "get", projectId: "project" });
+    const [extra, short] = state.runs.map((r) => r.candidates?.[0]);
+    expect(state.runs[0]!.configuration!.layout!.cells.map((c) => c.frameIndex)).toEqual([
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      null,
+      null,
+    ]);
+    expect(extra!.frames).toHaveLength(8);
+    expect(extra!.issues!.map((i) => i.code)).toContain("gif-frame-count");
+    expect(extra!.issues!.find((i) => i.code === "gif-frame-count")!.severity).toBe("warning");
+    expect(short!.frames).toHaveLength(9);
+    expect(short!.issues!.map((i) => i.code)).toEqual(
+      expect.arrayContaining(["gif-frame-count", "missing-frames"]),
+    );
+    expect(short!.status).toBe("needs-adjustment");
+  });
+  it("creates GIF tasks with ordered, appropriately scoped references and no layout guide", async () => {
     const { engine, images } = fixture();
-    const initial = config();
+    const initial = threeActions();
     const c: SpritePlanConfiguration = {
       ...initial,
-      mode: "separate",
       references: [
+        ...initial.references,
         {
           ...initial.references[0]!,
+          referenceId: "attachment:pose",
           asset: { ...asset, id: "pose" },
           role: "pose",
           actionId: "action-1",
         },
-        ...initial.references,
       ],
     };
     const plan = await prepare(engine, c);
     await engine.confirm(confirmInput(plan));
+    await engine.tick();
     expect(images.createJob).toHaveBeenCalledTimes(3);
-    expect(images.createJob.mock.calls.map(([input]) => input.inputAssetIds.slice(0, -1))).toEqual([
+    expect(images.createJob.mock.calls.map(([input]) => input.inputAssetIds)).toEqual([
       ["character"],
-      ["pose", "character"],
+      ["character", "pose"],
       ["character"],
     ]);
-    expect(images.createJob.mock.calls[1]![0].prompt).toContain('Row 1: action "walk"');
+    expect(images.upload.mock.calls.map(([, name]) => name)).not.toContain("sprite-layout.png");
+    expect(images.createJob.mock.calls[1]![0].prompt).toContain('Action "walk"');
   });
   it("preserves completed actions when a separate task fails and clones only the requested action", async () => {
-    const c: SpritePlanConfiguration = { ...config(), mode: "separate" };
-    const { engine, images } = fixture(await sheet({ ...c, actions: [c.actions[0]!] }));
+    const c = threeActions();
+    const { engine, images } = fixture();
     const plan = await prepare(engine, c);
     images.createJob.mockRejectedValueOnce(
       new ImageApiError("provider_disabled", "Provider unavailable"),
@@ -304,17 +438,18 @@ describe("confirmed sprite generation plans", () => {
   });
   it("prevents over-budget plans and exposes accurate compiled prompts", async () => {
     const { engine, images } = fixture();
-    const c = { ...config(), width: 4096, height: 4096 };
-    const plan = await prepare(engine, c);
-    await expect(engine.confirm(confirmInput(plan))).rejects.toThrow("64 megapixels");
+    const large = { ...renderSpec, logicalWidth: 4096, logicalHeight: 4096 };
+    await expect(
+      prepare(engine, { ...config(), renderSpec: large, width: 4096, height: 4096 }),
+    ).rejects.toThrow("GIF limits");
     expect(images.createJob).not.toHaveBeenCalled();
-    expect(spritePlanPrompt(config())).toContain("leave the remaining 6 cells completely empty");
+    expect(spritePlanPrompt(config())).toContain("Animate exactly 8 frames");
   });
 });
 it("supports uneven image dimensions and ignores unexpected artwork in unused cells", async () => {
-  const c = config();
+  const c = sheetConfig();
   const bytes = await sheet(c, true);
-  const result = await processSprite(bytes, context, c.actions);
+  const result = await processSprite(bytes, sheetContext, c.actions);
   expect(result.actions.map((o) => o.frames.length)).toEqual([8, 12, 6]);
   const metadata = await sharp(result.frames[0]).metadata();
   expect([metadata.width, metadata.height]).toEqual([16, 16]);
@@ -330,24 +465,24 @@ it("supports uneven image dimensions and ignores unexpected artwork in unused ce
     ])
     .png()
     .toBuffer();
-  const dirty = await processSprite(polluted, context, c.actions);
+  const dirty = await processSprite(polluted, sheetContext, c.actions);
   expect(dirty.actions[2]!.frames).toHaveLength(6);
   expect(dirty.actions[2]!.warnings.join(" ")).toContain("unused cell");
 });
 
 it("retains valid blank frames and warns when a transparent request returns opaque output", async () => {
-  const c = { ...config(), actions: [config().actions[0]!] };
+  const c = { ...sheetConfig(), actions: [sheetConfig().actions[0]!] };
   const opaque = await sharp({ create: { width: 80, height: 10, channels: 4, background: "red" } })
     .png()
     .toBuffer();
-  const result = await processSprite(opaque, context, c.actions);
+  const result = await processSprite(opaque, sheetContext, c.actions);
   expect(result.warnings.join(" ")).toContain("Expected transparency");
   const blank = await sharp({
     create: { width: 80, height: 10, channels: 4, background: "#00000000" },
   })
     .png()
     .toBuffer();
-  const empty = await processSprite(blank, context, c.actions);
+  const empty = await processSprite(blank, sheetContext, c.actions);
   expect(empty.actions[0]!.frames).toHaveLength(8);
   expect(empty.actions[0]!.warnings.join(" ")).toContain("empty");
 });
@@ -391,7 +526,7 @@ describe("conversation draft lifecycle", () => {
         planId: plan.id,
         replacePlanId: current.id,
         version: current.version,
-        configuration: { ...config(), width: 0 },
+        configuration: { ...config(), chromaKey: "green" },
       }),
     ).rejects.toThrow();
     expect(
@@ -503,7 +638,7 @@ describe("conversation draft lifecycle", () => {
     expect(prompt).toContain("green coat");
     expect(prompt).toContain("Transparent background");
     expect(prompt).not.toContain("Output frame canvas");
-    expect(prompt).toContain("Requested whole image size:");
+    expect(prompt).toContain("animated GIF");
     const revision = await engine.command({
       operation: "clone-plan",
       projectId: "project",
@@ -526,35 +661,31 @@ describe("conversation draft lifecycle", () => {
 
 describe("candidate and task lifecycle", () => {
   it("retains all outputs, processes additional candidates on demand and soft removes without deleting jobs", async () => {
-    const bytes = await sharp({
-      create: {
-        width: 192,
-        height: 48,
-        channels: 4,
-        background: { r: 40, g: 80, b: 100, alpha: 0.5 },
-      },
-    })
-      .png()
-      .toBuffer();
-    const { engine, images, jobs } = fixture(bytes);
+    const { engine, images, jobs } = fixture();
     const plan = await prepare(engine);
     const confirmed = await engine.confirm(confirmInput(plan));
     const job = [...jobs.values()][0]!;
-    job.outputs.push({ ...asset, id: "second" });
+    job.outputs.push(gifAsset("second", 8, 320, 320));
     const state = await engine.command({ operation: "get", projectId: "project" });
     const run = state.runs[0]!;
     expect(run.candidates).toHaveLength(2);
-    expect(run.candidates![0]!.frames).toHaveLength(26);
-    expect(run.candidates![1]!.status).toBe("pending");
+    expect(run.candidates![0]!.frames).toHaveLength(8);
+    expect(run.candidates![1]).toMatchObject({
+      id: "second",
+      status: "pending",
+      animationSource: { id: "second" },
+    });
     expect(images.createJob).toHaveBeenCalledTimes(1);
+    const second = run.candidates![1]!;
     const selected = await engine.command({
       operation: "select-candidate",
       projectId: "project",
       runId: run.id,
-      candidateId: "second",
+      candidateId: second.id,
     });
-    expect(selected.runs[0]!.source!.id).toBe("second");
-    expect(selected.runs[0]!.candidates![1]!.frames).toHaveLength(26);
+    expect(selected.runs[0]!.source!.id).toBe(second.source.id);
+    expect(selected.runs[0]!.candidates![1]!.frames).toHaveLength(8);
+    expect(selected.runs[0]!.candidates![1]!.animationSource!.id).toBe("second");
     expect(selected.runs[0]!.frames[0]!.id).not.toBe(run.frames[0]!.id);
     const removed = await engine.command({
       operation: "remove-run",
@@ -563,6 +694,7 @@ describe("candidate and task lifecycle", () => {
     });
     expect(removed.runs[0]!.removedAt).toBeTruthy();
     expect(images.spriteAssetIds.has("second")).toBe(true);
+    expect(images.spriteAssetIds.has(second.source.id)).toBe(true);
     expect(images.cancelJob).not.toHaveBeenCalled();
     const restored = await engine.command({
       operation: "restore-run",
@@ -574,17 +706,7 @@ describe("candidate and task lifecycle", () => {
     expect(images.createJob).toHaveBeenCalledTimes(1);
   });
   it("recovers missing extra outputs for historical completed runs without regenerating", async () => {
-    const bytes = await sharp({
-      create: {
-        width: 192,
-        height: 48,
-        channels: 4,
-        background: { r: 40, g: 80, b: 100, alpha: 0.5 },
-      },
-    })
-      .png()
-      .toBuffer();
-    const { engine, images, jobs } = fixture(bytes);
+    const { engine, images, jobs } = fixture();
     const plan = await prepare(engine);
     await engine.confirm(confirmInput(plan));
     await engine.command({ operation: "get", projectId: "project" });
@@ -594,7 +716,7 @@ describe("candidate and task lifecycle", () => {
     delete saved.runs[0].candidates;
     delete saved.runs[0].selectedCandidateId;
     await writeFile(file, JSON.stringify(saved));
-    [...jobs.values()][0]!.outputs.push({ ...asset, id: "recovered" });
+    [...jobs.values()][0]!.outputs.push(gifAsset("recovered", 8, 320, 320));
     const restored = new SpriteEngine(
       root,
       images as unknown as ImageGenerationEngine,
@@ -602,9 +724,64 @@ describe("candidate and task lifecycle", () => {
     );
     await restored.initialize();
     const state = await restored.command({ operation: "get", projectId: "project" });
-    expect(state.runs[0]!.candidates?.map((c) => c.id)).toEqual(["sheet", "recovered"]);
+    const candidates = state.runs[0]!.candidates!;
+    expect(candidates.map((c) => c.animationSource?.id)).toEqual(["gif-0", "recovered"]);
+    expect(candidates[0]!.source.id).toBe(saved.runs[0].source.id);
     expect(state.runs[0]!.frames).toEqual(saved.runs[0].frames);
     expect(images.createJob).toHaveBeenCalledTimes(1);
+  });
+  it("marks new plans as GIF and re-derives whole-sheet sizes of older drafts", async () => {
+    const { engine, images } = fixture();
+    const plan = await prepare(engine);
+    expect(plan.configuration.generation).toEqual({ version: 1 });
+    const { readFile, writeFile } = await import("node:fs/promises");
+    const file = path.join(root, "project.json");
+    const saved = JSON.parse(await readFile(file, "utf8"));
+    const old = saved.plans[0].configuration;
+    delete old.generation;
+    Object.assign(old, {
+      sizing: {
+        version: 1,
+        mode: "manual",
+        sourceScale: 1,
+        arrangement: "auto",
+        margin: 0,
+        gap: 0,
+      },
+      sizeSource: "user",
+      parameters: { ...old.parameters, size: "1152x576" },
+    });
+    await writeFile(file, JSON.stringify(saved));
+    const restored = new SpriteEngine(
+      root,
+      images as unknown as ImageGenerationEngine,
+      async () => {},
+    );
+    await restored.initialize();
+    const draft = (await restored.forThread("thread"))!.plans![0]!;
+    const updated = await restored.command({
+      operation: "update-plan",
+      projectId: "project",
+      planId: draft.id,
+      version: draft.version,
+      configuration: draft.configuration,
+    });
+    const c = updated.plans![0]!.configuration;
+    expect(c).toMatchObject({ generation: { version: 1 }, sizing: { mode: "linked" } });
+    expect(spritePlanTasks(c)[0]!.parameters.size).toBe("288x288");
+    const manual = await restored.command({
+      operation: "update-plan",
+      projectId: "project",
+      planId: draft.id,
+      version: updated.plans![0]!.version,
+      configuration: {
+        ...c,
+        sizing: { ...c.sizing!, mode: "manual" },
+        sizeSource: "user",
+        parameters: { ...c.parameters, size: "320x320" },
+      },
+    });
+    expect(spritePlanTasks(manual.plans![0]!.configuration)[0]!.parameters.size).toBe("320x320");
   });
   it("restores previously blank migrated drafts while preserving parameters and references", async () => {
     const { engine, images } = fixture();
@@ -638,17 +815,7 @@ describe("candidate and task lifecycle", () => {
 });
 
 it("saves corrected candidate versions atomically, rejects stale edits and restores without submitting images", async () => {
-  const bytes = await sharp({
-    create: {
-      width: 192,
-      height: 48,
-      channels: 4,
-      background: { r: 20, g: 90, b: 150, alpha: 0.5 },
-    },
-  })
-    .png()
-    .toBuffer();
-  const { engine, images } = fixture(bytes);
+  const { engine, images } = fixture();
   const plan = await prepare(engine);
   await engine.confirm(confirmInput(plan));
   const state = await engine.command({ operation: "get", projectId: "project" });
@@ -657,8 +824,8 @@ it("saves corrected candidate versions atomically, rejects stale edits and resto
   const { spriteGridSlice } = await import("@synara/contracts");
   const correction = {
     ...spriteGridSlice(
-      192,
-      48,
+      candidate.source.width,
+      candidate.source.height,
       config().actions.map((a) => Object.assign({}, a, { frameCount: 2 })),
     ),
     reviewedActionIds: config().actions.map((a) => a.id),
@@ -671,10 +838,10 @@ it("saves corrected candidate versions atomically, rejects stale edits and resto
     version: candidate.version!,
     slice: correction,
   });
-  expect(preview.runs[0]!.candidates![0]!.frames).toHaveLength(6);
+  expect(preview.runs[0]!.candidates![0]!.frames).toHaveLength(2);
   expect(
     (await engine.command({ operation: "get", projectId: "project" })).runs[0]!.frames,
-  ).toHaveLength(26);
+  ).toHaveLength(8);
   const saved = await engine.command({
     operation: "save-slicing",
     projectId: "project",
@@ -684,7 +851,7 @@ it("saves corrected candidate versions atomically, rejects stale edits and resto
     slice: correction,
   });
   const revised = saved.runs[0]!.candidates![0]!;
-  expect(revised.frames).toHaveLength(6);
+  expect(revised.frames).toHaveLength(2);
   expect(revised.status).toBe("needs-adjustment");
   expect(revised.slice!.reviewedActionIds).toEqual([]);
   await expect(
@@ -720,11 +887,16 @@ it("saves corrected candidate versions atomically, rejects stale edits and resto
     version: revised.version!,
     processingVersionId: candidate.processingVersionId!,
   });
-  expect(restored.runs[0]!.frames).toHaveLength(26);
+  expect(restored.runs[0]!.frames).toHaveLength(8);
   expect(images.createJob).toHaveBeenCalledTimes(1);
   const invalid = {
     ...correction,
-    rows: [{ ...correction.rows[0]!, cells: [{ ...correction.rows[0]!.cells[0]!, x: 200 }] }],
+    rows: [
+      {
+        ...correction.rows[0]!,
+        cells: [{ ...correction.rows[0]!.cells[0]!, x: candidate.source.width + 10 }],
+      },
+    ],
   };
   await expect(
     engine.command({
@@ -738,18 +910,16 @@ it("saves corrected candidate versions atomically, rejects stale edits and resto
   ).rejects.toThrow("outside");
   expect(
     (await engine.command({ operation: "get", projectId: "project" })).runs[0]!.frames,
-  ).toHaveLength(26);
+  ).toHaveLength(8);
 });
 
 it("retries only failed tasks with the frozen inputs and deduplicates confirmations across restarts", async () => {
   const { engine, images, jobs } = fixture();
-  const plan = await prepare(engine, { ...config(), mode: "separate" });
+  const plan = await prepare(engine);
   await engine.confirm(confirmInput(plan));
   const originals = [...jobs.values()];
   originals[0]!.status = "failed";
   originals[0]!.outputs = [];
-  originals[1]!.status = "queued";
-  originals[2]!.status = "queued";
   await engine.tick();
   const state = await engine.command({ operation: "get", projectId: "project" });
   const first = state.runs[0]!;
@@ -761,16 +931,16 @@ it("retries only failed tasks with the frozen inputs and deduplicates confirmati
   };
   const before = images.createJob.mock.calls[0]![0];
   const [retried] = await Promise.all([engine.retryConfirm(input), engine.retryConfirm(input)]);
-  expect(images.createJob).toHaveBeenCalledTimes(4);
-  const after = images.createJob.mock.calls[3]![0];
+  expect(images.createJob).toHaveBeenCalledTimes(2);
+  const after = images.createJob.mock.calls[1]![0];
   expect(after).toMatchObject({
     prompt: before.prompt,
     parameters: before.parameters,
     inputAssetIds: before.inputAssetIds,
   });
   expect(after.clientRequestId).not.toBe(before.clientRequestId);
-  expect(retried.runs).toHaveLength(4);
-  expect(retried.runs[3]!.retryOfRunId).toBe(first.id);
+  expect(retried.runs).toHaveLength(2);
+  expect(retried.runs[1]!.retryOfRunId).toBe(first.id);
   const restored = new SpriteEngine(
     root,
     images as unknown as ImageGenerationEngine,
@@ -778,27 +948,27 @@ it("retries only failed tasks with the frozen inputs and deduplicates confirmati
   );
   await restored.initialize();
   await restored.retryConfirm(input);
-  expect(images.createJob).toHaveBeenCalledTimes(4);
+  expect(images.createJob).toHaveBeenCalledTimes(2);
   await expect(restored.retryConfirm({ ...input, requestId: "second-click" })).rejects.toThrow(
     "already has a retry",
   );
-  const retryJob = [...jobs.values()][3]!;
+  const retryJob = [...jobs.values()][1]!;
   retryJob.status = "failed";
   retryJob.outputs = [];
   await restored.tick();
   await restored.retryConfirm({
     ...input,
-    runIds: [retried.runs[3]!.id],
+    runIds: [retried.runs[1]!.id],
     requestId: "next-attempt",
   });
-  expect(images.createJob).toHaveBeenCalledTimes(5);
+  expect(images.createJob).toHaveBeenCalledTimes(3);
   await expect(
     restored.retryConfirm({ ...input, threadId: "other", requestId: "wrong-owner" }),
   ).rejects.toThrow("unavailable");
 });
 
 it("does not regenerate candidates or uncertain submissions", async () => {
-  const { engine, images } = fixture(await sheet());
+  const { engine, images } = fixture();
   const plan = await prepare(engine);
   await engine.confirm(confirmInput(plan));
   await engine.tick();

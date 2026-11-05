@@ -2,8 +2,8 @@
 import { spriteSliceFromEdit } from "@synara/contracts";
 import sharp from "sharp";
 import {
-  spriteLayoutGuideSvg,
   spriteGridSlice,
+  spriteGifGrid,
   validateSpriteSlice,
   spriteIssue,
   SPRITE_ANALYSIS_VERSION,
@@ -710,17 +710,41 @@ export async function normalizeSpriteCharacter(
     pivotY: Math.floor(h * 0.9) + registration.offsetY,
   };
 }
-export async function spriteLayoutGuide(
-  count: number,
-  rows = 1,
-  size?: string,
-  frameWidth = 1,
-  frameHeight = 1,
-  counts?: readonly number[],
-) {
-  return sharp(
-    Buffer.from(spriteLayoutGuideSvg(count, rows, size, frameWidth, frameHeight, counts)),
-  )
-    .png()
-    .toBuffer();
+/**
+ * Decodes every GIF frame onto its full canvas and lays the frames out as one sheet, so slicing,
+ * analysis, repair and export keep working on a single still image.
+ */
+export async function expandGifFrames(bytes: Uint8Array) {
+  const image = sharp(bytes, { animated: true, limitInputPixels: false });
+  const meta = await image.metadata();
+  const frames = meta.pages ?? 1,
+    width = meta.width ?? 0,
+    height = meta.pageHeight ?? meta.height ?? 0;
+  if (frames > 64 || width * height * frames > 64_000_000)
+    throw new Error("The GIF exceeds frame processing capacity.");
+  const { data } = await image.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { columns, rows } = spriteGifGrid(frames);
+  const sheet = Buffer.alloc(columns * width * rows * height * 4);
+  for (let frame = 0; frame < frames; frame++) {
+    const left = (frame % columns) * width,
+      top = Math.floor(frame / columns) * height;
+    for (let y = 0; y < height; y++)
+      data.copy(
+        sheet,
+        ((top + y) * columns * width + left) * 4,
+        (frame * height + y) * width * 4,
+        (frame * height + y + 1) * width * 4,
+      );
+  }
+  return {
+    bytes: await sharp(sheet, {
+      raw: { width: columns * width, height: rows * height, channels: 4 },
+    })
+      .png()
+      .toBuffer(),
+    frames,
+    width,
+    height,
+    delays: meta.delay ?? [],
+  };
 }

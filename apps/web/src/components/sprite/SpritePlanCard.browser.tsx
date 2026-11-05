@@ -46,6 +46,23 @@ vi.mock("../drawing/useDrawing", () => ({
   imageUrl: () =>
     "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect x='16' y='12' width='32' height='42' rx='10' fill='%23b7a7e5'/%3E%3C/svg%3E",
 }));
+const fox = {
+  id: "fox",
+  name: "fox.png",
+  mimeType: "image/png" as const,
+  url: "/asset",
+  thumbnailUrl: "/thumb",
+  width: 256,
+  height: 256,
+  bytes: 100,
+  createdAt: "2026-10-14T00:00:00.000Z",
+};
+const renderSpec = {
+  mode: "illustration" as const,
+  logicalWidth: 256,
+  logicalHeight: 256,
+  outputScale: 1,
+};
 function initialPlan(): SpriteGenerationPlan {
   return {
     id: "plan",
@@ -58,8 +75,21 @@ function initialPlan(): SpriteGenerationPlan {
     confirmedAt: null,
     createdAt: "2026-10-14T00:00:00.000Z",
     configuration: {
+      workflowVersion: 2,
+      generation: { version: 1 },
+      renderSpec,
+      canonical: {
+        revision: "revision",
+        source: fox,
+        asset: fox,
+        renderSpec,
+        registration: { scale: 1, offsetX: 0, offsetY: 0 },
+        pivotX: 128,
+        pivotY: 230,
+        confirmedAt: fox.createdAt,
+      },
       kind: "animation",
-      mode: "combined",
+      mode: "separate",
       prompt: "A small fox, pixel art, side view. Keep the same character across every action.",
       actions: [8, 12, 6].map((frameCount, i) => ({
         id: `action-${i}`,
@@ -71,22 +101,7 @@ function initialPlan(): SpriteGenerationPlan {
         loop: i < 2,
       })),
       references: [
-        {
-          referenceId: "attachment:fox",
-          role: "character",
-          actionId: null,
-          asset: {
-            id: "fox",
-            name: "fox.png",
-            mimeType: "image/png",
-            url: "/asset",
-            thumbnailUrl: "/thumb",
-            width: 256,
-            height: 256,
-            bytes: 100,
-            createdAt: "2026-10-14T00:00:00.000Z",
-          },
-        },
+        { referenceId: "canonical:revision", role: "character", actionId: null, asset: fox },
       ],
       providerId: "drawing",
       model: "gpt-image",
@@ -151,13 +166,13 @@ it("shows an editable multi-action plan and submits only the saved version", asy
   await mount();
   expect(mocks.confirm).not.toHaveBeenCalled();
   await expect
-    .element(page.getByText("1 image tasks · 3 actions · 26 frames", { exact: true }))
+    .element(page.getByText("3 image tasks · 3 actions · 26 frames", { exact: true }))
     .toBeVisible();
   await page.getByRole("spinbutton", { name: "Frames 1" }).fill("10");
   await userEvent.keyboard("{Enter}");
   await expect.poll(() => mocks.state.plans![0]!.configuration.actions[0]!.frameCount).toBe(10);
-  await expect.element(page.getByRole("button", { name: "Start generation · 1" })).toBeEnabled();
-  await page.getByRole("button", { name: "Start generation · 1" }).click();
+  await expect.element(page.getByRole("button", { name: "Start generation · 3" })).toBeEnabled();
+  await page.getByRole("button", { name: "Start generation · 3" }).click();
   expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith({
     projectId: "project",
     planId: "plan",
@@ -168,33 +183,52 @@ it("shows an editable multi-action plan and submits only the saved version", asy
   await page.getByRole("button", { name: "Expand plan" }).click();
   await expect.element(page.getByRole("spinbutton", { name: "Frames 1" })).not.toBeInTheDocument();
 });
-it("changes generation mode and blocks animation without a character reference", async () => {
+it("blocks legacy sprite-sheet plans until a character reference is confirmed", async () => {
+  const plan = initialPlan();
+  const {
+    workflowVersion: _v,
+    generation: _g,
+    renderSpec: _r,
+    canonical: _c,
+    ...legacy
+  } = plan.configuration;
+  mocks.state = {
+    ...mocks.state,
+    plans: [{ ...plan, configuration: { ...legacy, mode: "combined" } }],
+  };
   await mount();
-  await page.getByRole("combobox", { name: "Generation mode" }).click();
-  await page.getByRole("option", { name: "One image per action", exact: true }).click();
   await expect
-    .element(page.getByText("3 image tasks · 3 actions · 26 frames", { exact: true }))
+    .element(
+      page.getByText(
+        "Sprite sheets are no longer generated. Confirm a character reference to generate actions as GIFs.",
+        { exact: true },
+      ),
+    )
     .toBeVisible();
-  await expect.element(page.getByRole("button", { name: "Start generation · 3" })).toBeEnabled();
-  await page.getByRole("button", { name: "Remove reference fox.png" }).click();
+  await expect.element(page.getByRole("button", { name: /^Start generation/ })).toBeDisabled();
   await expect
-    .element(page.getByText("Add a reference image before generating animation.", { exact: true }))
-    .toBeVisible();
-  await expect.element(page.getByRole("button", { name: "Start generation · 3" })).toBeDisabled();
+    .element(page.getByRole("combobox", { name: "Generation mode" }))
+    .not.toBeInTheDocument();
   expect(mocks.confirm).not.toHaveBeenCalled();
 });
-it("sends the chosen 512 request dimensions without increasing the output frame or hiding other request parameters", async () => {
+it("sends an explicit per-frame GIF size without changing the output frame or other parameters", async () => {
   await mount();
   await page.getByText("Drawing settings", { exact: true }).click();
-  await page.getByRole("button", { name: "Size", exact: true }).click();
-  await page.getByRole("button", { name: "512×512", exact: true }).click();
+  await expect.element(page.getByText("Format: GIF", { exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "GIF frame size", exact: true }).click();
+  await page.getByRole("option", { name: "Specify frame size", exact: true }).click();
+  await page.getByRole("button", { name: "Frame size", exact: true }).click();
+  await page.getByRole("button", { name: "Custom width and height", exact: true }).click();
+  await page.getByRole("textbox", { name: "Width", exact: true }).fill("640");
+  await page.getByRole("textbox", { name: "Height", exact: true }).fill("640");
   await page.getByRole("button", { name: "Confirm", exact: true }).click();
-  await expect.poll(() => mocks.state.plans![0]!.configuration.parameters.size).toBe("512x512");
+  await expect.poll(() => mocks.state.plans![0]!.configuration.parameters.size).toBe("640x640");
   expect(mocks.state.plans![0]!.configuration.width).toBe(256);
+  expect(mocks.state.plans![0]!.configuration.sizing?.mode).toBe("manual");
   await page.getByRole("combobox", { name: "Quality", exact: true }).click();
   await page.getByRole("option", { name: "high", exact: true }).click();
   await expect.poll(() => mocks.state.plans![0]!.configuration.parameters.quality).toBe("high");
-  expect(mocks.state.plans![0]!.configuration.parameters.size).toBe("512x512");
+  expect(mocks.state.plans![0]!.configuration.parameters.size).toBe("640x640");
   expect(mocks.confirm).not.toHaveBeenCalled();
 });
 it("keeps conflicting edits visible and requires reload before confirming", async () => {
@@ -331,8 +365,8 @@ it.each([false, true])(
       answer.compareDocumentPosition(planCard) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     await page.getByRole("button", { name: "Modify parameters", exact: true }).click();
-    await page.getByRole("combobox", { name: "Generation mode" }).click();
-    await page.getByRole("option", { name: "One image per action", exact: true }).click();
+    await page.getByRole("spinbutton", { name: "Frames 1" }).fill("10");
+    await userEvent.keyboard("{Enter}");
     await expect.poll(() => mocks.state.plans![0]!.version).toBe(2);
     await expect
       .element(page.getByRole("heading", { name: /^(Action|Character) generation$/ }))
@@ -342,9 +376,7 @@ it.each([false, true])(
     await expect
       .element(page.getByRole("heading", { name: /^(Action|Character) generation$/ }))
       .toBeVisible();
-    await expect
-      .element(page.getByRole("combobox", { name: "Generation mode" }))
-      .toHaveTextContent("One image per action");
+    await expect.element(page.getByRole("spinbutton", { name: "Frames 1" })).toHaveValue("10");
     await page.screenshot({
       path: `../../../node_modules/.cache/aha-sprite-plan-after-reply-${conversationOnly}.png`,
     });

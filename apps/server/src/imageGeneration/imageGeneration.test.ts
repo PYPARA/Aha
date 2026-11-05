@@ -921,7 +921,15 @@ describe("sprite workbench generation through Drawing", () => {
     const provider = await f.engine.upsertProvider(providerInput());
     const sprites = new SpriteEngine(path.join(f.root, "sprites"), f.engine, async () => {});
     await sprites.initialize();
+    const renderSpec = {
+      mode: "illustration" as const,
+      logicalWidth: 16,
+      logicalHeight: 16,
+      outputScale: 1,
+    };
     const context = {
+      workflowVersion: 2 as const,
+      renderSpec,
       projectId: "sprite-project",
       threadId: "sprite-thread",
       name: "Fox",
@@ -944,8 +952,36 @@ describe("sprite workbench generation through Drawing", () => {
     )
       .png()
       .toBuffer();
+    // Actions are requested as GIFs: two 32×32 frames with a moving pose on the key color.
+    const frames = await Promise.all(
+      [5, 9].map((x) =>
+        sharp(
+          Buffer.from(
+            `<svg width="32" height="32"><rect width="32" height="32" fill="#00ff00"/><rect x="${x}" y="10" width="8" height="14" fill="red"/></svg>`,
+          ),
+        )
+          .png()
+          .toBuffer(),
+      ),
+    );
+    const gif = await sharp(frames, { join: { animated: true } })
+      .gif()
+      .toBuffer();
     const upstream = vi.fn(
-      async () => new Response(JSON.stringify({ data: [{ b64_json: bytes.toString("base64") }] })),
+      async (_url: string | URL | Request, init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                b64_json: (typeof init?.body === "string" &&
+                init.body.includes('"output_format":"gif"')
+                  ? gif
+                  : bytes
+                ).toString("base64"),
+              },
+            ],
+          }),
+        ),
     );
     vi.stubGlobal("fetch", upstream);
     const create = {
@@ -974,11 +1010,29 @@ describe("sprite workbench generation through Drawing", () => {
       context: { ...context, referenceAssetId: done.runs[0]!.frames[0]!.id },
     });
     const reference = done.runs[0]!.frames[0]!;
+    const approved = await sprites.command({
+      operation: "confirm-character",
+      projectId: context.projectId,
+      context,
+      renderSpec,
+      references: [
+        {
+          referenceId: `candidate:${done.runs[0]!.id}:${reference.id}`,
+          asset: reference,
+          role: "character",
+          actionId: null,
+        },
+      ],
+    });
+    expect(approved.canonical).toBeDefined();
     const animationPlan = await sprites.command({
       operation: "propose",
       projectId: context.projectId,
       configuration: {
         ...proposal.plans![0]!.configuration,
+        workflowVersion: 2,
+        renderSpec,
+        canonical: approved.canonical,
         kind: "animation",
         prompt: "Idle breathing",
         references: [
@@ -1007,7 +1061,13 @@ describe("sprite workbench generation through Drawing", () => {
     await restored.initialize();
     const recovered = await restored.forThread("sprite-thread");
     expect(recovered?.runs[1]!.frames).toHaveLength(2);
-    expect(recovered?.runs[1]!.status).toBe("needs-adjustment");
+    expect(recovered?.runs[1]!.status).toBe("ready");
+    expect(recovered?.runs[1]!.candidates?.[0]?.animationSource?.mimeType).toBe("image/gif");
+    expect((await f.engine.getJob(animationJob)).parameters).toMatchObject({
+      outputFormat: "gif",
+      frameCount: 2,
+      background: "opaque",
+    });
     expect(recovered?.runs[1]!.candidates?.[0]?.analysis).toBeDefined();
     await f.engine.deleteJob(animationJob);
     expect((await f.engine.getAsset(recovered!.runs[1]!.source!.id)).id).toBe(

@@ -1,73 +1,50 @@
 import { workflowConfiguration } from "./spriteWorkflow.fixture";
 import { describe, expect, it } from "vitest";
-import { spritePlanTasks, spritePlanIssues } from "./spritePlan";
+import { spritePlanTasks, spritePlanIssues, spritePlanPrompt } from "./spritePlan";
 import { DEFAULT_SPRITE_RENDER_SPEC, spriteOutputSize, spriteTaskSlice } from "./spriteWorkflow";
 import { validateSpriteSlice } from "./spriteProcessing";
 
 describe("staged sprite layout", () => {
-  it("keeps request size and frame canvas independent and preserves explicit automatic requests", () => {
+  it("keeps the per-frame request size and the output canvas independent", () => {
     const c = workflowConfiguration();
-    const illustration = {
-      mode: "illustration" as const,
-      logicalWidth: 256,
-      logicalHeight: 256,
-      outputScale: 1,
-    };
-    const ordinary = spritePlanTasks({
-      ...c,
-      renderSpec: illustration,
-      parameters: { n: 1, size: "512x512" },
-    });
-    expect(ordinary).toHaveLength(1);
-    expect(ordinary[0]!.layout).toMatchObject({ width: 512, height: 512 });
-    expect(ordinary[0]!.width).toBe(256);
-    const larger = spritePlanTasks({
-      ...c,
-      width: 512,
-      height: 512,
-      renderSpec: { ...illustration, logicalWidth: 512, logicalHeight: 512 },
-    });
-    expect(larger).toHaveLength(1);
-    expect(larger[0]!.layout).toMatchObject({ width: 1024, height: 1024 });
+    const tasks = spritePlanTasks(c);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.parameters).toMatchObject({ size: "512x512", outputFormat: "gif" });
+    expect(tasks[0]!.width).toBe(256);
     expect(spritePlanTasks({ ...c, sizeSource: "auto" })[0]!.parameters.size).toBe("auto");
   });
-  it.each([1, 5, 6, 8, 9, 32])(
-    "maps %i frames to bounded tasks without changing playback settings",
+  it.each([2, 5, 8, 9, 16, 17, 32])(
+    "maps %i frames to bounded GIF tasks without changing playback settings",
     (frames) => {
       const tasks = spritePlanTasks(workflowConfiguration(frames));
-      expect(tasks).toHaveLength(Math.ceil(frames / 8));
+      expect(tasks).toHaveLength(Math.ceil(frames / 16));
       expect(
         tasks.flatMap((t) => t.layout!.cells.filter((c) => c.actionId).map((c) => c.frameIndex)),
       ).toEqual(Array.from({ length: frames }, (_, i) => i));
       for (const task of tasks) {
         expect(task.actions[0]).toMatchObject({ fps: 24, loop: false });
-        expect(task.segment!.frameCount).toBeLessThanOrEqual(8);
+        expect(task.segment!.frameCount).toBeGreaterThanOrEqual(2);
+        expect(task.parameters.frameCount).toBe(task.segment!.frameCount);
         const layout = task.layout!;
-        expect(layout.width).toBe(1024);
-        expect(layout.height).toBe(1024);
-        for (const c of layout.cells) {
-          expect(c.width).toBe(c.height);
-          expect(c.x + c.width).toBeLessThanOrEqual(layout.width);
-          expect(c.y + c.height).toBeLessThanOrEqual(layout.height);
-        }
         validateSpriteSlice(spriteTaskSlice(layout, task.actions), layout.width, layout.height);
       }
     },
   );
-  it("uses the request size and ignores retired model capability declarations", () => {
+  it("rejects single-frame actions and ignores retired model capability declarations", () => {
     const c = workflowConfiguration();
-    const ordinary = spritePlanTasks(c);
     const legacy = spritePlanTasks({
       ...c,
       sizePolicy: { kind: "custom", referenceImages: false, maxEdge: 128 },
     });
-    expect(legacy.map((t) => t.layout)).toEqual(ordinary.map((t) => t.layout));
-    expect(ordinary[0]!.layout).toMatchObject({ columns: 3, rows: 3, width: 1024, height: 1024 });
+    expect(legacy.map((t) => t.layout)).toEqual(spritePlanTasks(c).map((t) => t.layout));
     expect(
       spritePlanIssues({ ...c, sizePolicy: { kind: "fixed", referenceImages: false } }),
     ).toEqual([]);
     expect(spritePlanIssues({ ...c, canonical: undefined })).toContain(
       "Confirm the character reference before generating actions.",
+    );
+    expect(spritePlanIssues(workflowConfiguration(1))).toContain(
+      "Each action needs at least 2 frames for GIF generation.",
     );
   });
   it("derives output dimensions and rejects noninteger pixel magnification", () => {
@@ -82,28 +59,21 @@ describe("staged sprite layout", () => {
       }),
     ).toThrow();
   });
-  it("allows explicit request sizes without changing the output frame or task count", () => {
-    const c = {
-      ...workflowConfiguration(),
-      sizeSource: "user" as const,
-      parameters: { n: 1, size: "2048x256" },
-    };
-    const tasks = spritePlanTasks({ ...c, sizePolicy: { kind: "fixed", sizes: ["1024x1024"] } });
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0]!.layout).toMatchObject({ width: 2048, height: 256 });
-    expect(tasks[0]!.width).toBe(256);
-    expect(() => spritePlanTasks({ ...c, parameters: { n: 1, size: "8192x8192" } })).toThrow();
-  });
-  it("replans a segment's physical layout for the selected model and protects its global frame range", () => {
-    const task = spritePlanTasks(workflowConfiguration(9))[0]!;
-    const custom = spritePlanTasks({
-      ...task,
-      parameters: { ...task.parameters, size: "1152x576" },
-    })[0]!;
-    expect(custom.layout).toMatchObject({ columns: 4, rows: 2, width: 1152, height: 576 });
-    expect(custom.segment).toEqual(task.segment);
+  it("replans a segment from its own settings and protects its global frame range", () => {
+    const task = spritePlanTasks(workflowConfiguration(20))[1]!;
+    expect(task.segment).toMatchObject({ frameStart: 10, frameCount: 10, index: 1 });
+    expect(spritePlanTasks(task)[0]).toEqual(task);
     expect(() =>
       spritePlanTasks({ ...task, actions: [{ ...task.actions[0]!, frameCount: 6 }] }),
     ).toThrow("frame range");
+  });
+  it("describes GIF segments without layout guides", () => {
+    const [first, second] = spritePlanTasks(workflowConfiguration(20));
+    const prompt = spritePlanPrompt(second!);
+    expect(prompt).toContain("animated GIF");
+    expect(prompt).toContain("global frames 11–20 of 20");
+    expect(prompt).toContain("last two frames of the previous segment");
+    expect(prompt).not.toMatch(/layout|slot|grid guide/i);
+    expect(spritePlanPrompt(first!)).toContain("Begin the action at its initial phase.");
   });
 });

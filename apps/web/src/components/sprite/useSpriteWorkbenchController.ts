@@ -2,7 +2,7 @@
 import { EmbeddedChatAttachments } from "../chat/EmbeddedChatAttachments";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useNavigate, useBlocker } from "@tanstack/react-router";
-import { spriteBlockedActions, spriteOutputSize } from "@synara/contracts";
+import { DEFAULT_SPRITE_SIZING, spriteBlockedActions, spriteOutputSize } from "@synara/contracts";
 import type { SpriteRun, SpriteState, ThreadId } from "@synara/contracts";
 import { useAhaTranslation } from "~/aha/AppearanceProvider";
 import { ensureNativeApi } from "~/nativeApi";
@@ -1625,16 +1625,7 @@ export function useSpriteWorkbenchController({
           renderSpec: p.renderSpec,
           canonical: p.canonical,
           ...(target.kind === "animation"
-            ? {
-                sizing: {
-                  version: 1 as const,
-                  mode: "linked" as const,
-                  sourceScale: 1 as const,
-                  arrangement: "auto" as const,
-                  margin: 0,
-                  gap: 0,
-                },
-              }
+            ? { sizing: DEFAULT_SPRITE_SIZING, generation: { version: 1 as const } }
             : {}),
           kind: target.kind,
           mode: "separate",
